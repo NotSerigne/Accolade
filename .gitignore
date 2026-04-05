@@ -40,3 +40,5 @@ Thumbs.db
 .env.*.local
 !.env.example
 !.env.test
+.idea/
+.vscode
