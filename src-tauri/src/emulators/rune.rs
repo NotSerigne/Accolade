@@ -16,7 +16,20 @@ impl EmulatorParser for Parser {
         let mut index: Vec<String>  = Vec::new();
         for (_key, value) in section.iter() {
             index.push(value.to_string());
+        };
+        let mut achievements: Vec<Achievement> = Vec::new();
+        for name in &index {
+            let ach_section = achievementfile.section(Some(name.as_str())).unwrap();
+            let achieved = ach_section.get("Achieved").unwrap();
+            let unlock_time = ach_section.get("UnlockTime").unwrap();
+            achievements.push(Achievement {
+                key: name.clone(),
+                name: name.clone(),
+                unlocked: achieved == "1",
+                icon: String::new(),
+                unlocked_time: Some(unlock_time.parse::<u64>().unwrap()),
+            });
         }
-        todo!()
+        achievements
     }
 }
