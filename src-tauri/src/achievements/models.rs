@@ -17,4 +17,14 @@ pub struct Game {
     pub achievements_total: u32,
     pub achievements: Vec<Achievement>,
     pub path_buf: PathBuf,
+    pub emulator: Emulator
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Emulator {
+    Goldberg,
+    Empress,
+    Codex,
+    OnlineFix,
+    Rune
 }
