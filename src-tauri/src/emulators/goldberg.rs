@@ -1,4 +1,5 @@
 // goldberg: parse le format JSON de Goldberg
+
 use std::path::PathBuf;
 use std::collections::HashMap;
 use serde::{Deserialize};
