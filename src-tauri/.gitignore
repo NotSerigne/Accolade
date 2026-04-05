@@ -1,0 +1,13 @@
+# Rust / Cargo
+target/
+debug/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Tauri generated output
+gen/
+
+# JetBrains / RustRover
+.idea/
+*.iml
