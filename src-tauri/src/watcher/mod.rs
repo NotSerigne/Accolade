@@ -9,6 +9,7 @@ pub fn start(games: Vec<Game>) -> std::sync::mpsc::Receiver<notify::Result<notif
         for game in &games {
             watcher.watch(&game.path_buf, RecursiveMode::Recursive).unwrap();
         }
+        loop{}
     });
     rx
 }
