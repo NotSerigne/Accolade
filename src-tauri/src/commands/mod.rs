@@ -1,0 +1,1 @@
+// goldberg: parse le format JSON de Goldberg
