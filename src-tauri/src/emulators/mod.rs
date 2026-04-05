@@ -3,11 +3,11 @@
 use std::path::PathBuf;
 use crate::achievements::models::Achievement;
 
-mod goldberg;
-mod rune;
-mod onlinefix;
-mod empress;
-mod codex;
+pub(crate) mod goldberg;
+pub(crate) mod rune;
+pub(crate) mod onlinefix;
+pub(crate) mod empress;
+pub(crate) mod codex;
 
 pub trait EmulatorParser {
     fn parse(&self, path: &PathBuf) -> Vec<Achievement>;
