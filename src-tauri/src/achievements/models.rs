@@ -10,6 +10,14 @@ pub struct Achievement {
 }
 
 #[derive(Serialize, Deserialize)]
+pub enum Emulator {
+    Goldberg,
+    Empress,
+    Codex,
+    OnlineFix,
+    Rune
+}
+#[derive(Serialize, Deserialize)]
 pub struct Game {
     pub name: String,
     pub steam_id: u32,
@@ -20,11 +28,3 @@ pub struct Game {
     pub emulator: Emulator
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum Emulator {
-    Goldberg,
-    Empress,
-    Codex,
-    OnlineFix,
-    Rune
-}
