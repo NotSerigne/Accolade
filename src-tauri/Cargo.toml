@@ -24,7 +24,7 @@ log = "0.4.29"
 tauri = { version = "2.10.3" }
 tauri-plugin-log = "2.8.0"
 notify = "9.0.0-rc.2"
-ini = "1.3.0"
+rust-ini = "0.21"
 
 [build]
 script = "build.rs"
