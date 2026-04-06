@@ -1,9 +1,15 @@
 <script>
     import {invoke} from "@tauri-apps/api/core";
     import {onMount} from "svelte";
+    import {listen} from "@tauri-apps/api/event";
 
     let achievements = $state([]);
-    onMount(loadAchievements);
+    onMount(() => {
+        loadAchievements();
+        listen("achievement-unlocked", (e) => {
+            achievements = achievements.concat(e.payload);
+        })
+    });
     async function loadAchievements() {
         const game = {
             name: "Elden Ring",

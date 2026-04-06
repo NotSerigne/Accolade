@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Achievement {
     pub key: String, // Nom de l'achievement du fichier
     pub name: String, // Nom de l'achievement retourné par l'API Steam/serveur
@@ -9,7 +9,7 @@ pub struct Achievement {
     pub unlocked_time: Option<u64>, // Timestamp de déblocage, null si pas débloqué
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Emulator {
     Goldberg,
     Empress,
@@ -17,7 +17,7 @@ pub enum Emulator {
     OnlineFix,
     Rune
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Game {
     pub name: String,
     pub steam_id: u32,
