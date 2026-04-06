@@ -1,9 +1,8 @@
 // onlinefix: parse le format INI de OnlineFix
 
 use std::path::PathBuf;
-use std::collections::HashMap;
 use ini::Ini;
-use crate::achievements::models::Achievement;
+use crate::achievements::models::{Achievement, Emulator};
 use crate::emulators::EmulatorParser;
 
 pub struct Parser;
@@ -26,5 +25,15 @@ impl EmulatorParser for Parser {
             }
         }
         achievements
+    }
+    fn known_locations(&self) -> Vec<PathBuf> {
+        let public = std::env::var("PUBLIC").unwrap_or_default();
+        vec![
+            PathBuf::from(&public).join("OnlineFix-Emulator"),
+        ]
+    }
+
+    fn emulator(&self) -> Emulator {
+        Emulator::OnlineFix
     }
 }

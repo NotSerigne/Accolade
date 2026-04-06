@@ -1,16 +1,20 @@
-use commands::get_achievements;#[cfg_attr(mobile, tauri::mobile_entry_point)]
+use std::path::PathBuf;
+use crate::achievements::models::Emulator;
+use crate::achievements::models::Game;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let games: Vec<Game> = vec![
                 Game {
-                    name: "Elden Ring",
+                    name: String::from("Elden Ring"),
                     steam_id: 1245620,
-                    game_icon: "icon.png",
+                    game_icon: String::from("icon.png"),
                     achievements_total: 42,
-                    achievements: [],
-                    path_buf: "C:/Users/Serigne/AppData/Roaming/Goldberg",
-                    emulator: "Goldberg"
+                    achievements: vec![],
+                    path_buf: PathBuf::from("C:/Users/Serigne/AppData/Roaming/Goldberg"),
+                    emulator: Emulator::Goldberg,
                 }
             ];
             watcher::start(games, app.handle().clone());

@@ -1,10 +1,9 @@
 // rune: parse le format INI de Rune
 
 use std::path::PathBuf;
-use std::collections::HashMap;
 use ini::Ini;
 use serde::{Deserialize};
-use crate::achievements::models::Achievement;
+use crate::achievements::models::{Achievement, Emulator};
 use crate::emulators::EmulatorParser;
 
 #[derive(Deserialize)]
@@ -32,5 +31,15 @@ impl EmulatorParser for Parser {
             });
         }
         achievements
+    }
+    fn known_locations(&self) -> Vec<PathBuf> {
+        let public = std::env::var("PUBLIC").unwrap_or_default();
+        vec![
+            PathBuf::from(&public).join("Rune-Emulator"),
+        ]
+    }
+
+    fn emulator(&self) -> Emulator {
+        Emulator::Rune
     }
 }

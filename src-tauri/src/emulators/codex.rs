@@ -1,10 +1,9 @@
 // codex: parse le format INI de Codex
 
 use std::path::PathBuf;
-use std::collections::HashMap;
 use ini::Ini;
 use serde::{Deserialize};
-use crate::achievements::models::Achievement;
+use crate::achievements::models::{Achievement, Emulator};
 use crate::emulators::EmulatorParser;
 
 #[derive(Deserialize)]
@@ -32,5 +31,17 @@ impl EmulatorParser for Parser {
             });
         }
         achievements
+    }
+    fn known_locations(&self) -> Vec<PathBuf> {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        let public = std::env::var("PUBLIC").unwrap_or_default();
+        vec![
+            PathBuf::from(&appdata).join("Godex-Emulator"),
+            PathBuf::from(&public).join("Codex-Emulator"),
+        ]
+    }
+
+    fn emulator(&self) -> Emulator {
+        Emulator::Codex
     }
 }

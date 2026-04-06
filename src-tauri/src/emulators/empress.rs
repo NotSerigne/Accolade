@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
 use serde::{Deserialize};
-use crate::achievements::models::Achievement;
+use crate::achievements::models::{Achievement, Emulator};
 use crate::emulators::EmulatorParser;
 
 pub struct Parser;
@@ -27,5 +27,15 @@ impl EmulatorParser for Parser {
                 unlocked_time: value.earned_time,
             }
         }).collect()
+    }
+    fn known_locations(&self) -> Vec<PathBuf> {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        vec![
+            PathBuf::from(&appdata).join("Empress-Emulator"),
+        ]
+    }
+
+    fn emulator(&self) -> Emulator {
+        Emulator::Empress
     }
 }

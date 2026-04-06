@@ -1,6 +1,5 @@
 // watcher: surveille les fichiers des émulateurs en temps réel
 use notify::{Watcher, RecursiveMode, recommended_watcher};
-use std::path::PathBuf;
 use tauri::Emitter;
 use crate::achievements::match_emulator;
 use crate::achievements::models::Game;

@@ -1,5 +1,5 @@
 // achievements: logique métier, détection des unlocks
-use crate::achievements::models::{Achievement, Emulator, Game};
+use crate::achievements::models::{Achievement, Game};
 use crate::emulators::goldberg;
 use crate::emulators::empress;
 use crate::emulators::codex;
