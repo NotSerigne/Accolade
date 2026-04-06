@@ -7,6 +7,9 @@ pub struct Achievement {
     pub unlocked: bool, // True/False
     pub icon: String,
     pub unlocked_time: Option<u64>, // Timestamp de déblocage, null si pas débloqué
+    pub rarity: String,
+    pub completionpercentage: String,
+    pub desc: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

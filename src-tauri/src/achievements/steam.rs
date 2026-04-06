@@ -41,6 +41,9 @@ pub async fn fetch_game_schema(steam_id: u32, api_key: &str) -> Result<Vec<Achie
             unlocked: false,
             icon: a.icon,
             unlocked_time: None,
+            rarity: String::new(),
+            completionpercentage: String::new(),
+            desc: String::new(),
         })
         .collect())
 }

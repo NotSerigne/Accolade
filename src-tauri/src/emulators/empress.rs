@@ -25,6 +25,9 @@ impl EmulatorParser for Parser {
                 unlocked: value.earned,
                 icon: String::new(), // vide pour l'instant
                 unlocked_time: value.earned_time,
+                rarity: String::new(),
+                completionpercentage: String::new(),
+                desc: String::new(),
             }
         }).collect()
     }

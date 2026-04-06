@@ -28,6 +28,9 @@ impl EmulatorParser for Parser {
                 unlocked: achieved == "1",
                 icon: String::new(),
                 unlocked_time: Some(unlock_time.parse::<u64>().unwrap()),
+                rarity: String::new(),
+                completionpercentage: String::new(),
+                desc: String::new(),
             });
         }
         achievements
