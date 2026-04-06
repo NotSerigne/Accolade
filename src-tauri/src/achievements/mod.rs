@@ -7,6 +7,7 @@ use crate::emulators::onlinefix;
 use crate::emulators::rune;
 use crate::emulators::EmulatorParser;
 pub mod models;
+pub mod steam;
 
 pub fn match_emulator(games: Game) -> Vec<Achievement>{
     match games.emulator {
