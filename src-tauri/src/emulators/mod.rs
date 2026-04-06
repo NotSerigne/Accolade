@@ -19,6 +19,7 @@ pub trait EmulatorParser {
 
 pub fn game_scanner(parsers: Vec<Box<dyn EmulatorParser>>) -> Vec<Game> {
     let mut games: Vec<Game> = Vec::new();
+    if path.exists() {
     for parser in parsers {
         games.extend(parser.known_locations().into_iter().map(|path| Game {
             name: String::new(),
@@ -29,6 +30,9 @@ pub fn game_scanner(parsers: Vec<Box<dyn EmulatorParser>>) -> Vec<Game> {
             path_buf: path,
             emulator: parser.emulator(),
         }));
+    }
+    } else {
+        println!("Path not found");
     }
     games
 }
