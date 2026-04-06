@@ -32,7 +32,7 @@ impl EmulatorParser for Parser {
     fn known_locations(&self) -> Vec<PathBuf> {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
         vec![
-            PathBuf::from(&appdata).join("Goldberg-Emulator"),
+            PathBuf::from(&appdata).join("Goldberg SteamEmu Saves"),
         ]
     }
 

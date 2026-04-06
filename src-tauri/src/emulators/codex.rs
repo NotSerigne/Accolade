@@ -36,8 +36,8 @@ impl EmulatorParser for Parser {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
         let public = std::env::var("PUBLIC").unwrap_or_default();
         vec![
-            PathBuf::from(&appdata).join("Godex-Emulator"),
-            PathBuf::from(&public).join("Codex-Emulator"),
+            PathBuf::from(&appdata).join("Steam").join("CODEX"),
+            PathBuf::from(&public).join("Documents").join("Steam").join("CODEX"),
         ]
     }
 

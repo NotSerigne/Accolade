@@ -29,7 +29,7 @@ impl EmulatorParser for Parser {
     fn known_locations(&self) -> Vec<PathBuf> {
         let public = std::env::var("PUBLIC").unwrap_or_default();
         vec![
-            PathBuf::from(&public).join("OnlineFix-Emulator"),
+            PathBuf::from(&public).join("Documents").join("OnlineFix"),
         ]
     }
 
