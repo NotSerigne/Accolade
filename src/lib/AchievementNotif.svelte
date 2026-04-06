@@ -1,8 +1,9 @@
 <script>
+    import { scale } from 'svelte/transition';
     let { achievement } = $props();
 </script>
 
-<div class="notification bg-gray-900 rounded-xl w-96" >
+<div class="notification bg-gray-900 rounded-xl w-96" transition:scale>
     <div class="ColoredBody">
         <div class="text-center text-sm text-gray-500">Achievement Unlocked!</div>
     </div>

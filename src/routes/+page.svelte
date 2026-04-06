@@ -2,6 +2,7 @@
     import {invoke} from "@tauri-apps/api/core";
     import {onMount} from "svelte";
     import {listen} from "@tauri-apps/api/event";
+    import AchievementNotif from '$lib/AchievementNotif.svelte';
 
     let achievements = $state([]);
     onMount(() => {
@@ -27,5 +28,5 @@
 
 <h1>Welcome to SvelteKit</h1>
 {#each achievements as achievement}
-    <p>{achievement.name}</p>
+    <AchievementNotif achievement={achievement} />
 {/each}
