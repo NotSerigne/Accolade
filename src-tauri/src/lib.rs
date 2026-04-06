@@ -1,4 +1,4 @@
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+use commands::get_achievements;#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -11,6 +11,7 @@ pub fn run() {
             }
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![commands::get_achievements])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application");
 }
