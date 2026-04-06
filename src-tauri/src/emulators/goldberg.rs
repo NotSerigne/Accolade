@@ -17,8 +17,15 @@ pub struct GoldbergAchievement {
 
 impl EmulatorParser for Parser {
     fn parse(&self, path: &PathBuf) -> Vec<Achievement> {
-        let content = std::fs::read_to_string(path).unwrap();
-        let data: HashMap<String, GoldbergAchievement> = serde_json::from_str(&content).unwrap();
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(_) => return Vec::new(),
+        };
+
+        let data: HashMap<String, GoldbergAchievement> = match serde_json::from_str(&content) {
+            Ok(data) => data,
+            Err(_) => return Vec::new(),
+        };
         data.into_iter().map(|(key, value)| {
             Achievement {
                 key: key.clone(),

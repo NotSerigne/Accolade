@@ -1,6 +1,11 @@
+use tauri::Manager;
 use crate::emulators::{EmulatorParser, goldberg, empress, onlinefix, rune, codex, game_scanner};
 use crate::achievements::steam::fetch_game_schema;
+use crate::achievements::models::Game;
 
+struct AppState {
+    games: Vec<Game>,
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -23,6 +28,7 @@ pub fn run() {
                     game.achievements = schema;
                 }
             }
+            app.manage(AppState { games: games.clone() });
             watcher::start(games, app.handle().clone());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -33,7 +39,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::get_achievements])
+        .invoke_handler(tauri::generate_handler![commands::get_achievements, commands::get_all_games])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application");
 }

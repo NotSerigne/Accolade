@@ -9,7 +9,10 @@ pub struct Parser;
 
 impl EmulatorParser for Parser {
     fn parse(&self, path: &PathBuf) -> Vec<Achievement> {
-        let achievementfile = Ini::load_from_file(path).unwrap();
+        let achievementfile = match Ini::load_from_file(path) {
+            Ok(achievementfile) => achievementfile,
+            Err(_) => return Vec::new(),
+        };
         let mut achievements: Vec<Achievement> = Vec::new();
         for (sec, prop) in &achievementfile {
             if let Some(name) = sec {

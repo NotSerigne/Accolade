@@ -11,7 +11,10 @@ pub struct Parser;
 
 impl EmulatorParser for Parser {
     fn parse(&self, path: &PathBuf) -> Vec<Achievement> {
-        let achievementfile = Ini::load_from_file(path).unwrap();
+        let achievementfile = match Ini::load_from_file(path) {
+            Ok(achievementfile) => achievementfile,
+            Err(_) => return Vec::new(),
+        };
         let section = achievementfile.section(Some("SteamAchievements")).unwrap();
         let mut index: Vec<String>  = Vec::new();
         for (_key, value) in section.iter() {
