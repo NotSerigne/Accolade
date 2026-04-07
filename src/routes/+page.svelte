@@ -12,16 +12,14 @@
         })
     });
     async function loadAchievements() {
-        const game = {
-            name: "Elden Ring",
-            steam_id: 1245620,
-            game_icon: "icon.png",
-            achievements_total: 42,
-            achievements: [],
-            path_buf: "C:/Users/Serigne/AppData/Roaming/Goldberg",
-            emulator: "Goldberg"
-        };
-        achievements = await invoke("get_achievements", {game: game});
+        const games = await invoke("get_all_games");
+        console.log("Games found:", games);  // 👈 Vérifie si des jeux sont trouvés
+
+        for (let game of games) {
+            const gameAchievements = await invoke("get_achievements", {game});
+            console.log(`Achievements for ${game.name}:`, gameAchievements);  // 👈 Vérifie les achievements
+            achievements = achievements.concat(gameAchievements);
+        }
     }
 
 </script>

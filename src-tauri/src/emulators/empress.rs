@@ -15,17 +15,15 @@ pub struct EmpressAchievement {
 }
 
 impl EmulatorParser for Parser {
-    fn parse(&self, path: &PathBuf) -> Vec<Achievement> {
+    fn parse(&self, path: &str) -> Vec<Achievement> {
         let content = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(_) => return Vec::new(),
         };
-
         let data: HashMap<String, EmpressAchievement> = match serde_json::from_str(&content) {
             Ok(data) => data,
             Err(_) => return Vec::new(),
         };
-
         data.into_iter().map(|(key, value)| {
             Achievement {
                 key: key.clone(),
@@ -45,7 +43,6 @@ impl EmulatorParser for Parser {
             PathBuf::from(&appdata).join("Empress-Emulator"),
         ]
     }
-
     fn emulator(&self) -> Emulator {
         Emulator::Empress
     }

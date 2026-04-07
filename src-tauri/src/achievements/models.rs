@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Achievement {
@@ -12,7 +11,7 @@ pub struct Achievement {
     pub desc: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Emulator {
     Goldberg,
     Empress,
@@ -27,7 +26,7 @@ pub struct Game {
     pub game_icon: String,
     pub achievements_total: u32,
     pub achievements: Vec<Achievement>,
-    pub path_buf: PathBuf,
+    pub path_buf: String,
     pub emulator: Emulator
 }
 

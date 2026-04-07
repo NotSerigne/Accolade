@@ -3,7 +3,7 @@ use crate::emulators::{EmulatorParser, goldberg, empress, onlinefix, rune, codex
 use crate::achievements::steam::fetch_game_schema;
 use crate::achievements::models::Game;
 
-struct AppState {
+pub struct AppState {
     games: Vec<Game>,
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

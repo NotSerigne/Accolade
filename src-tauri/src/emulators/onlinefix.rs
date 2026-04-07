@@ -8,7 +8,7 @@ use crate::emulators::EmulatorParser;
 pub struct Parser;
 
 impl EmulatorParser for Parser {
-    fn parse(&self, path: &PathBuf) -> Vec<Achievement> {
+    fn parse(&self, path: &str) -> Vec<Achievement> {
         let achievementfile = match Ini::load_from_file(path) {
             Ok(achievementfile) => achievementfile,
             Err(_) => return Vec::new(),
@@ -18,12 +18,20 @@ impl EmulatorParser for Parser {
             if let Some(name) = sec {
                 let achieved = prop.get("achieved").unwrap_or("false");
                 let unlock_time = prop.get("timestamp").unwrap_or("0");
+                
+                // Parsing le timestamp proprement
+                // Si c'est "0" ou invalide, retourne None
+                let unlocked_time = unlock_time
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|&time| time > 0);  // Exclut les 0
+                
                 achievements.push(Achievement {
                     key: name.to_string(),
                     name: name.to_string(),
                     unlocked: achieved == "true",
                     icon: String::new(),
-                    unlocked_time: Some(unlock_time.parse::<u64>().unwrap()),
+                    unlocked_time,
                     rarity: String::new(),
                     completionpercentage: String::new(),
                     desc: String::new(),
@@ -38,7 +46,6 @@ impl EmulatorParser for Parser {
             PathBuf::from(&public).join("Documents").join("OnlineFix"),
         ]
     }
-
     fn emulator(&self) -> Emulator {
         Emulator::OnlineFix
     }

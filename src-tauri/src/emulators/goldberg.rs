@@ -16,16 +16,15 @@ pub struct GoldbergAchievement {
 }
 
 impl EmulatorParser for Parser {
-    fn parse(&self, path: &PathBuf) -> Vec<Achievement> {
-        let content = match std::fs::read_to_string(path) {
+    fn parse(&self, path: &str) -> Vec<Achievement> {
+        let content = match std::fs::read_to_string(path) {  // &str marche directement
             Ok(content) => content,
             Err(_) => return Vec::new(),
         };
-
-        let data: HashMap<String, GoldbergAchievement> = match serde_json::from_str(&content) {
-            Ok(data) => data,
-            Err(_) => return Vec::new(),
-        };
+    let data: HashMap<String, GoldbergAchievement> = match serde_json::from_str(&content) {
+        Ok(data) => data,
+        Err(_) => return Vec::new(),
+    };
         data.into_iter().map(|(key, value)| {
             Achievement {
                 key: key.clone(),
@@ -45,7 +44,6 @@ impl EmulatorParser for Parser {
             PathBuf::from(&appdata).join("Goldberg SteamEmu Saves"),
         ]
     }
-
     fn emulator(&self) -> Emulator {
         Emulator::Goldberg
     }
