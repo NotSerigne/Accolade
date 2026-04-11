@@ -31,6 +31,16 @@
         const unlocked = game.achievements?.filter((a) => a.unlocked).length ?? 0;
         return `${unlocked}/${total}`;
     }
+
+    function handleImgError(e: Event): void {
+        const target = e.target as HTMLImageElement;
+        target.style.display = 'none';
+        const fallback = target.nextElementSibling as HTMLElement | null;
+        if (fallback) fallback.style.display = 'flex';
+    }
+
+    // Stats agrégées pour le user panel
+    let totalUnlocked = $derived($games.reduce((acc, g) => acc + (g.achievements?.filter(a => a.unlocked).length ?? 0), 0));
 </script>
 
 <aside class="sidebar">
@@ -52,7 +62,7 @@
 
     <div class="divider"></div>
 
-    <!-- Jeux -->
+    <!-- Icônes des jeux détectés -->
     <div class="games-list">
         {#each $games as game (game.steam_id)}
             {@const isActive = $selectedGameId === game.steam_id}
@@ -69,12 +79,7 @@
                                 src="https://media.steampowered.com/steamcommunity/public/images/apps/{game.steam_id}/{game.game_icon}.jpg"
                                 alt={game.name}
                                 class="game-icon-img"
-                                onerror={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.style.display = 'none';
-                                const fallback = target.nextElementSibling as HTMLElement | null;
-                                if (fallback) fallback.style.display = 'flex';
-                            }}
+                                onerror={handleImgError}
                         />
                         <span class="game-icon-fallback" style="display:none">
                             {initials(game.name || String(game.steam_id))}
@@ -93,9 +98,13 @@
         {/if}
     </div>
 
-    <!-- User panel -->
+    <!-- User panel flottant — déborde à droite de la sidebar comme Discord -->
     <div class="user-panel">
         <div class="avatar">SG</div>
+        <div class="user-info">
+            <div class="user-name">Serigne</div>
+            <div class="user-meta">{totalUnlocked} succès · 0 platines</div>
+        </div>
         <div class="user-actions">
             <div class="watcher-dot" title="Watcher actif"></div>
             <button class="icon-btn" title="Paramètres">
@@ -110,14 +119,17 @@
 
 <style>
     .sidebar {
+        grid-column: 1 / 2;
+        grid-row: 1 / 3;
         background: #0e0e0e;
+        border-radius: 12px;
         display: flex;
         flex-direction: column;
         align-items: center;
         padding: 12px 0 0;
-        gap: 4px;
-        overflow: hidden;
-        border-radius: 12px;
+        position: relative;
+        /* overflow visible pour que le panel déborde */
+        overflow: visible;
     }
 
     .nav-wrap {
@@ -126,6 +138,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
     }
 
     .pill {
@@ -136,12 +149,13 @@
         background: #c8a96e;
         border-radius: 0 3px 3px 0;
         transition: height 0.18s cubic-bezier(.4,0,.2,1);
+        pointer-events: none;
     }
     .pill.visible { height: 22px; }
 
     .game-slot {
-        width: 52px;
-        height: 52px;
+        width: 48px;
+        height: 48px;
         border-radius: 50%;
         background: #1e1e1e;
         border: none;
@@ -177,19 +191,21 @@
     .game-icon-img { width: 100%; height: 100%; object-fit: cover; }
 
     .game-icon-fallback {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 700;
         color: #c8a96e;
         display: flex;
         align-items: center;
         justify-content: center;
+        width: 100%;
+        height: 100%;
     }
 
     .divider {
-        width: 36px;
+        width: 32px;
         height: 1px;
         background: rgba(255,255,255,0.08);
-        margin: 4px 0;
+        margin: 6px 0;
         flex-shrink: 0;
     }
 
@@ -197,12 +213,12 @@
         flex: 1;
         width: 100%;
         overflow-y: auto;
-        overflow-x: hidden;
+        overflow-x: visible;
         display: flex;
         flex-direction: column;
         align-items: center;
         scrollbar-width: none;
-        padding-bottom: 8px;
+        padding-bottom: 72px;
     }
     .games-list::-webkit-scrollbar { display: none; }
 
@@ -214,39 +230,80 @@
         line-height: 1.5;
     }
 
+    /* ── User panel — flottant, déborde à droite ── */
     .user-panel {
-        width: 100%;
-        background: #111;
-        border-top: 1px solid rgba(255,255,255,0.06);
-        padding: 10px;
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        /* Largeur fixe qui déborde bien au-delà des 72px de la sidebar */
+        width: 260px;
+        background: #1a1a1a;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px;
+        padding: 10px 12px;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        flex-shrink: 0;
+        gap: 10px;
+        /* Passe devant le contenu principal */
+        z-index: 100;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     }
 
     .avatar {
-        width: 34px;
-        height: 34px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
         background: #c8a96e;
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 700;
         color: #1a1400;
     }
 
-    .user-actions { display: flex; align-items: center; gap: 6px; }
+    .user-info {
+        flex: 1;
+        min-width: 0;
+    }
 
-    .watcher-dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; }
+    .user-name {
+        font-size: 13px;
+        font-weight: 700;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .user-meta {
+        font-size: 11px;
+        color: #6a7080;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 1px;
+    }
+
+    .user-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .watcher-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3ddc84;
+    }
 
     .icon-btn {
         width: 24px;
         height: 24px;
-        border-radius: 4px;
+        border-radius: 5px;
         background: transparent;
         border: none;
         cursor: pointer;
