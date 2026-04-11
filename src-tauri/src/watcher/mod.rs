@@ -10,7 +10,7 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut watcher = recommended_watcher(tx).unwrap();
 
-        // Ajoute tous les jeux au watcher
+        // Ajoute tous les games au watcher
         for game in &games {
             let path = std::path::Path::new(&game.path_buf);
             let _ = watcher.watch(path, RecursiveMode::Recursive);
