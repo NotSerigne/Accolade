@@ -272,7 +272,7 @@
     .progress-pct { font-size: 22px; font-weight: 700; color: #4ac8ff; margin-left: auto; }
     .progress-meta { display: flex; gap: 20px; font-size: 11px; color: #6a7080; text-transform: uppercase; letter-spacing: 0.8px; }
     .progress-meta strong { color: #fff; }
-    .gold { color: #c8a96e !important; }
+    .gold { color: var(--accent, #c8a96e) !important; }
     .progress-bar-track { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
     .progress-bar-fill { height: 100%; background: #4ac8ff; border-radius: 3px; transition: width 0.5s ease; }
 
@@ -337,7 +337,7 @@
     }
     .ach-icon-wrap img { width: 100%; height: 100%; object-fit: cover; }
     .ach-icon-wrap.grayscale { filter: grayscale(100%) brightness(0.5); }
-    .ach-icon-wrap.tier-legendary { border-color: rgba(200,169,110,0.5); }
+    .ach-icon-wrap.tier-legendary { border-color: color-mix(in srgb, var(--accent, #c8a96e) 50%, transparent); }
     .ach-icon-wrap.tier-rare      { border-color: rgba(61,220,132,0.35); }
     .ach-icon-wrap.tier-uncommon  { border-color: rgba(74,200,255,0.3); }
     .ach-placeholder { font-size: 22px; }
@@ -353,14 +353,14 @@
         font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
         text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;
     }
-    .rarity-badge.tier-legendary { background: rgba(200,169,110,0.15); color: #c8a96e; }
+    .rarity-badge.tier-legendary { background: color-mix(in srgb, var(--accent, #c8a96e) 15%, transparent); color: var(--accent, #c8a96e); }
     .rarity-badge.tier-rare      { background: rgba(61,220,132,0.12);  color: #3ddc84; }
     .rarity-badge.tier-uncommon  { background: rgba(74,200,255,0.1);   color: #4ac8ff; }
     .rarity-badge.tier-common    { background: rgba(255,255,255,0.05); color: #6a7080; }
 
     .rarity-track { flex: 1; max-width: 140px; height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
     .rarity-fill { height: 100%; border-radius: 2px; }
-    .rarity-fill.tier-legendary { background: #c8a96e; }
+    .rarity-fill.tier-legendary { background: var(--accent, #c8a96e); }
     .rarity-fill.tier-rare      { background: #3ddc84; }
     .rarity-fill.tier-uncommon  { background: #4ac8ff; }
     .rarity-fill.tier-common    { background: #4a5060; }

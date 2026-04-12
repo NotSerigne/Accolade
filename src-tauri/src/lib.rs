@@ -9,6 +9,7 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             dotenv::dotenv().ok();
             let parsers: Vec<Box<dyn EmulatorParser>> = vec![
@@ -41,7 +42,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![commands::get_achievements, commands::get_all_games])
         .run(tauri::generate_context!("tauri.conf.json"))
-        .expect("error while running tauri application");
+        .expect("error while running tauri application")
 }
 
 pub mod watcher;

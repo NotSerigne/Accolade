@@ -1,6 +1,7 @@
-<script>
+<script lang="ts">
+    import { totalUnlockedAchievements } from '$lib/stores/Games.js';
+
     const stats = [
-        { label: 'Succès débloqués', value: '247' },
         { label: 'Progression moyenne', value: '62%' },
         { label: 'Rareté moyenne', value: '24%' },
     ];
@@ -9,6 +10,10 @@
 <aside class="stats-panel">
     <section class="stats-section">
         <h2 class="section-title">Stats</h2>
+        <div class="stat-card">
+            <div class="stat-label">Succès débloqués</div>
+            <div class="stat-value">{$totalUnlockedAchievements}</div>
+        </div>
         {#each stats as stat}
             <div class="stat-card">
                 <div class="stat-label">{stat.label}</div>
@@ -59,6 +64,6 @@
     .stat-value {
         font-size: 28px;
         font-weight: 700;
-        color: #c8a96e;
+        color: var(--accent, #c8a96e);
     }
 </style>

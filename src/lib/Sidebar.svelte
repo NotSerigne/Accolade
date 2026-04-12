@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { games, selectedGameId, loadGames, type Game } from '$lib/stores/Games.js';
+    import { games, selectedGameId, loadGames, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
+    import { settingsOpen } from '$lib/stores/ui.js';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { page } from '$app/state';
@@ -8,12 +9,18 @@
 
     function selectGame(id: number): void {
         selectedGameId.set(id);
+        settingsOpen.set(false);
         goto(`/games/${id}`);
     }
 
     function goHome(): void {
         selectedGameId.set(null);
+        settingsOpen.set(false);
         goto('/');
+    }
+
+    function goSettings(): void {
+        settingsOpen.set(true);
     }
 
     function initials(name: string): string {
@@ -39,17 +46,19 @@
         if (fallback) fallback.style.display = 'flex';
     }
 
-    // Stats agrégées pour le user panel
-    let totalUnlocked = $derived($games.reduce((acc, g) => acc + (g.achievements?.filter(a => a.unlocked).length ?? 0), 0));
+    let pathname = $derived(String(page.url.pathname));
+    let isHomeActive = $derived(pathname === '/');
+    let isSettingsActive = $derived($settingsOpen);
+
 </script>
 
 <aside class="sidebar">
     <!-- Home -->
     <div class="nav-wrap">
-        <div class="pill" class:visible={page.url.pathname === '/'}></div>
+        <div class="pill" class:visible={isHomeActive}></div>
         <button
                 class="game-slot home-slot"
-                class:active={page.url.pathname === '/'}
+                class:active={isHomeActive}
                 onclick={goHome}
                 title="Dashboard"
         >
@@ -98,16 +107,21 @@
         {/if}
     </div>
 
-    <!-- User panel flottant — déborde à droite de la sidebar comme Discord -->
+    <!-- User panel flottant style Discord -->
     <div class="user-panel">
         <div class="avatar">SG</div>
         <div class="user-info">
             <div class="user-name">Serigne</div>
-            <div class="user-meta">{totalUnlocked} succès · 0 platines</div>
+            <div class="user-meta">{$totalUnlockedAchievements} succès · 0 platines</div>
         </div>
         <div class="user-actions">
             <div class="watcher-dot" title="Watcher actif"></div>
-            <button class="icon-btn" title="Paramètres">
+            <button
+                    class="icon-btn"
+                    class:active={isSettingsActive}
+                    onclick={goSettings}
+                    title="Paramètres"
+            >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -128,7 +142,6 @@
         align-items: center;
         padding: 12px 0 0;
         position: relative;
-        /* overflow visible pour que le panel déborde */
         overflow: visible;
     }
 
@@ -146,7 +159,7 @@
         left: 0;
         width: 3px;
         height: 0;
-        background: #c8a96e;
+        background: var(--accent, #c8a96e);
         border-radius: 0 3px 3px 0;
         transition: height 0.18s cubic-bezier(.4,0,.2,1);
         pointer-events: none;
@@ -176,24 +189,24 @@
     .game-slot:hover {
         border-radius: 30%;
         background: #2a2a2a;
-        box-shadow: 0 0 0 2px rgba(200,169,110,0.3);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #c8a96e) 30%, transparent);
     }
 
     .game-slot.active {
         border-radius: 30%;
-        box-shadow: 0 0 0 2px #c8a96e;
+        box-shadow: 0 0 0 2px var(--accent, #c8a96e);
     }
 
     .home-slot { background: #1a1a1a; }
     .home-slot.active,
-    .home-slot:hover { color: #c8a96e; }
+    .home-slot:hover { color: var(--accent, #c8a96e); }
 
     .game-icon-img { width: 100%; height: 100%; object-fit: cover; }
 
     .game-icon-fallback {
         font-size: 12px;
         font-weight: 700;
-        color: #c8a96e;
+        color: var(--accent, #c8a96e);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -230,12 +243,11 @@
         line-height: 1.5;
     }
 
-    /* ── User panel — flottant, déborde à droite ── */
+    /* ── User panel flottant ── */
     .user-panel {
         position: absolute;
         bottom: 8px;
         left: 8px;
-        /* Largeur fixe qui déborde bien au-delà des 72px de la sidebar */
         width: 260px;
         background: #1a1a1a;
         border: 1px solid rgba(255,255,255,0.08);
@@ -244,7 +256,6 @@
         display: flex;
         align-items: center;
         gap: 10px;
-        /* Passe devant le contenu principal */
         z-index: 100;
         box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     }
@@ -253,7 +264,7 @@
         width: 36px;
         height: 36px;
         border-radius: 50%;
-        background: #c8a96e;
+        background: var(--accent, #c8a96e);
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -263,10 +274,7 @@
         color: #1a1400;
     }
 
-    .user-info {
-        flex: 1;
-        min-width: 0;
-    }
+    .user-info { flex: 1; min-width: 0; }
 
     .user-name {
         font-size: 13px;
@@ -281,24 +289,12 @@
         font-size: 11px;
         color: #6a7080;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
         margin-top: 1px;
     }
 
-    .user-actions {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-    }
+    .user-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
-    .watcher-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #3ddc84;
-    }
+    .watcher-dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; }
 
     .icon-btn {
         width: 24px;
@@ -314,4 +310,5 @@
         transition: background 0.12s, color 0.12s;
     }
     .icon-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .icon-btn.active { color: var(--accent, #c8a96e); }
 </style>

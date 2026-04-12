@@ -93,9 +93,9 @@
         color: #6a7080;
     }
 
-    .activity-rarity { color: #c8a96e; }
+    .activity-rarity { color: var(--accent, #c8a96e); }
 
-    .rarity-epic   { border-left: 3px solid #c8a96e; }
+    .rarity-epic   { border-left: 3px solid var(--accent, #c8a96e); }
     .rarity-rare   { border-left: 3px solid #3ddc84; }
     .rarity-common { border-left: 3px solid #2e3240; }
 </style>

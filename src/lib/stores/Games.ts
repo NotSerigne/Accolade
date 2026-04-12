@@ -30,6 +30,10 @@ export const selectedGame = derived(
     ([$games, $id]) => $games.find((g: Game) => g.steam_id === $id) ?? null
 );
 
+export const totalUnlockedAchievements = derived(games, ($games) =>
+    $games.reduce((acc, g) => acc + (g.achievements?.filter((a) => a.unlocked).length ?? 0), 0)
+);
+
 export async function loadGames(): Promise<void> {
     try {
         const result = await invoke<Game[]>('get_all_games');
