@@ -3,6 +3,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
     import { settingsOpen } from '$lib/stores/ui.js';
+    import { syncSteamMetadata } from '$lib/stores/Games.js';
 
     let draft = $state<AppSettings>({ ...get(settings) });
 
@@ -63,6 +64,7 @@
                 accentColor: draft.accentColor,
             };
             await saveSettings(next);
+            await syncSteamMetadata(next.steamApiKey);
             settingsOpen.set(false);
         } catch (error) {
             const details = error instanceof Error ? error.message : String(error);

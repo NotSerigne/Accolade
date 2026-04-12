@@ -40,10 +40,12 @@
     let merged = $derived.by((): Achievement[] => {
         if (!game) return [];
         const schema = game.achievements ?? [];
-        const stateMap = new Map<string, Achievement>(achievements.map((a) => [a.key, a]));
+        const stateMap = new Map<string, Achievement>(
+            achievements.map((a) => [a.key.trim().toLowerCase(), a])
+        );
 
         return schema.map((s: Achievement) => {
-            const live = stateMap.get(s.key);
+            const live = stateMap.get(s.key.trim().toLowerCase());
             return {
                 ...s,
                 unlocked: live?.unlocked ?? s.unlocked ?? false,
@@ -117,6 +119,14 @@
         if (n <= 40) return 'tier-uncommon';
         return 'tier-common';
     }
+
+    function gameTitle(current: Game): string {
+        return current.name?.trim() || `AppID ${current.steam_id}`;
+    }
+
+    function heroBackground(current: Game): string {
+        return current.background_image_url || current.header_image_url || '';
+    }
 </script>
 
 {#if !game}
@@ -125,9 +135,10 @@
     <div class="game-page">
 
         <!-- Header -->
-        <div class="game-header">
+        <div class="game-header" style:--game-bg={heroBackground(game) ? `url('${heroBackground(game)}')` : 'none'}>
+            <div class="game-header-overlay"></div>
             <div class="game-title-row">
-                <h1 class="game-title">{game.name || `AppID ${game.steam_id}`}</h1>
+                <h1 class="game-title">{gameTitle(game)}</h1>
                 <span class="emulator-badge">{game.emulator}</span>
             </div>
 
@@ -140,7 +151,7 @@
                     <span class="progress-pct">{progressPct}%</span>
                     <div class="progress-meta">
                         <span>TOTAL <strong>{totalCount}</strong></span>
-                        <span>DÉBLOQUÉS <strong class="gold">{unlockedCount}</strong></span>
+                        <span>DEBLOQUES <strong class="gold">{unlockedCount}</strong></span>
                     </div>
                 </div>
                 <div class="progress-bar-track">
@@ -214,11 +225,11 @@
                         </div>
 
                         <div class="ach-info">
-                            <div class="ach-name" class:muted={isLocked}>{ach.name}</div>
-                            {#if ach.desc && (revealed || ach.unlocked)}
+                            <div class="ach-name" class:muted={isLocked}>{ach.name || ach.key}</div>
+                            {#if (ach.desc || '').trim() && (revealed || ach.unlocked)}
                                 <div class="ach-desc">{ach.desc}</div>
                             {:else if isLocked && !revealed}
-                                <div class="ach-desc italic">Description masquée</div>
+                                <div class="ach-desc italic">Description masquee</div>
                             {/if}
                             {#if ach.completionpercentage}
                                 <div class="rarity-row">
@@ -256,13 +267,30 @@
     .not-found { height: 100%; }
     .loading-state, .empty-state { height: 120px; }
 
-    .game-header { padding: 24px 28px 20px; border-bottom: 1px solid rgba(255,255,255,0.06); flex-shrink: 0; }
+    .game-header {
+        position: relative;
+        padding: 24px 28px 20px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        flex-shrink: 0;
+        background-image: var(--game-bg);
+        background-size: cover;
+        background-position: center;
+        overflow: hidden;
+    }
+    .game-header-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(8, 10, 16, 0.35) 0%, rgba(8, 10, 16, 0.92) 100%);
+        pointer-events: none;
+    }
+    .game-title-row, .progress-block { position: relative; z-index: 1; }
     .game-title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
     .game-title { font-size: 26px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
     .emulator-badge {
-        font-size: 10px; font-weight: 600; color: #6a7080;
-        border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
+        font-size: 10px; font-weight: 600; color: #d2d8e8;
+        border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;
         padding: 2px 8px; text-transform: uppercase; letter-spacing: 1px;
+        background: rgba(0,0,0,0.35);
     }
 
     .progress-block { display: flex; flex-direction: column; gap: 10px; }

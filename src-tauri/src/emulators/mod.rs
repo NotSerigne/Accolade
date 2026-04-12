@@ -45,8 +45,11 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                 if !achievements.is_empty() {
                     games.push(Game {
                         name: String::new(),
-                        steam_id: extract_steam_id_from_path(&entry_path.to_string_lossy()),  // 👈 Ici
+                        steam_id: extract_steam_id_from_path(&entry_path.to_string_lossy()),
                         game_icon: String::new(),
+                        game_icon_url: String::new(),
+                        header_image_url: String::new(),
+                        background_image_url: String::new(),
                         achievements_total: 0,
                         achievements,
                         path_buf: entry_path.to_string_lossy().to_string(),

@@ -2,14 +2,19 @@
     import './layout.css';
     import favicon from '$lib/assets/favicon.svg';
     import Settings from '$lib/Settings.svelte';
-    import { loadSettings } from '$lib/stores/settings.js';
+    import { loadSettings, settings } from '$lib/stores/settings.js';
     import { settingsOpen } from '$lib/stores/ui.js';
+    import { syncSteamMetadata } from '$lib/stores/Games.js';
     import { onMount } from 'svelte';
+    import { get } from 'svelte/store';
 
     let { children } = $props();
 
     onMount(() => {
-        void loadSettings();
+        void (async () => {
+            await loadSettings();
+            await syncSteamMetadata(get(settings).steamApiKey);
+        })();
     });
 
     function closeSettings(): void {

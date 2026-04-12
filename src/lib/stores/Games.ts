@@ -16,6 +16,9 @@ export interface Game {
     name: string;
     steam_id: number;
     game_icon: string;
+    game_icon_url: string;
+    header_image_url: string;
+    background_image_url: string;
     achievements_total: number;
     achievements: Achievement[];
     path_buf: string;
@@ -40,6 +43,15 @@ export async function loadGames(): Promise<void> {
         games.set(result);
     } catch (e) {
         console.error('Failed to load games:', e);
+    }
+}
+
+export async function syncSteamMetadata(apiKey: string): Promise<void> {
+    try {
+        const result = await invoke<Game[]>('sync_steam_metadata', { apiKey });
+        games.set(result);
+    } catch (e) {
+        console.error('Failed to sync Steam metadata:', e);
     }
 }
 

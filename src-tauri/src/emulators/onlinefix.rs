@@ -7,6 +7,19 @@ use crate::emulators::EmulatorParser;
 
 pub struct Parser;
 
+fn parse_unlocked(raw: Option<&str>) -> bool {
+    let value = raw.unwrap_or("false").trim().to_ascii_lowercase();
+    matches!(value.as_str(), "true" | "1" | "yes" | "y" | "on")
+}
+
+fn parse_unlock_time(prop: &ini::Properties) -> Option<u64> {
+    ["timestamp", "unlock_time", "unlocked_time", "time", "date"]
+        .iter()
+        .find_map(|key| prop.get(*key))
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|&time| time > 0)
+}
+
 impl EmulatorParser for Parser {
     fn parse(&self, path: &str) -> Vec<Achievement> {
         let achievementfile = match Ini::load_from_file(path) {
@@ -16,20 +29,18 @@ impl EmulatorParser for Parser {
         let mut achievements: Vec<Achievement> = Vec::new();
         for (sec, prop) in &achievementfile {
             if let Some(name) = sec {
-                let achieved = prop.get("achieved").unwrap_or("false");
-                let unlock_time = prop.get("timestamp").unwrap_or("0");
-                
-                // Parsing le timestamp proprement
-                // Si c'est "0" ou invalide, retourne None
-                let unlocked_time = unlock_time
-                    .parse::<u64>()
-                    .ok()
-                    .filter(|&time| time > 0);  // Exclut les 0
-                
+                let unlocked = parse_unlocked(
+                    prop.get("achieved")
+                        .or_else(|| prop.get("unlocked"))
+                        .or_else(|| prop.get("earned"))
+                        .or_else(|| prop.get("done")),
+                );
+                let unlocked_time = parse_unlock_time(prop);
+
                 achievements.push(Achievement {
                     key: name.to_string(),
                     name: name.to_string(),
-                    unlocked: achieved == "true",
+                    unlocked,
                     icon: String::new(),
                     unlocked_time,
                     rarity: String::new(),

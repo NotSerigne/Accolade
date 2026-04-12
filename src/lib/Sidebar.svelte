@@ -46,6 +46,14 @@
         if (fallback) fallback.style.display = 'flex';
     }
 
+    function iconUrl(game: Game): string {
+        if (game.game_icon_url) return game.game_icon_url;
+        if (game.game_icon) {
+            return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.jpg`;
+        }
+        return '';
+    }
+
     let pathname = $derived(String(page.url.pathname));
     let isHomeActive = $derived(pathname === '/');
     let isSettingsActive = $derived($settingsOpen);
@@ -83,9 +91,9 @@
                         onclick={() => selectGame(game.steam_id)}
                         title="{game.name || game.steam_id}{progress(game) ? ' · ' + progress(game) : ''}"
                 >
-                    {#if game.game_icon}
+                    {#if iconUrl(game)}
                         <img
-                                src="https://media.steampowered.com/steamcommunity/public/images/apps/{game.steam_id}/{game.game_icon}.jpg"
+                                src={iconUrl(game)}
                                 alt={game.name}
                                 class="game-icon-img"
                                 onerror={handleImgError}

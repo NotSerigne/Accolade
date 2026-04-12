@@ -3,7 +3,7 @@
     import Topbar from '$lib/Topbar.svelte';
     import GamePage from '$lib/GamePage.svelte';
     import { page } from '$app/state';
-    import { games } from '$lib/stores/Games.ts';
+    import { games } from '$lib/stores/Games.js';
 
     // page depuis $app/state = rune Svelte 5, pas un store → pas de $ devant
     // $games = store Svelte classique → $ obligatoire
