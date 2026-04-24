@@ -64,9 +64,11 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
     let client = reqwest::Client::new();
 
     let schema_url = format!(
-        "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?appid={steam_id}&key={api_key}"
+        "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?appid={steam_id}&key={api_key}&l=french"
     );
     let schema_response = client.get(schema_url).send().await?.json::<SteamResponse>().await?;
+
+    let game_name = schema_response.game.game_name.clone();
 
     let achievements = schema_response
         .game
@@ -99,13 +101,8 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
         .and_then(|entry| if entry.success { entry.data.as_ref() } else { None });
 
     let game_icon_url = details
-        .map(|d| {
-            if !d.capsule_imagev5.is_empty() {
-                d.capsule_imagev5.clone()
-            } else {
-                d.header_image.clone()
-            }
-        })
+        .map(|d| d.capsule_imagev5.clone())
+        .filter(|s| !s.is_empty())
         .unwrap_or_default();
 
     let header_image_url = details
@@ -125,7 +122,7 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
     Ok(SteamMetadata {
         name: details
             .map(|d| d.name.clone())
-            .or(schema_response.game.game_name)
+            .or(game_name)
             .unwrap_or_default(),
         game_icon_url,
         header_image_url,

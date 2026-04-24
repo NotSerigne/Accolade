@@ -24,7 +24,7 @@ pub struct Game {
     pub name: String,
     pub steam_id: u32,
     pub game_icon: String,
-    pub game_icon_url: String,
+    pub steamgrid_icon_url: String,
     pub header_image_url: String,
     pub background_image_url: String,
     pub achievements_total: u32,

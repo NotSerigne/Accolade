@@ -39,19 +39,24 @@
         return `${unlocked}/${total}`;
     }
 
-    function handleImgError(e: Event): void {
-        const target = e.target as HTMLImageElement;
-        target.style.display = 'none';
-        const fallback = target.nextElementSibling as HTMLElement | null;
-        if (fallback) fallback.style.display = 'flex';
-    }
-
     function iconUrl(game: Game): string {
-        if (game.game_icon_url) return game.game_icon_url;
         if (game.game_icon) {
-            return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.jpg`;
+            // C'est un hash clienticon si ça ne commence pas par http
+            if (game.game_icon.startsWith('http')) {
+                return game.game_icon;
+            }
+            return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
         }
         return '';
+    }
+
+    function onIconError(name: string, steamId: number) {
+        return (e: Event) => {
+            const t = e.target as HTMLImageElement;
+            console.error('ICON FAILED:', name, t.src);
+            t.onerror = null; // stop la cascade
+            t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(steamId))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
+        };
     }
 
     let pathname = $derived(String(page.url.pathname));
@@ -68,7 +73,7 @@
                 class="game-slot home-slot"
                 class:active={isHomeActive}
                 onclick={goHome}
-                title="Dashboard"
+                title="Accueil"
         >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -96,7 +101,7 @@
                                 src={iconUrl(game)}
                                 alt={game.name}
                                 class="game-icon-img"
-                                onerror={handleImgError}
+                                onerror={onIconError(game.name, game.steam_id)}
                         />
                         <span class="game-icon-fallback" style="display:none">
                             {initials(game.name || String(game.steam_id))}
@@ -177,7 +182,7 @@
     .game-slot {
         width: 48px;
         height: 48px;
-        border-radius: 50%;
+        border-radius: 12px;
         background: #1e1e1e;
         border: none;
         cursor: pointer;

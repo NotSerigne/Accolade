@@ -51,8 +51,8 @@ pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str) {
             if !metadata.name.is_empty() {
                 game.name = metadata.name;
             }
-            if !metadata.game_icon_url.is_empty() {
-                game.game_icon_url = metadata.game_icon_url;
+            if !metadata.game_icon_url.is_empty() && game.game_icon.is_empty() {
+                game.game_icon = metadata.game_icon_url;
             }
             if !metadata.header_image_url.is_empty() {
                 game.header_image_url = metadata.header_image_url;
@@ -60,6 +60,64 @@ pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str) {
             if !metadata.background_image_url.is_empty() {
                 game.background_image_url = metadata.background_image_url;
             }
+        }
+    }
+}
+
+pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
+    let client = reqwest::Client::new();
+
+    for game in games.iter_mut() {
+        // Étape 1 : récupérer le game_id SteamGridDB depuis le steam_id
+        let search_url = format!(
+            "https://www.steamgriddb.com/api/v2/games/steam/{}",
+            game.steam_id
+        );
+
+        let game_id = match client
+            .get(&search_url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .send()
+            .await
+        {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(json) => match json["data"]["id"].as_u64() {
+                    Some(id) => id,
+                    None => continue,
+                },
+                Err(_) => continue,
+            },
+            Err(_) => continue,
+        };
+
+        // Étape 2 : récupérer les icônes pour ce game_id
+        if game.game_icon.is_empty() {
+            let icons_url = format!(
+                "https://www.steamgriddb.com/api/v2/icons/game/{}",
+                game_id
+            );
+
+            let icon_url = match client
+                .get(&icons_url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .send()
+                .await
+            {
+                Ok(resp) => match resp.json::<serde_json::Value>().await {
+                    Ok(json) => match json["data"][0]["thumb"].as_str() {
+                        Some(url) => url.to_string(),
+                        None => {
+                            println!("DEBUG sgdb no icon for app_id={}", game.steam_id);
+                            continue;
+                        }
+                    },
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            };
+
+            println!("DEBUG sgdb icon: app_id={} url={}", game.steam_id, icon_url);
+            game.game_icon = icon_url;
         }
     }
 }
@@ -80,13 +138,18 @@ pub fn run() {
 
             let mut games = game_scanner(parsers);
             let api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
+
             tauri::async_runtime::block_on(enrich_games_with_steam(&mut games, &api_key));
+
+            let sgdb_key = std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default();
+            tauri::async_runtime::block_on(apply_steamgriddb_icons(&mut games, &sgdb_key));
 
             app.manage(AppState {
                 games: Mutex::new(games.clone()),
                 steam_api_key: Mutex::new(api_key),
             });
             watcher::start(games, app.handle().clone());
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
