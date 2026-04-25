@@ -60,6 +60,59 @@ struct AppDetailsData {
     background_raw: String,
 }
 
+#[derive(Deserialize)]
+struct GlobalStatsResponse {
+    achievementpercentages: AchievementPercentages,
+}
+
+#[derive(Deserialize)]
+struct AchievementPercentages {
+    achievements: Vec<GlobalAchievementStat>,
+}
+
+#[derive(Deserialize)]
+struct GlobalAchievementStat {
+    name: String,
+    percent: f64,
+}
+
+async fn scrape_steam_community_percentages(
+    client: &reqwest::Client,
+    steam_id: u32,
+) -> HashMap<String, f64> {
+    let url = format!("https://steamcommunity.com/stats/{steam_id}/achievements");
+    let response = match client.get(url).send().await {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+    let html = match response.text().await {
+        Ok(text) => text,
+        Err(_) => return HashMap::new(),
+    };
+
+    let document = scraper::Html::parse_document(&html);
+    let row_sel = scraper::Selector::parse(".achieveRow").unwrap();
+    let img_sel = scraper::Selector::parse(".achieveImgHolder img").unwrap();
+    let pct_sel = scraper::Selector::parse(".achievePercent").unwrap();
+
+    document
+        .select(&row_sel)
+        .filter_map(|row| {
+            let src = row.select(&img_sel).next()?.value().attr("src")?;
+            let hash = src.rsplit('/').next()?.trim_end_matches(".jpg").to_string();
+
+            let pct_text = row
+                .select(&pct_sel)
+                .next()?
+                .text()
+                .collect::<String>();
+            let pct = pct_text.trim().trim_end_matches('%').parse::<f64>().ok()?;
+
+            Some((hash, pct))
+        })
+        .collect()
+}
+
 pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamMetadata, reqwest::Error> {
     let client = reqwest::Client::new();
 
@@ -85,6 +138,54 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
             rarity: String::new(),
             completionpercentage: String::new(),
             desc: a.description,
+        })
+        .collect::<Vec<_>>();
+
+    let percentages_url = format!(
+        "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={steam_id}"
+    );
+
+    let percentages_map: HashMap<String, f64> = client
+        .get(percentages_url)
+        .send()
+        .await?
+        .json::<GlobalStatsResponse>()
+        .await
+        .map(|r| {
+            r.achievementpercentages
+                .achievements
+                .into_iter()
+                .map(|s| (s.name.to_lowercase(), s.percent))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let all_zero = percentages_map.values().all(|&p| p == 0.0);
+
+    let scrape_map = if all_zero {
+        scrape_steam_community_percentages(&client, steam_id).await
+    } else {
+        HashMap::new()
+    };
+
+    let achievements = achievements
+        .into_iter()
+        .map(|mut a| {
+            let pct = if all_zero {
+                let hash = a.icon.rsplit('/').next()
+                    .unwrap_or("")
+                    .trim_end_matches(".jpg")
+                    .to_string();
+                scrape_map.get(&hash).copied().unwrap_or(0.0)
+            } else {
+                percentages_map
+                    .get(&a.key.to_lowercase())
+                    .copied()
+                    .filter(|&p| p > 0.0)
+                    .unwrap_or(0.0)
+            };
+            a.completionpercentage = pct.to_string();
+            a
         })
         .collect::<Vec<_>>();
 

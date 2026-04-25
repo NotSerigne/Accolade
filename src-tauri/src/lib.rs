@@ -27,7 +27,7 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
                     icon: if s.icon.is_empty() { live.icon.clone() } else { s.icon },
                     unlocked_time: live.unlocked_time,
                     rarity: live.rarity.clone(),
-                    completionpercentage: live.completionpercentage.clone(),
+                    completionpercentage: if s.completionpercentage.is_empty() { live.completionpercentage.clone() } else { s.completionpercentage.clone() },
                     desc: if s.desc.is_empty() { live.desc.clone() } else { s.desc },
                 }
             } else {

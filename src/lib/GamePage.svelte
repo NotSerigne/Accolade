@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import { listen } from '@tauri-apps/api/event';
     import { loadAchievements, type Game, type Achievement } from '$lib/stores/Games.js';
+    import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
 
     let { game }: { game: Game | null } = $props();
 
@@ -11,6 +12,12 @@
     let sort = $state<'date' | 'rarity' | 'name'>('date');
     let revealed = $state(true);
     let loading = $state(true);
+    let showHeaderLogo = $state(true);
+    let jumpedToken = $state<number | null>(null);
+    let flashAchievementKey = $state('');
+
+    const rowRefs = new Map<string, HTMLDivElement>();
+    let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
     $effect(() => {
         if (game) {
@@ -57,17 +64,19 @@
         });
     });
 
+    let globalAchievementHighlight = $derived($searchQuery.trim().toLowerCase());
+
     let filtered = $derived.by((): Achievement[] => {
         let list: Achievement[] = merged;
 
         if (filter === 'unlocked') list = list.filter((a) => a.unlocked);
         if (filter === 'locked')   list = list.filter((a) => !a.unlocked);
 
-        if (search.trim()) {
-            const q = search.toLowerCase();
+        const localQuery = search.trim().toLowerCase();
+        if (localQuery) {
             list = list.filter((a) =>
-                a.name.toLowerCase().includes(q) ||
-                (a.desc ?? '').toLowerCase().includes(q)
+                a.name.toLowerCase().includes(localQuery) ||
+                (a.desc ?? '').toLowerCase().includes(localQuery)
             );
         }
 
@@ -95,6 +104,66 @@
     let totalCount    = $derived(merged.length);
     let progressPct   = $derived(totalCount > 0 ? Math.round((unlockedCount / totalCount) * 100) : 0);
 
+    function normalizeAchievementKey(key: string): string {
+        return (key || '').trim().toLowerCase();
+    }
+
+    function trackAchievementRow(node: HTMLDivElement, key: string) {
+        const normalized = normalizeAchievementKey(key);
+        rowRefs.set(normalized, node);
+
+        return {
+            destroy() {
+                rowRefs.delete(normalized);
+            },
+        };
+    }
+
+    function triggerAchievementFlash(key: string) {
+        flashAchievementKey = key;
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => {
+            flashAchievementKey = '';
+            flashTimer = null;
+        }, 850);
+    }
+
+    function delay(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    $effect(() => {
+        const intent = $achievementJumpIntent;
+        if (!intent || !game) return;
+        if (intent.gameId !== game.steam_id) return;
+        if (jumpedToken === intent.token) return;
+
+        jumpedToken = intent.token;
+        const normalizedKey = normalizeAchievementKey(intent.achievementKey);
+
+        // Evite qu'un filtre local masque la ligne cible au moment du jump.
+        filter = 'all';
+        search = '';
+
+        void (async () => {
+            let target: HTMLDivElement | undefined;
+
+            for (let i = 0; i < 20; i += 1) {
+                await tick();
+                target = rowRefs.get(normalizedKey);
+                if (target) break;
+                await delay(50);
+            }
+
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                triggerAchievementFlash(normalizedKey);
+            }
+
+            achievementJumpIntent.set(null);
+        })();
+    });
+
     function formatDate(ts: number | null): string {
         if (!ts) return '';
         return new Date(ts * 1000).toLocaleDateString('fr-FR', {
@@ -105,19 +174,97 @@
     function rarityLabel(pct: string): string {
         const n = parseFloat(pct);
         if (isNaN(n)) return '';
-        if (n <= 5)  return 'Très rare';
-        if (n <= 15) return 'Peu commun';
-        if (n <= 40) return 'Commun';
-        return 'Fréquent';
+        if (n <= 0.1) return 'Mythic';
+        if (n <= 1) return 'Légendaire'
+        if (n <= 3)  return 'Épique';
+        if (n <= 7)  return 'Très rare';
+        if (n <= 15) return 'Rare';
+        if (n <= 35) return 'Peu commun';
+        return 'Commun';
     }
 
-    function rarityClass(pct: string): string {
+    type RarityPalette = {
+        border: string;
+        shadow: string;
+        badgeBg: string;
+        badgeColor: string;
+        fill: string;
+    };
+
+    function rarityPalette(pct: string): RarityPalette {
         const n = parseFloat(pct);
-        if (isNaN(n)) return 'tier-common';
-        if (n <= 5)  return 'tier-legendary';
-        if (n <= 15) return 'tier-rare';
-        if (n <= 40) return 'tier-uncommon';
-        return 'tier-common';
+        if (isNaN(n)) {
+            return {
+                border: 'rgba(106,112,128,0.4)',
+                shadow: '0 0 0 1px rgba(106,112,128,0.12)',
+                badgeBg: 'rgba(255,255,255,0.05)',
+                badgeColor: '#6a7080',
+                fill: '#4a5060',
+            };
+        }
+
+        if (n <= 0.1) {
+            return {
+                border: '#ff3b5c',
+                shadow: '0 0 0 1px rgba(255,59,92,0.16), 0 0 10px rgba(255,59,92,0.25)',
+                badgeBg: 'rgba(255,59,92,0.14)',
+                badgeColor: '#ff3b5c',
+                fill: '#ff3b5c',
+            };
+        }
+        if (n <= 1) {
+            return {
+                border: '#ffd85a',
+                shadow: '0 0 0 1px rgba(255,216,90,0.14), 0 0 10px rgba(255,216,90,0.18)',
+                badgeBg: 'rgba(255,216,90,0.14)',
+                badgeColor: '#ffd85a',
+                fill: '#ffd85a',
+            };
+        }
+        if (n <= 3) {
+            return {
+                border: '#a855f7',
+                shadow: '0 0 0 1px rgba(168,85,247,0.14), 0 0 10px rgba(168,85,247,0.2)',
+                badgeBg: 'rgba(168,85,247,0.14)',
+                badgeColor: '#a855f7',
+                fill: '#a855f7',
+            };
+        }
+        if (n <= 7) {
+            return {
+                border: '#f4b860',
+                shadow: '0 0 0 1px rgba(244,184,96,0.12), 0 0 10px rgba(244,184,96,0.18)',
+                badgeBg: 'rgba(244,184,96,0.14)',
+                badgeColor: '#f4b860',
+                fill: '#f4b860',
+            };
+        }
+        if (n <= 15) {
+            return {
+                border: '#4ac8ff',
+                shadow: '0 0 0 1px rgba(74,200,255,0.14), 0 0 10px rgba(74,200,255,0.18)',
+                badgeBg: 'rgba(74,200,255,0.1)',
+                badgeColor: '#4ac8ff',
+                fill: '#4ac8ff',
+            };
+        }
+        if (n <= 35) {
+            return {
+                border: '#3ddc84',
+                shadow: '0 0 0 1px rgba(61,220,132,0.12), 0 0 10px rgba(61,220,132,0.16)',
+                badgeBg: 'rgba(61,220,132,0.12)',
+                badgeColor: '#3ddc84',
+                fill: '#3ddc84',
+            };
+        }
+
+        return {
+            border: 'rgba(106,112,128,0.4)',
+            shadow: '0 0 0 1px rgba(106,112,128,0.12)',
+            badgeBg: 'rgba(255,255,255,0.05)',
+            badgeColor: '#6a7080',
+            fill: '#4a5060',
+        };
     }
 
     function gameTitle(current: Game): string {
@@ -126,6 +273,12 @@
 
     function heroBackground(current: Game): string {
         return current.background_image_url || current.header_image_url || '';
+    }
+
+    function isSecretAchievement(ach: Achievement): boolean {
+        const hasName = Boolean((ach.name || '').trim());
+        const hasDesc = Boolean((ach.desc || '').trim());
+        return !hasName || !hasDesc;
     }
 </script>
 
@@ -136,6 +289,17 @@
 
         <!-- Header -->
         <div class="game-header" style:--game-bg={heroBackground(game) ? `url('${heroBackground(game)}')` : 'none'}>
+            {#if showHeaderLogo}
+                <div class="game-logo-bg" aria-hidden="true">
+                    <img
+                        src="/logo.png"
+                        alt=""
+                        onerror={() => {
+                            showHeaderLogo = false;
+                        }}
+                    />
+                </div>
+            {/if}
             <div class="game-header-overlay"></div>
             <div class="game-title-row">
                 <h1 class="game-title">{gameTitle(game)}</h1>
@@ -213,10 +377,22 @@
             {:else}
                 {#each filtered as ach (ach.key)}
                     {@const isLocked = !ach.unlocked}
-                    {@const rClass = rarityClass(ach.completionpercentage)}
+                    {@const isSecret = isSecretAchievement(ach)}
+                    {@const palette = rarityPalette(ach.completionpercentage)}
+                    {@const achNormalizedKey = normalizeAchievementKey(ach.key)}
+                    {@const isTopbarMatch = globalAchievementHighlight && (
+                        ach.name.toLowerCase().includes(globalAchievementHighlight) ||
+                        (ach.desc ?? '').toLowerCase().includes(globalAchievementHighlight)
+                    )}
 
-                    <div class="ach-row" class:is-locked={isLocked && !revealed}>
-                        <div class="ach-icon-wrap {rClass}" class:grayscale={isLocked}>
+                    <div
+                        class="ach-row"
+                        class:is-secret-hidden={isSecret && isLocked && !revealed}
+                        class:highlighted={Boolean(isTopbarMatch)}
+                        class:jump-flash={flashAchievementKey === achNormalizedKey}
+                        use:trackAchievementRow={ach.key}
+                    >
+                        <div class="ach-icon-wrap" class:grayscale={isLocked} style:border-color={palette.border} style:box-shadow={palette.shadow}>
                             {#if ach.icon}
                                 <img src={ach.icon} alt={ach.name} />
                             {:else}
@@ -226,18 +402,18 @@
 
                         <div class="ach-info">
                             <div class="ach-name" class:muted={isLocked}>{ach.name || ach.key}</div>
-                            {#if (ach.desc || '').trim() && (revealed || ach.unlocked)}
+                            {#if (ach.desc || '').trim() && (revealed || ach.unlocked || !isSecret)}
                                 <div class="ach-desc">{ach.desc}</div>
-                            {:else if isLocked && !revealed}
+                            {:else if isSecret && isLocked && !revealed}
                                 <div class="ach-desc italic">Description masquee</div>
                             {/if}
                             {#if ach.completionpercentage}
                                 <div class="rarity-row">
-                                    <span class="rarity-badge {rClass}">
+                                    <span class="rarity-badge" style:background={palette.badgeBg} style:color={palette.badgeColor}>
                                         {rarityLabel(ach.completionpercentage)} · {parseFloat(ach.completionpercentage).toFixed(1)}%
                                     </span>
                                     <div class="rarity-track">
-                                        <div class="rarity-fill {rClass}" style="width: {Math.min(parseFloat(ach.completionpercentage), 100)}%"></div>
+                                        <div class="rarity-fill" style:background={palette.fill} style:width={`${Math.min(parseFloat(ach.completionpercentage), 100)}%`}></div>
                                     </div>
                                 </div>
                             {/if}
@@ -277,13 +453,30 @@
         background-position: center;
         overflow: hidden;
     }
+    .game-logo-bg {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 0;
+    }
+    .game-logo-bg img {
+        width: min(92%, 760px);
+        height: min(92%, 240px);
+        object-fit: contain;
+        opacity: 0.26;
+        filter: drop-shadow(0 14px 28px rgba(0,0,0,0.4));
+    }
     .game-header-overlay {
         position: absolute;
         inset: 0;
         background: linear-gradient(180deg, rgba(8, 10, 16, 0.35) 0%, rgba(8, 10, 16, 0.92) 100%);
         pointer-events: none;
+        z-index: 1;
     }
-    .game-title-row, .progress-block { position: relative; z-index: 1; }
+    .game-title-row, .progress-block { position: relative; z-index: 2; }
     .game-title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
     .game-title { font-size: 26px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
     .emulator-badge {
@@ -333,6 +526,21 @@
         border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
         padding: 0 10px; font-size: 13px; color: #fff; cursor: pointer;
         font-family: inherit; outline: none;
+        appearance: none;
+        -webkit-appearance: none;
+        color-scheme: dark;
+    }
+    .sort-select:focus {
+        border-color: rgba(255,255,255,0.28);
+        box-shadow: 0 0 0 1px rgba(255,255,255,0.16);
+    }
+    .sort-select option {
+        background: #171a22;
+        color: #f1f5ff;
+    }
+    .sort-select option:checked {
+        background: #232938;
+        color: #ffffff;
     }
 
     .reveal-btn {
@@ -355,7 +563,40 @@
         padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
         transition: opacity 0.15s;
     }
-    .ach-row.is-locked { opacity: 0.35; filter: blur(2px); pointer-events: none; }
+    .ach-row.highlighted {
+        border-bottom-color: transparent;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--accent, #c8a96e) 10%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #c8a96e) 42%, transparent);
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    .ach-row.jump-flash {
+        animation: achJumpFlash 0.85s ease;
+        border-bottom-color: transparent;
+        border-radius: 8px;
+        box-shadow:
+            inset 0 0 0 1px color-mix(in srgb, var(--accent, #c8a96e) 85%, transparent),
+            0 0 18px color-mix(in srgb, var(--accent, #c8a96e) 30%, transparent);
+        background: color-mix(in srgb, var(--accent, #c8a96e) 22%, transparent);
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    @keyframes achJumpFlash {
+        0% {
+            box-shadow:
+                inset 0 0 0 1px color-mix(in srgb, var(--accent, #c8a96e) 95%, transparent),
+                0 0 24px color-mix(in srgb, var(--accent, #c8a96e) 45%, transparent);
+            background: color-mix(in srgb, var(--accent, #c8a96e) 30%, transparent);
+        }
+        100% {
+            box-shadow:
+                inset 0 0 0 1px color-mix(in srgb, var(--accent, #c8a96e) 42%, transparent),
+                0 0 0 transparent;
+            background: color-mix(in srgb, var(--accent, #c8a96e) 10%, transparent);
+        }
+    }
+    .ach-row.is-secret-hidden { opacity: 0.35; filter: blur(2px); pointer-events: none; }
     .ach-row:last-child { border-bottom: none; }
 
     .ach-icon-wrap {
@@ -365,9 +606,6 @@
     }
     .ach-icon-wrap img { width: 100%; height: 100%; object-fit: cover; }
     .ach-icon-wrap.grayscale { filter: grayscale(100%) brightness(0.5); }
-    .ach-icon-wrap.tier-legendary { border-color: color-mix(in srgb, var(--accent, #c8a96e) 50%, transparent); }
-    .ach-icon-wrap.tier-rare      { border-color: rgba(61,220,132,0.35); }
-    .ach-icon-wrap.tier-uncommon  { border-color: rgba(74,200,255,0.3); }
     .ach-placeholder { font-size: 22px; }
 
     .ach-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -381,17 +619,9 @@
         font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
         text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;
     }
-    .rarity-badge.tier-legendary { background: color-mix(in srgb, var(--accent, #c8a96e) 15%, transparent); color: var(--accent, #c8a96e); }
-    .rarity-badge.tier-rare      { background: rgba(61,220,132,0.12);  color: #3ddc84; }
-    .rarity-badge.tier-uncommon  { background: rgba(74,200,255,0.1);   color: #4ac8ff; }
-    .rarity-badge.tier-common    { background: rgba(255,255,255,0.05); color: #6a7080; }
 
     .rarity-track { flex: 1; max-width: 140px; height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
     .rarity-fill { height: 100%; border-radius: 2px; }
-    .rarity-fill.tier-legendary { background: var(--accent, #c8a96e); }
-    .rarity-fill.tier-rare      { background: #3ddc84; }
-    .rarity-fill.tier-uncommon  { background: #4ac8ff; }
-    .rarity-fill.tier-common    { background: #4a5060; }
 
     .ach-date { font-size: 12px; color: #6a7080; white-space: nowrap; flex-shrink: 0; align-self: flex-start; padding-top: 4px; }
 </style>
