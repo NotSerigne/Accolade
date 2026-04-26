@@ -1,14 +1,16 @@
 use serde::{Serialize, Deserialize};
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Achievement {
     pub key: String, // Nom de l'achievement du fichier
     pub name: String, // Nom de l'achievement retourné par l'API Steam/serveur
     pub unlocked: bool, // True/False
     pub icon: String,
+    pub icon_gray: String,
     pub unlocked_time: Option<u64>, // Timestamp de déblocage, null si pas débloqué
     pub rarity: String,
     pub completionpercentage: String,
     pub desc: String,
+    pub hidden: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

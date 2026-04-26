@@ -17,24 +17,26 @@ pub struct GoldbergAchievement {
 
 impl EmulatorParser for Parser {
     fn parse(&self, path: &str) -> Vec<Achievement> {
-        let content = match std::fs::read_to_string(path) {  // &str marche directement
+        let content = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(_) => return Vec::new(),
         };
-    let data: HashMap<String, GoldbergAchievement> = match serde_json::from_str(&content) {
-        Ok(data) => data,
-        Err(_) => return Vec::new(),
-    };
+        let data: HashMap<String, GoldbergAchievement> = match serde_json::from_str(&content) {
+            Ok(data) => data,
+            Err(_) => return Vec::new(),
+        };
         data.into_iter().map(|(key, value)| {
             Achievement {
                 key: key.clone(),
-                name: key, // on a pas encore l'API Steam, on met la clé pour l'instant
+                name: key,
                 unlocked: value.earned,
-                icon: String::new(), // vide pour l'instant
+                icon: String::new(),
+                icon_gray: String::new(),
                 unlocked_time: value.earned_time,
                 rarity: String::new(),
                 completionpercentage: String::new(),
                 desc: String::new(),
+                hidden: false,
             }
         }).collect()
     }
@@ -48,4 +50,3 @@ impl EmulatorParser for Parser {
         Emulator::Goldberg
     }
 }
-

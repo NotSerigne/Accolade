@@ -36,16 +36,17 @@ impl EmulatorParser for Parser {
                         .or_else(|| prop.get("done")),
                 );
                 let unlocked_time = parse_unlock_time(prop);
-
                 achievements.push(Achievement {
                     key: name.to_string(),
                     name: name.to_string(),
                     unlocked,
                     icon: String::new(),
-                    unlocked_time,
+                    icon_gray: String::new(),
+                    unlocked_time: unlocked_time,
                     rarity: String::new(),
                     completionpercentage: String::new(),
                     desc: String::new(),
+                    hidden: false,
                 });
             }
         }

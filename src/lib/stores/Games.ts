@@ -10,6 +10,7 @@ export interface Achievement {
     rarity: string;
     completionpercentage: string;
     desc: string;
+    hidden?: boolean;
 }
 
 export interface Game {

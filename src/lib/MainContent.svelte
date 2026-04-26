@@ -21,6 +21,19 @@
         return Math.round((unlocked / total) * 100);
     }
 
+    function formatDateTime(ts: number | null | undefined): string {
+        if (!ts) return '';
+        return new Date(ts * 1000).toLocaleString('fr-FR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+        });
+    }
+
     let recentActivity = $derived.by(() => {
         return $games
             .flatMap((g: any) =>
@@ -45,7 +58,7 @@
                 <div class="activity-game">{item.gameName}</div>
                 <div class="activity-meta">
                     <span class="activity-rarity" style:color={accent}>{parseFloat(item.completionpercentage).toFixed(1)}%</span>
-                    <span class="activity-time">{new Date((item.unlocked_time ?? 0) * 1000).toLocaleDateString('fr-FR')}</span>
+                    <span class="activity-time">{formatDateTime(item.unlocked_time)}</span>
                 </div>
             </div>
         {/each}

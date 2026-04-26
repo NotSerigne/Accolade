@@ -27,13 +27,15 @@ impl EmulatorParser for Parser {
         data.into_iter().map(|(key, value)| {
             Achievement {
                 key: key.clone(),
-                name: key, // on a pas encore l'API Steam, on met la clé pour l'instant
+                name: key,
                 unlocked: value.earned,
-                icon: String::new(), // vide pour l'instant
+                icon: String::new(),
+                icon_gray: String::new(),
                 unlocked_time: value.earned_time,
                 rarity: String::new(),
                 completionpercentage: String::new(),
                 desc: String::new(),
+                hidden: false,
             }
         }).collect()
     }

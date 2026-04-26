@@ -30,6 +30,7 @@ dotenv = "0.15"
 tauri-plugin-store = "2.4.2"
 winreg = "0.56.0"
 scraper = "0.26.0"
+quick-xml = "0.39.2"
 
 [build]
 script = "build.rs"

@@ -166,8 +166,14 @@
 
     function formatDate(ts: number | null): string {
         if (!ts) return '';
-        return new Date(ts * 1000).toLocaleDateString('fr-FR', {
-            day: '2-digit', month: '2-digit', year: 'numeric'
+        return new Date(ts * 1000).toLocaleString('fr-FR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
         });
     }
 
@@ -275,11 +281,6 @@
         return current.background_image_url || current.header_image_url || '';
     }
 
-    function isSecretAchievement(ach: Achievement): boolean {
-        const hasName = Boolean((ach.name || '').trim());
-        const hasDesc = Boolean((ach.desc || '').trim());
-        return !hasName || !hasDesc;
-    }
 </script>
 
 {#if !game}
@@ -376,8 +377,12 @@
                 <div class="loading-state">Chargement…</div>
             {:else}
                 {#each filtered as ach (ach.key)}
-                    {@const isLocked = !ach.unlocked}
-                    {@const isSecret = isSecretAchievement(ach)}
+                    {@const isUnlocked = ach.unlocked || Boolean(ach.unlocked_time)}
+                    {@const isLocked = !isUnlocked}
+                    {@const isSecret = ach.hidden ?? false}
+                    {@const descText = (ach.desc || '').trim()}
+                    {@const showDescription = Boolean(descText) && (isUnlocked || !isSecret || revealed)}
+                    {@const showMaskedDescription = isLocked && isSecret && !revealed}
                     {@const palette = rarityPalette(ach.completionpercentage)}
                     {@const achNormalizedKey = normalizeAchievementKey(ach.key)}
                     {@const isTopbarMatch = globalAchievementHighlight && (
@@ -387,7 +392,7 @@
 
                     <div
                         class="ach-row"
-                        class:is-secret-hidden={isSecret && isLocked && !revealed}
+                        class:is-secret-hidden={showMaskedDescription}
                         class:highlighted={Boolean(isTopbarMatch)}
                         class:jump-flash={flashAchievementKey === achNormalizedKey}
                         use:trackAchievementRow={ach.key}
@@ -402,10 +407,10 @@
 
                         <div class="ach-info">
                             <div class="ach-name" class:muted={isLocked}>{ach.name || ach.key}</div>
-                            {#if (ach.desc || '').trim() && (revealed || ach.unlocked || !isSecret)}
-                                <div class="ach-desc">{ach.desc}</div>
-                            {:else if isSecret && isLocked && !revealed}
-                                <div class="ach-desc italic">Description masquee</div>
+                            {#if showDescription}
+                                <div class="ach-desc">{descText}</div>
+                            {:else if showMaskedDescription}
+                                <div class="ach-desc" class:italic={!descText}>{descText || 'Description masquee'}</div>
                             {/if}
                             {#if ach.completionpercentage}
                                 <div class="rarity-row">
@@ -419,7 +424,7 @@
                             {/if}
                         </div>
 
-                        {#if ach.unlocked && ach.unlocked_time}
+                        {#if isUnlocked && ach.unlocked_time}
                             <div class="ach-date">{formatDate(ach.unlocked_time)}</div>
                         {/if}
                     </div>
