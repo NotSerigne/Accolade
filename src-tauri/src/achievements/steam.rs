@@ -89,7 +89,7 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
         // Parse les champs
         if let Some(ref mut ach) = current {
             if let Some(value) = extract_xml_value(trimmed, "internal_name") {
-                ach.internal_name = value;
+                ach.internal_name = decode_html_entities(&value);
             }
             if let Some(value) = extract_xml_value(trimmed, "localized_name") {
                 ach.localized_name = decode_html_entities(&value);

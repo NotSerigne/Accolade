@@ -1,5 +1,5 @@
 use tauri::Manager;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use crate::emulators::{EmulatorParser, goldberg, empress, onlinefix, rune, codex, game_scanner};
 use crate::achievements::steam::fetch_steam_metadata;
@@ -15,11 +15,15 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
         .iter()
         .map(|a| (a.key.trim().to_lowercase(), a))
         .collect();
+    let mut seen_schema_keys: HashSet<String> = HashSet::new();
 
-    schema
+    let mut merged: Vec<Achievement> = schema
         .into_iter()
         .map(|s| {
-            if let Some(live) = local_map.get(&s.key.trim().to_lowercase()) {
+            let key = s.key.trim().to_lowercase();
+            seen_schema_keys.insert(key.clone());
+
+            if let Some(live) = local_map.get(&key) {
                 Achievement {
                     key: s.key,
                     name: if s.name.is_empty() { live.name.clone() } else { s.name },
@@ -36,7 +40,17 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
                 s
             }
         })
-        .collect()
+        .collect();
+
+    // Conserve les achievements locaux absents du schéma Steam pour éviter les pertes (ex: 78 -> 77).
+    for ach in local {
+        let key = ach.key.trim().to_lowercase();
+        if !seen_schema_keys.contains(&key) {
+            merged.push(ach.clone());
+        }
+    }
+
+    merged
 }
 
 pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str) {
@@ -66,60 +80,54 @@ pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str) {
     }
 }
 
+async fn fetch_sgdb_icon(client: &reqwest::Client, steam_id: u32, api_key: &str, styles_filter: Option<&str>) -> Option<String> {
+    let mut icons_url = format!(
+        "https://www.steamgriddb.com/api/v2/icons/steam/{}?dimensions=256",
+        steam_id
+    );
+
+    if let Some(styles) = styles_filter {
+        icons_url.push_str(&format!("&styles={}", styles));
+    }
+
+    match client
+        .get(&icons_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(json) => json["data"][0]["thumb"].as_str().map(|s| s.to_string()),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    }
+}
+
 pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
+    if api_key.trim().is_empty() {
+        return;
+    }
+
     let client = reqwest::Client::new();
 
     for game in games.iter_mut() {
-        // Étape 1 : récupérer le game_id SteamGridDB depuis le steam_id
-        let search_url = format!(
-            "https://www.steamgriddb.com/api/v2/games/steam/{}",
-            game.steam_id
-        );
-
-        let game_id = match client
-            .get(&search_url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .send()
-            .await
-        {
-            Ok(resp) => match resp.json::<serde_json::Value>().await {
-                Ok(json) => match json["data"]["id"].as_u64() {
-                    Some(id) => id,
-                    None => continue,
-                },
-                Err(_) => continue,
-            },
-            Err(_) => continue,
-        };
-
-        // Étape 2 : récupérer les icônes pour ce game_id
         if game.game_icon.is_empty() {
-            let icons_url = format!(
-                "https://www.steamgriddb.com/api/v2/icons/game/{}",
-                game_id
-            );
+            // Essaie official d'abord
+            if let Some(icon_url) = fetch_sgdb_icon(&client, game.steam_id, api_key, Some("official")).await {
+                println!("DEBUG sgdb icon (official): app_id={} url={}", game.steam_id, icon_url);
+                game.game_icon = icon_url;
+                continue;
+            }
 
-            let icon_url = match client
-                .get(&icons_url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .send()
-                .await
-            {
-                Ok(resp) => match resp.json::<serde_json::Value>().await {
-                    Ok(json) => match json["data"][0]["thumb"].as_str() {
-                        Some(url) => url.to_string(),
-                        None => {
-                            println!("DEBUG sgdb no icon for app_id={}", game.steam_id);
-                            continue;
-                        }
-                    },
-                    Err(_) => continue,
-                },
-                Err(_) => continue,
-            };
+            // Fallback sur community si pas d'official
+            if let Some(icon_url) = fetch_sgdb_icon(&client, game.steam_id, api_key, None).await {
+                println!("DEBUG sgdb icon (community): app_id={} url={}", game.steam_id, icon_url);
+                game.game_icon = icon_url;
+                continue;
+            }
 
-            println!("DEBUG sgdb icon: app_id={} url={}", game.steam_id, icon_url);
-            game.game_icon = icon_url;
+            println!("DEBUG sgdb no icon for app_id={}", game.steam_id);
         }
     }
 }

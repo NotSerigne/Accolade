@@ -3,6 +3,7 @@
     import { listen } from '@tauri-apps/api/event';
     import { loadAchievements, type Game, type Achievement } from '$lib/stores/Games.js';
     import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
+    import headerLogo from '$lib/assets/favicon.svg';
 
     let { game }: { game: Game | null } = $props();
 
@@ -293,7 +294,7 @@
             {#if showHeaderLogo}
                 <div class="game-logo-bg" aria-hidden="true">
                     <img
-                        src="/logo.png"
+                        src={headerLogo}
                         alt=""
                         onerror={() => {
                             showHeaderLogo = false;

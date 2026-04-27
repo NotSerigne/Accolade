@@ -9,6 +9,30 @@ use crate::emulators::EmulatorParser;
 #[derive(Deserialize)]
 pub struct Parser;
 
+fn normalize_section_name(value: &str) -> String {
+    value.trim().trim_matches('"').to_string()
+}
+
+fn parse_unlocked(raw: Option<&str>) -> bool {
+    let value = raw.unwrap_or("0").trim().to_ascii_lowercase();
+    matches!(value.as_str(), "1" | "true" | "yes" | "y" | "on")
+}
+
+fn find_section<'a>(achievementfile: &'a Ini, name: &str) -> Option<&'a ini::Properties> {
+    let wanted = normalize_section_name(name);
+
+    achievementfile
+        .section(Some(wanted.as_str()))
+        .or_else(|| {
+            achievementfile
+                .iter()
+                .find_map(|(sec, prop)| {
+                    sec.filter(|current| normalize_section_name(current).eq_ignore_ascii_case(&wanted))
+                        .map(|_| prop)
+                })
+        })
+}
+
 impl EmulatorParser for Parser {
     fn parse(&self, path: &str) -> Vec<Achievement> {
         let achievementfile = match Ini::load_from_file(path) {
@@ -20,20 +44,22 @@ impl EmulatorParser for Parser {
         };
         let mut index: Vec<String> = Vec::new();
         for (_key, value) in section.iter() {
-            index.push(value.to_string());
+            index.push(normalize_section_name(value));
         }
         let mut achievements: Vec<Achievement> = Vec::new();
         for name in &index {
-            let Some(ach_section) = achievementfile.section(Some(name.as_str())) else {
+            let Some(ach_section) = find_section(&achievementfile, name) else {
                 continue;
             };
-            let achieved = ach_section.get("Achieved").unwrap_or("0");
+            let achieved = ach_section
+                .get("Achieved")
+                .or_else(|| ach_section.get("achieved"));
             let unlock_time = ach_section.get("UnlockTime").unwrap_or("0");
             let unlocked_time = unlock_time.parse::<u64>().ok();
             achievements.push(Achievement {
                 key: name.clone(),
                 name: name.clone(),
-                unlocked: achieved == "1",
+                unlocked: parse_unlocked(achieved),
                 icon: String::new(),
                 icon_gray: String::new(),
                 unlocked_time: unlocked_time,
