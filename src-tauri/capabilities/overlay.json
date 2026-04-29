@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Permissions pour la fenêtre overlay",
+  "windows": [
+    "achievement-overlay"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:window:allow-show",
+    "core:window:allow-hide"
+  ]
+}

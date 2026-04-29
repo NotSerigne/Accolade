@@ -49,6 +49,18 @@
         draft.windowPosition = value;
     }
 
+    async function testNotification(): Promise<void> {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            console.log('[TEST] Avant invoke...');
+            await invoke('test_achievement_notif');
+            console.log('[TEST] Invoke OK');
+        } catch (error) {
+            console.error('Test notification failed:', error);
+            saveError = `Erreur lors du test: ${error instanceof Error ? error.message : String(error)}`;
+        }
+    }
+
     async function save(): Promise<void> {
         if (isSaving) return;
 
@@ -199,6 +211,19 @@
                     </button>
                 {/each}
             </div>
+        </section>
+
+        <div class="separator"></div>
+
+        <!-- ── Test ── -->
+        <section class="settings-section">
+            <div class="section-label">Test</div>
+            <button class="test-btn" onclick={testNotification}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                </svg>
+                Tester la notification
+            </button>
         </section>
 
         <div class="separator"></div>
@@ -723,5 +748,31 @@
         font-size: 11px;
         color: rgba(255,255,255,0.2);
         flex-shrink: 0;
+    }
+
+    .test-btn {
+        height: 36px;
+        padding: 0 16px;
+        border-radius: 8px;
+        background: color-mix(in srgb, #4ac8ff 12%, transparent);
+        border: 1px solid #4ac8ff;
+        color: #4ac8ff;
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-family: inherit;
+        font-weight: 500;
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+
+    .test-btn:hover {
+        background: color-mix(in srgb, #4ac8ff 18%, transparent);
+        border-color: #4ac8ff;
+    }
+
+    .test-btn:active {
+        transform: scale(0.98);
     }
 </style>

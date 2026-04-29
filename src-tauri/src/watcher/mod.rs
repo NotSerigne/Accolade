@@ -6,6 +6,20 @@ use crate::achievements::models::{Achievement, Game};
 use crate::achievements::steam::fetch_app_name_by_appid;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use serde::Serialize;
+
+#[derive(Serialize, Clone)]
+pub struct AchievementNotifPayload {
+    pub name: String,
+    pub desc: String,
+    pub icon: Option<String>,
+    pub rarity: String,
+    pub completionpercentage: Option<f32>,
+    pub unlocked: u32,
+    pub total: u32,
+    #[serde(default)]
+    pub test: bool,
+}
 
 fn unlocked_keys(achievements: &[Achievement]) -> HashSet<String> {
     achievements
@@ -65,6 +79,17 @@ fn display_game_name(game: &Game, name_cache: &mut HashMap<u32, String>, api_loo
     format!("Jeu inconnu (AppID {})", game.steam_id)
 }
 
+fn rarity_label(percentage: Option<f32>) -> String {
+    match percentage {
+        Some(p) if p <= 5.0  => "LEGENDARY".to_string(),
+        Some(p) if p <= 15.0 => "EPIC".to_string(),
+        Some(p) if p <= 30.0 => "RARE".to_string(),
+        Some(p) if p <= 60.0 => "UNCOMMON".to_string(),
+        Some(_)              => "COMMON".to_string(),
+        None                 => "UNKNOWN".to_string(),
+    }
+}
+
 pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -77,42 +102,74 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
         let mut game_name_cache: HashMap<u32, String> = HashMap::new();
         let mut api_lookup_attempted: HashSet<u32> = HashSet::new();
 
-        // Ajoute tous les games au watcher
         for game in &games {
             let path = std::path::Path::new(&game.path_buf);
             let _ = watcher.watch(path, RecursiveMode::Recursive);
         }
 
-        // Écoute les changements
         while let Ok(Ok(event)) = rx.recv() {
             for game in &games {
                 let game_path = std::path::Path::new(&game.path_buf);
 
-                // Si le fichier est dans le dossier du jeu
                 if event.paths.iter().any(|p| p.starts_with(game_path)) {
                     let achievements = match_emulator(game.clone());
                     let current_unlocked = unlocked_keys(&achievements);
                     let previous_unlocked = unlocked_by_game.entry(game.steam_id).or_default();
-                    let newly_unlocked: Vec<String> = current_unlocked
+
+                    let newly_unlocked: Vec<&Achievement> = achievements
                         .iter()
-                        .filter(|key| !previous_unlocked.contains(*key))
-                        .cloned()
+                        .filter(|a| {
+                            let key = a.key.trim().to_lowercase();
+                            current_unlocked.contains(&key) && !previous_unlocked.contains(&key)
+                        })
                         .collect();
 
                     if !newly_unlocked.is_empty() {
                         let display_name = display_game_name(game, &mut game_name_cache, &mut api_lookup_attempted);
-                        println!(
-                            "[DEBUG][achievements] Nouveau(x) succes debloque(s) pour '{}' (AppID {}): {}",
-                            display_name,
-                            game.steam_id,
-                            newly_unlocked.join(", ")
-                        );
+                        let total = achievements.len() as u32;
+                        let unlocked_count = current_unlocked.len() as u32;
+
+                        for ach in &newly_unlocked {
+                            println!(
+                                "[DEBUG][achievements] Nouveau succes debloque pour '{}' (AppID {}): {}",
+                                display_name, game.steam_id, ach.key
+                            );
+
+                            let payload = AchievementNotifPayload {
+                                name: ach.name.clone(),
+                                desc: String::new(),
+                                icon: Some(ach.icon.clone()),
+                                rarity: "UNKNOWN".to_string(),
+                                completionpercentage: None,
+                                unlocked: unlocked_count,
+                                total,
+                                test: false,
+                            };
+
+                            let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);
+                        }
                     }
 
                     *previous_unlocked = current_unlocked;
-                    let _ = app_handle.emit("achievement-unlocked", &achievements);
+                    // Event séparé pour la mise à jour de la liste complète dans l'UI principale
+                    let _ = app_handle.emit("achievements-updated", &achievements);
                 }
             }
         }
     });
+}
+
+pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
+    let payload = AchievementNotifPayload {
+        name: "Test Achievement".to_string(),
+        desc: "This is a test notification".to_string(),
+        icon: None,
+        rarity: "EPIC".to_string(),
+        completionpercentage: Some(12.5),
+        unlocked: 5,
+        total: 50,
+        test: true,
+    };
+
+    let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);
 }

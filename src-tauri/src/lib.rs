@@ -154,6 +154,33 @@ pub fn run() {
             let sgdb_key = std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default();
             tauri::async_runtime::block_on(apply_steamgriddb_icons(&mut games, &sgdb_key));
 
+            let overlay_url = if cfg!(debug_assertions) {
+                "http://localhost:5173/overlay"
+            } else {
+                "/overlay"
+            };
+
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "achievement-overlay",
+                tauri::WebviewUrl::App(overlay_url.into()),
+            )
+                .title("")
+                .inner_size(460.0, 160.0)
+                .position(30.0, 30.0)
+                .transparent(true)
+                .decorations(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .visible(false)
+                .build()?;
+
+            #[cfg(debug_assertions)]
+            {
+                let overlay_win = app.get_webview_window("achievement-overlay").unwrap();
+                overlay_win.open_devtools();
+            }
+
             app.manage(AppState {
                 games: Mutex::new(games.clone()),
                 steam_api_key: Mutex::new(api_key),
@@ -170,6 +197,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::test_achievement_notif,
             commands::get_achievements,
             commands::get_all_games,
             commands::sync_steam_metadata

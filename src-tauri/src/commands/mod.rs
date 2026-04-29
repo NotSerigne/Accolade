@@ -4,6 +4,11 @@ use crate::achievements::{match_emulator, models::Game, models::Achievement};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
 
 #[tauri::command]
+pub fn test_achievement_notif(app_handle: tauri::AppHandle) {
+    crate::watcher::emit_test_notification(&app_handle);
+}
+
+#[tauri::command]
 pub fn get_achievements(game: Game) -> Vec<Achievement> {
     match_emulator(game)
 }
@@ -16,6 +21,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
         .map(|games| games.clone())
         .unwrap_or_default()
 }
+
 
 #[tauri::command]
 pub(crate) async fn sync_steam_metadata(api_key: String, state: tauri::State<'_, AppState>) -> Result<Vec<Game>, String> {
