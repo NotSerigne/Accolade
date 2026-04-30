@@ -2,16 +2,28 @@
     import { games } from '$lib/stores/Games.js';
     import { goto } from '$app/navigation';
 
-    function rarityAccent(pct: string): string {
+    function rarityLabel(pct: string): string {
         const n = parseFloat(pct);
-        if (isNaN(n)) return '#6a7080';
-        if (n <= 0.1) return '#ff3b5c';
-        if (n <= 1) return '#ffd85a';
-        if (n <= 3) return '#a855f7';
-        if (n <= 7) return '#f4b860';
-        if (n <= 15) return '#4ac8ff';
-        if (n <= 35) return '#3ddc84';
-        return '#6a7080';
+        if (isNaN(n)) return 'Commun';
+        if (n <= 0.1) return 'Mythic';
+        if (n <= 1) return 'Légendaire';
+        if (n <= 3) return 'Épique';
+        if (n <= 7) return 'Très rare';
+        if (n <= 15) return 'Rare';
+        if (n <= 35) return 'Peu commun';
+        return 'Commun';
+    }
+
+    function rarityPalette(pct: string) {
+        const n = parseFloat(pct);
+        if (isNaN(n)) return { accent: '#6a7080', bg: 'rgba(106, 112, 128, 0.1)' };
+        if (n <= 0.1) return { accent: '#ff3b5c', bg: 'rgba(255, 59, 92, 0.15)' };
+        if (n <= 1) return { accent: '#ffd85a', bg: 'rgba(255, 216, 90, 0.15)' };
+        if (n <= 3) return { accent: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' };
+        if (n <= 7) return { accent: '#f4b860', bg: 'rgba(244, 184, 96, 0.15)' };
+        if (n <= 15) return { accent: '#4ac8ff', bg: 'rgba(74, 200, 255, 0.15)' };
+        if (n <= 35) return { accent: '#3ddc84', bg: 'rgba(61, 220, 132, 0.15)' };
+        return { accent: '#6a7080', bg: 'rgba(106, 112, 128, 0.1)' };
     }
 
     function progressPct(game: any): number {
@@ -29,7 +41,6 @@
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
-            second: '2-digit',
             hour12: false,
         });
     }
@@ -39,7 +50,7 @@
             .flatMap((g: any) =>
                 (g.achievements ?? [])
                     .filter((a: any) => a.unlocked && a.unlocked_time)
-                    .map((a: any) => ({ ...a, gameName: g.name }))
+                    .map((a: any) => ({ ...a, gameName: g.name, gameId: g.steam_id }))
             )
             .sort((a: any, b: any) => (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0))
             .slice(0, 6);
@@ -53,40 +64,74 @@
                 const lastUnlockB = Math.max(...(b.achievements ?? []).map((x: any) => x.unlocked_time ?? 0), 0);
                 return lastUnlockB - lastUnlockA;
             })
-            .slice(0, 4);
+            .slice(0, 12);
     });
 </script>
 
 <main class="main-content">
     <section class="activity-section">
         <h2 class="section-title">Activité récente</h2>
-        {#each recentActivity as item}
-            {@const accent = rarityAccent(item.completionpercentage)}
-            <div class="activity-item" style:border-left-color={accent}>
-                <div class="activity-achievement">{item.name}</div>
-                <div class="activity-game">{item.gameName}</div>
-                <div class="activity-meta">
-                    <span class="activity-rarity" style:color={accent}>{parseFloat(item.completionpercentage).toFixed(1)}%</span>
-                    <span class="activity-time">{formatDateTime(item.unlocked_time)}</span>
-                </div>
-            </div>
-        {/each}
+        <div class="activity-grid">
+            {#each recentActivity as item}
+                {@const palette = rarityPalette(item.completionpercentage)}
+                <button class="activity-card" onclick={() => goto(`/games/${item.gameId}`)}>
+                    <div class="activity-icon-wrap">
+                        {#if item.icon}
+                            <img
+                                src={item.icon}
+                                alt={item.name}
+                                class="activity-icon"
+                                onerror={(e) => {
+                                    const t = e.target as HTMLImageElement;
+                                    if (!t.src.includes('header.jpg')) {
+                                        t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${item.gameId}/header.jpg`;
+                                    }
+                                }}
+                            />
+                        {:else}
+                            <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{item.gameId}/header.jpg" alt={item.name} class="activity-icon" />
+                        {/if}
+                    </div>
+                    <div class="activity-info">
+                        <div class="activity-header">
+                            <span class="activity-name">{item.name}</span>
+                        </div>
+                        <div class="activity-game">{item.gameName}</div>
+                        <div class="activity-footer">
+                            <span class="activity-rarity-badge" style:color={palette.accent} style:background={palette.bg}>
+                                {rarityLabel(item.completionpercentage)} · {parseFloat(item.completionpercentage).toFixed(1)}%
+                            </span>
+                            <span class="activity-time">{formatDateTime(item.unlocked_time)}</span>
+                        </div>
+                    </div>
+                </button>
+            {/each}
+        </div>
 
         {#if recentActivity.length === 0}
             <div class="empty-hint">Aucune activité récente</div>
         {/if}
     </section>
 
-    <section class="activity-section" style="margin-top: 28px;">
+    <section class="activity-section" style="margin-top: 32px;">
         <h2 class="section-title">Bibliothèque récente</h2>
         <div class="game-grid">
             {#each recentGames as game}
                 <button class="game-card" onclick={() => goto(`/games/${game.steam_id}`)}>
                     <div class="game-card-bg">
                         {#if game.header_image_url}
-                            <img src={game.header_image_url} alt={game.name} />
+                            <img
+                                src={game.header_image_url}
+                                alt={game.name}
+                                onerror={(e) => {
+                                    const t = e.target as HTMLImageElement;
+                                    if (!t.src.includes('header.jpg')) {
+                                        t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+                                    }
+                                }}
+                            />
                         {:else}
-                            <span class="game-placeholder">🎮</span>
+                            <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{game.steam_id}/header.jpg" alt={game.name} />
                         {/if}
                     </div>
                     <div class="game-card-overlay"></div>
@@ -107,12 +152,13 @@
 
 <style>
     .main-content {
-        grid-column: 2 / 3;
-        grid-row: 2 / 3;
         background: #161616;
         border-radius: 12px;
         padding: 32px;
         overflow-y: auto;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
     }
 
     .activity-section {
@@ -120,44 +166,121 @@
         flex-direction: column;
     }
 
-    .section-title {
-        font-size: 22px;
-        font-weight: 700;
-        margin-bottom: 24px;
+    .activity-section:last-child {
+        flex: 1;
     }
 
-    .activity-item {
-        padding: 24px 0 24px 20px;
-        border-bottom: 1px solid #1e1e1e;
-        border-left: 3px solid transparent;
+    .section-title {
+        font-size: 20px;
+        font-weight: 800;
+        margin-bottom: 20px;
+        letter-spacing: -0.5px;
+        color: #fff;
+    }
+
+    .activity-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 12px;
+    }
+
+    .activity-card {
+        display: flex;
+        gap: 14px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        text-align: left;
+        width: 100%;
+        font-family: inherit;
+    }
+
+    .activity-card:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.1);
+        transform: translateY(-2px);
+    }
+
+    .activity-icon-wrap {
+        flex-shrink: 0;
+    }
+
+    .activity-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: #1a1a1a;
+    }
+
+    .activity-icon-placeholder {
+        width: 56px;
+        height: 56px;
+        border-radius: 8px;
+        background: #1a1a1a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+    }
+
+    .activity-info {
+        flex: 1;
+        min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        justify-content: space-between;
     }
 
-    .activity-item:last-child { border-bottom: none; }
+    .activity-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 2px;
+    }
 
-    .activity-achievement {
-        font-size: 16px;
-        font-weight: 600;
-        color: #ffffff;
+    .activity-name {
+        font-size: 14px;
+        font-weight: 700;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .activity-game {
-        font-size: 13px;
+        font-size: 12px;
+        font-weight: 500;
         color: #6a7080;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 6px;
     }
 
-    .activity-meta {
-        margin-top: 8px;
+    .activity-footer {
         display: flex;
         justify-content: space-between;
-        font-size: 12px;
-        color: #6a7080;
+        align-items: center;
     }
 
-    .activity-rarity { color: var(--accent, #c8a96e); }
+    .activity-rarity-badge {
+        font-size: 10px;
+        font-weight: 800;
+        padding: 2px 8px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
 
+    .activity-time {
+        font-size: 10px;
+        font-weight: 600;
+        color: #6a7080;
+    }
 
     .empty-hint {
         font-size: 13px;
@@ -167,22 +290,26 @@
 
     .game-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 8px;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
     }
 
     .game-card {
         position: relative;
-        height: 110px;
-        border-radius: 8px;
+        height: 120px;
+        border-radius: 10px;
         overflow: hidden;
-        border: 0.5px solid #1e1e1e;
+        border: 1px solid rgba(255, 255, 255, 0.05);
         cursor: pointer;
-        background: none;
+        background: #1a1a1a;
         padding: 0;
-        transition: border-color 0.15s;
+        transition: all 0.2s;
     }
-    .game-card:hover { border-color: #c8a96e44; }
+
+    .game-card:hover {
+        border-color: var(--accent, #c8a96e);
+        transform: scale(1.02);
+    }
 
     .game-card-bg {
         position: absolute;
@@ -190,7 +317,6 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #1a1a1a;
     }
     .game-card-bg img { width: 100%; height: 100%; object-fit: cover; }
     .game-placeholder { font-size: 28px; }
@@ -204,35 +330,35 @@
     .game-card-info {
         position: absolute;
         bottom: 0; left: 0; right: 0;
-        padding: 8px 10px;
+        padding: 10px;
     }
 
     .game-card-title {
         font-size: 11px;
-        font-weight: 500;
-        color: #e0e0e0;
+        font-weight: 700;
+        color: #fff;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        margin-bottom: 5px;
+        margin-bottom: 6px;
     }
 
     .game-card-bar {
-        height: 2px;
-        background: #2a2a2a;
-        border-radius: 1px;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 2px;
         overflow: hidden;
-        margin-bottom: 3px;
+        margin-bottom: 4px;
     }
 
     .game-card-bar-fill {
         height: 100%;
-        background: #4caf6e;
-        border-radius: 1px;
+        background: var(--accent, #c8a96e);
+        border-radius: 2px;
     }
 
-    .game-card-pct { font-size: 10px; color: #666; }
-    .game-card-pct.complete { color: #4caf6e; }
+    .game-card-pct { font-size: 10px; font-weight: 800; color: #6a7080; }
+    .game-card-pct.complete { color: var(--accent, #c8a96e); }
 
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }

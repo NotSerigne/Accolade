@@ -1,6 +1,4 @@
 <script>
-    import Sidebar from '$lib/Sidebar.svelte';
-    import Topbar from '$lib/Topbar.svelte';
     import GamePage from '$lib/GamePage.svelte';
     import { page } from '$app/state';
     import { games } from '$lib/stores/Games.js';
@@ -10,32 +8,17 @@
     let game = $derived($games.find(g => String(g.steam_id) === page.params.id) ?? null);
 </script>
 
-<div class="app-container">
-    <Sidebar />
-    <Topbar />
-    <main class="main-slot">
-        <GamePage {game} />
-    </main>
-</div>
+<main class="game-main">
+    <GamePage {game} />
+</main>
 
 <style>
-    .app-container {
-        display: grid;
-        grid-template-columns: 72px minmax(0, 1fr);
-        grid-template-rows: 56px 1fr;
-        height: 100vh;
-        gap: 8px;
-        padding: 8px;
-        overflow: hidden;
-    }
-
-    .main-slot {
-        grid-column: 2 / 3;
-        grid-row: 2 / 3;
+    .game-main {
         background: #161616;
         border-radius: 12px;
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        height: 100%;
     }
 </style>

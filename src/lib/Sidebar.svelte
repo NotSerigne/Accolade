@@ -20,6 +20,24 @@
         goto('/');
     }
 
+    function goStats(): void {
+        selectedGameId.set(null);
+        settingsOpen.set(false);
+        goto('/stats');
+    }
+
+    function goObjectives(): void {
+        selectedGameId.set(null);
+        settingsOpen.set(false);
+        goto('/objectives');
+    }
+
+    function goJournal(): void {
+        selectedGameId.set(null);
+        settingsOpen.set(false);
+        goto('/journal');
+    }
+
     function goSettings(): void {
         settingsOpen.set(true);
     }
@@ -59,20 +77,32 @@
         // Priority 4: header image as fallback
         if (game.header_image_url) return game.header_image_url;
 
-        return '';
+        // Final Fallback: Steam API header image (Cloudflare)
+        return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
     function onIconError(name: string, steamId: number) {
         return (e: Event) => {
             const t = e.target as HTMLImageElement;
-            console.error('ICON FAILED:', name, t.src);
-            t.onerror = null; // stop la cascade
-            t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(steamId))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
+            const currentSrc = t.src;
+
+            // Si on a déjà essayé le header et que ça a échoué, on passe aux initiales
+            if (currentSrc.includes('header.jpg')) {
+                t.onerror = null;
+                t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(steamId))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
+            } else {
+                // Sinon on tente le header
+                t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamId}/header.jpg`;
+            }
         };
     }
 
     let pathname = $derived(String(page.url.pathname));
     let isHomeActive = $derived(pathname === '/');
+    let isStatsActive = $derived(pathname === '/stats');
+    let isObjectivesActive = $derived(pathname === '/objectives');
+    let isJournalActive = $derived(pathname === '/journal');
+
     let isSettingsActive = $derived($settingsOpen);
     let sortedGames = $derived.by(() => {
         return [...$games].sort((a, b) =>
@@ -105,8 +135,56 @@
 
     <div class="divider"></div>
 
+    <div class="nav-wrap">
+        <div class="pill" class:visible={isStatsActive}></div>
+        <button
+                class="game-slot nav-btn"
+                class:active={isStatsActive}
+                onclick={goStats}
+                title="Statistiques"
+        >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+                <path d="M22 12A10 10 0 0 0 12 2v10z" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="nav-wrap">
+        <div class="pill" class:visible={isObjectivesActive}></div>
+        <button
+                class="game-slot nav-btn"
+                class:active={isObjectivesActive}
+                onclick={goObjectives}
+                title="Objectifs"
+        >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v8M8 12h8" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="nav-wrap">
+        <div class="pill" class:visible={isJournalActive}></div>
+        <button
+                class="game-slot nav-btn"
+                class:active={isJournalActive}
+                onclick={goJournal}
+                title="Journal"
+        >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="divider"></div>
+
     <!-- Icônes des jeux détectés -->
     <div class="games-list">
+
         {#each sortedGames as game (game.steam_id)}
             {@const isActive = $selectedGameId === game.steam_id}
             <div class="nav-wrap">
@@ -177,8 +255,9 @@
     .sidebar {
         grid-column: 1 / 2;
         grid-row: 1 / 3;
+        height: 100%;
         background: #0e0e0e;
-        border-radius: 12px;
+        border-radius: 0;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -244,6 +323,12 @@
     .home-slot.active,
     .home-slot:hover { color: var(--accent, #c8a96e); }
 
+    .nav-btn { background: #1a1a1a; }
+    .nav-btn.active,
+    .nav-btn:hover { color: var(--accent, #c8a96e); }
+    .nav-btn[title="Journal"].active,
+    .nav-btn[title="Journal"]:hover { color: var(--accent, #c8a96e); }
+
     .game-icon-img { width: 100%; height: 100%; object-fit: cover; }
 
     .game-icon-fallback {
@@ -289,30 +374,31 @@
     /* ── User panel flottant ── */
     .user-panel {
         position: absolute;
-        bottom: 9px;
-        left: 9px;
-        width: 292.5px;
+        bottom: 20px;
+        left: 16px;
+        width: 320px;
         background: #1a1a1a;
         border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 11.25px;
-        padding: 11.25px 13.5px;
+        border-radius: 16px;
+        padding: 16px 20px;
         display: flex;
         align-items: center;
-        gap: 11.25px;
+        gap: 16px;
         z-index: 100;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+        box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+        backdrop-filter: blur(12px);
     }
 
     .avatar {
-        width: 40.5px;
-        height: 40.5px;
+        width: 52px;
+        height: 52px;
         border-radius: 50%;
         background: var(--accent, #c8a96e);
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 13.5px;
+        font-size: 16px;
         font-weight: 700;
         color: #1a1400;
         object-fit: cover;
@@ -321,7 +407,7 @@
     .user-info { flex: 1; min-width: 0; }
 
     .user-name {
-        font-size: 15px;
+        font-size: 16px;
         font-weight: 700;
         color: #fff;
         white-space: nowrap;
@@ -330,21 +416,21 @@
     }
 
     .user-meta {
-        font-size: 12px;
+        font-size: 13px;
         color: #6a7080;
         white-space: nowrap;
-        margin-top: 1.5px;
+        margin-top: 2px;
     }
 
-    .user-actions { display: flex; align-items: center; gap: 6.75px; flex-shrink: 0; }
+    .user-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-    .watcher-dot { width: 9px; height: 9px; border-radius: 50%; background: #6a7080; transition: background 0.3s; }
+    .watcher-dot { width: 10px; height: 10px; border-radius: 50%; background: #6a7080; transition: background 0.3s; }
     .watcher-dot.active { background: #3ddc84; }
 
     .icon-btn {
-        width: 27px;
-        height: 27px;
-        border-radius: 6px;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
         background: transparent;
         border: none;
         cursor: pointer;

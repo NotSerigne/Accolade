@@ -47,7 +47,8 @@
             return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
         }
 
-        return '';
+        // Final Fallback: Steam API header image
+        return `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
     let searchPlaceholder = $derived('Rechercher un jeu ou un succes');
@@ -195,13 +196,6 @@
 </script>
 
 <header class="topbar">
-    <button class="topbar-icon-btn" title="Accueil" onclick={() => goto('/')}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            <polyline points="9 22 9 12 15 12 15 22"/>
-        </svg>
-    </button>
-
     <div class="topbar-search-wrap" bind:this={searchWrapEl}>
         <div class="topbar-search" role="search">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -293,6 +287,7 @@
         background: #161616;
         border-radius: 12px;
         padding: 0 16px;
+        height: 100%;
         display: flex;
         align-items: center;
         gap: 10px;

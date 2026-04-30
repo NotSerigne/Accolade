@@ -177,7 +177,7 @@ fn display_game_name(
 
 fn rarity_label(percentage: Option<f32>) -> String {
     match percentage {
-        Some(p) if p <= 0.1 => "Mythic".to_string(),
+        Some(p) if p <= 0.1 => "Mythique".to_string(),
         Some(p) if p <= 1.0 => "Légendaire".to_string(),
         Some(p) if p <= 3.0 => "Épique".to_string(),
         Some(p) if p <= 7.0 => "Très rare".to_string(),

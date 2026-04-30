@@ -21,7 +21,7 @@
 
     // Palette identique à GamePage.svelte / MainContent.svelte
     const RARITY_COLORS: Record<string, { accent: string; glow: string }> = {
-        'Mythic':     { accent: '#ff3b5c', glow: 'rgba(255, 59, 92, 0.55)'   },
+        'Mythique':     { accent: '#ff3b5c', glow: 'rgba(255, 59, 92, 0.55)'   },
         'Légendaire': { accent: '#ffd85a', glow: 'rgba(255, 216, 90, 0.55)'  },
         'Épique':     { accent: '#a855f7', glow: 'rgba(168, 85, 247, 0.55)'  },
         'Très rare':  { accent: '#f4b860', glow: 'rgba(244, 184, 96, 0.55)'  },

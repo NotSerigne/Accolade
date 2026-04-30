@@ -221,7 +221,7 @@
     function rarityLabel(pct: string): string {
         const n = parseFloat(pct);
         if (isNaN(n)) return '';
-        if (n <= 0.1) return 'Mythic';
+        if (n <= 0.1) return 'Mythique';
         if (n <= 1) return 'Légendaire'
         if (n <= 3)  return 'Épique';
         if (n <= 7)  return 'Très rare';
@@ -395,7 +395,7 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                             </svg>
-                            <input class="search-input" type="text" placeholder="Chercher un succès..." bind:value={search} />
+                            <input class="search-input" type="text" placeholder="Chercher un  fa..." bind:value={search} />
                             <span class="search-count">{filtered.length} / {totalCount}</span>
                         </div>
 
@@ -406,10 +406,18 @@
                         </select>
 
                         <button class="reveal-btn" class:active={revealed} onclick={() => (revealed = !revealed)}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-                            </svg>
-                            <span>Révélés</span>
+                            {#if revealed}
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <span>Révélés</span>
+                            {:else}
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                                </svg>
+                                <span>Cachés</span>
+                            {/if}
                         </button>
                     </div>
 
@@ -456,16 +464,7 @@
                                             <div class="ach-details">
                                                 <div class="ach-header-row">
                                                     <div class="ach-name" class:muted={isLocked}>
-                                                        {ach.name || ach.key}
-                                                        {#if showMaskedDescription}
-                                                            <span class="secret-badge">
-                                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                                                                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                                                                </svg>
-                                                                Caché
-                                                            </span>
-                                                        {/if}
+                                                        {isLocked && isSecret && !revealed ? 'Succès caché' : (ach.name || ach.key)}
                                                     </div>
                                                     {#if isUnlocked && ach.unlocked_time}
                                                         <div class="ach-date">{formatDate(ach.unlocked_time)}</div>
@@ -476,7 +475,7 @@
                                                     {#if showDescription}
                                                         <div class="ach-desc">{descText}</div>
                                                     {:else if showMaskedDescription}
-                                                        <div class="ach-desc italic">{descText || 'Description masquée'}</div>
+                                                        <div class="ach-desc italic">Description masquée</div>
                                                     {/if}
                                                 </div>
 
@@ -618,7 +617,7 @@
     .progress-stats { display: flex; align-items: baseline; justify-content: space-between; }
     .main-count { font-size: 32px; font-weight: 800; color: #fff; }
     .slash { color: #444; font-size: 20px; font-weight: 600; margin-left: 6px; }
-    .main-pct { font-size: 32px; font-weight: 900; color: #00e5ff; }
+    .main-pct { font-size: 32px; font-weight: 900; color: var(--accent, #00e5ff); }
     .progress-bar-track { height: 10px; background: rgba(255,255,255,0.05); border-radius: 5px; overflow: hidden; }
     .progress-bar-fill { height: 100%; background: #3ddc84; border-radius: 5px; transition: width 1s cubic-bezier(0.19, 1, 0.22, 1); }
 
@@ -652,7 +651,7 @@
         cursor: pointer; font-size: 13px; color: #6a7080; font-weight: 600;
         transition: all 0.25s;
     }
-    .tab.active { background: #0066cc; color: #fff; box-shadow: 0 4px 12px rgba(0, 102, 204, 0.4); }
+    .tab.active { background: var(--accent, #0066cc); color: #fff; box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #0066cc) 40%, transparent); }
     .tab:hover:not(.active) { color: #fff; background: rgba(255,255,255,0.05); }
 
     .search-wrap {
@@ -665,16 +664,25 @@
     .search-count { font-size: 12px; color: #333; font-weight: 700; }
 
     .sort-select {
-        height: 38px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);
+        height: 38px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 10px; padding: 0 14px; font-size: 13px; color: #fff; outline: none; cursor: pointer;
         color-scheme: dark;
+        transition: border-color 0.2s, background 0.2s;
     }
+    .sort-select:hover { background: rgba(255, 255, 255, 0.08); }
+    .sort-select:focus { border-color: var(--accent, #0066cc); }
+    .sort-select option { background: #1a1a1a; color: #fff; }
 
     .reveal-btn {
-        height: 38px; padding: 0 16px; background: rgba(0, 102, 204, 0.1);
-        border: 1px solid rgba(0, 102, 204, 0.3); border-radius: 10px;
-        font-size: 13px; color: #00e5ff; cursor: pointer; display: flex; align-items: center; gap: 8px;
+        height: 38px; padding: 0 16px; background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+        font-size: 13px; color: #6a7080; cursor: pointer; display: flex; align-items: center; gap: 8px;
         transition: all 0.2s;
+    }
+    .reveal-btn.active {
+        background: color-mix(in srgb, var(--accent, #0066cc) 12%, transparent);
+        border-color: color-mix(in srgb, var(--accent, #0066cc) 30%, transparent);
+        color: var(--accent, #00e5ff);
     }
     .reveal-btn span { font-weight: 600; }
 
@@ -700,29 +708,10 @@
 
     .ach-details { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; height: 68px; }
     .ach-header-row { display: flex; justify-content: space-between; align-items: center; line-height: 1; }
-    .ach-name {
-        font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -0.2px;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        display: flex; align-items: center; gap: 8px;
-    }
+    .ach-name { font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -0.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ach-name.muted { color: #444; }
-
-    .secret-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        background: rgba(255, 255, 255, 0.05);
-        border: 0.5px solid rgba(255, 255, 255, 0.1);
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 9px;
-        color: #6a7080;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        font-weight: 700;
-    }
-
     .ach-date { font-size: 10px; color: #333; font-weight: 700; letter-spacing: 0.5px; }
+
     .ach-desc-row { overflow: hidden; }
     .ach-desc { font-size: 12px; color: #9ca3af; line-height: 1.3; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .ach-desc.italic { font-style: italic; opacity: 0.5; }

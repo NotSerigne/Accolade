@@ -9,6 +9,8 @@
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
     import { listen } from '@tauri-apps/api/event';
+    import Sidebar from '$lib/Sidebar.svelte';
+    import Topbar from '$lib/Topbar.svelte';
 
     let { children } = $props();
 
@@ -40,7 +42,17 @@
     <link rel="icon" href={favicon} />
 </svelte:head>
 
-{@render children()}
+<div class="app-container">
+    <div class="sidebar-slot">
+        <Sidebar />
+    </div>
+    <div class="topbar-slot">
+        <Topbar />
+    </div>
+    <div class="content-slot">
+        {@render children()}
+    </div>
+</div>
 
 {#if $settingsOpen}
     <div class="settings-overlay">
@@ -57,6 +69,37 @@
 {/if}
 
 <style>
+    .app-container {
+        display: grid;
+        grid-template-columns: 72px 1fr;
+        grid-template-rows: 64px 1fr;
+        height: 100vh;
+        gap: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #000;
+    }
+
+    .sidebar-slot {
+        grid-column: 1 / 2;
+        grid-row: 1 / 3;
+    }
+
+    .topbar-slot {
+        grid-column: 2 / 3;
+        grid-row: 1 / 2;
+        padding: 8px 8px 4px 0;
+    }
+
+    .content-slot {
+        grid-column: 2 / 3;
+        grid-row: 2 / 3;
+        padding: 4px 8px 8px 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
     .settings-overlay {
         position: fixed;
         inset: 0;

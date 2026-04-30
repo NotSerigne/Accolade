@@ -16,21 +16,17 @@
         if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
             return game.steamgrid_icon_url;
         }
-        
+
         // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
         if (game.game_icon && game.game_icon.startsWith('http')) {
             return game.game_icon;
         }
-        
+
         // Priority 3: header image
         if (game.header_image_url) return game.header_image_url;
-        
-        // Priority 4: game_icon if it's a valid hash (Steam client icon)
-        if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
-            return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
-        }
-        
-        return '';
+
+        // Final Fallback: Steam API header image (Cloudflare)
+        return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
     let totalAchievements = $derived(
@@ -133,7 +129,7 @@
     <h2 class="section-title">Répartition Rareté</h2>
 
     <ul class="rarity-list">
-        <li><span class="dot mythic"></span><span class="rarity-label">Mythic</span><span class="rarity-count">{rarityBreakdown.mythic}</span></li>
+        <li><span class="dot mythic"></span><span class="rarity-label">Mythique</span><span class="rarity-count">{rarityBreakdown.mythic}</span></li>
         <li><span class="dot legendary"></span><span class="rarity-label">Légendaire</span><span class="rarity-count">{rarityBreakdown.legendary}</span></li>
         <li><span class="dot epic"></span><span class="rarity-label">Épique</span><span class="rarity-count">{rarityBreakdown.epic}</span></li>
         <li><span class="dot very-rare"></span><span class="rarity-label">Très rare</span><span class="rarity-count">{rarityBreakdown.veryRare}</span></li>
@@ -147,7 +143,17 @@
     <ul class="completed-list">
         {#each recentlyCompleted as game}
             <li class="completed-item">
-                <img src={getGameIcon(game)} alt={game.name} class="game-icon" />
+                <img
+                    src={getGameIcon(game)}
+                    alt={game.name}
+                    class="game-icon"
+                    onerror={(e) => {
+                        const t = e.target as HTMLImageElement;
+                        if (!t.src.includes('header.jpg')) {
+                            t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+                        }
+                    }}
+                />
                 <div class="completed-info">
                     <span class="completed-name">{game.name}</span>
                     <span class="completed-sub">
@@ -162,8 +168,6 @@
 
 <style>
     .stats-panel {
-        grid-column: 3 / 4;
-        grid-row: 2 / 3;
         background: #161616;
         border-radius: 12px;
         padding: 24px;
@@ -171,6 +175,7 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
+        height: 100%;
     }
 
     .section-title {
@@ -204,7 +209,7 @@
     .stat-value {
         font-size: 32px;
         font-weight: 700;
-        color: #c8a96e;
+        color: var(--accent, #c8a96e);
         line-height: 1;
     }
 
@@ -296,7 +301,7 @@
 
     .completed-sub {
         font-size: 11px;
-        color: #4caf6e;
+        color: var(--accent, #4caf6e);
     }
 
     ::-webkit-scrollbar { width: 4px; }

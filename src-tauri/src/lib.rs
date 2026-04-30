@@ -168,6 +168,14 @@ pub(crate) async fn enrich_games_with_steam(games: &mut Vec<Game>, api_key: &str
         }
         if !metadata.header_image_url.is_empty() {
             game.header_image_url = metadata.header_image_url;
+        } else {
+            game.header_image_url = format!(
+                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
+                steam_id
+            );
+        }
+        if !metadata.game_icon_url.is_empty() {
+            game.game_icon = metadata.game_icon_url;
         }
         if !metadata.background_image_url.is_empty() {
             game.background_image_url = metadata.background_image_url;
