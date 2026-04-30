@@ -8,8 +8,8 @@
         completionpercentage?: number;
         unlocked?: number;
         total?: number;
-        unlockedAt?: string; // ISO string ou timestamp
-    } 
+        unlocked_time?: number; // Timestamp en secondes
+    }
 
     type Position = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
 
@@ -47,11 +47,11 @@
     );
 
     const formattedDate = $derived(() => {
-        if (!achievement?.unlockedAt) return null;
-        const d = new Date(achievement.unlockedAt);
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        if (!achievement?.unlocked_time) return null;
+        const d = new Date(achievement.unlocked_time * 1000);
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
             + ' · '
-            + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     });
 
     const animationClass = $derived(() => {

@@ -185,6 +185,7 @@
         padding: 12px 0 0;
         position: relative;
         overflow: visible;
+        z-index: 1000;
     }
 
     .nav-wrap {

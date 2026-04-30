@@ -23,7 +23,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
         .lock()
         .map(|gs| {
             gs.iter()
-                .filter(|g| g.steam_id != 0)
+                .filter(|g| g.steam_id != 0 && !g.achievements.is_empty())
                 .cloned()
                 .collect::<Vec<Game>>()
         })
@@ -94,6 +94,32 @@ pub(crate) async fn sync_steam_metadata(
         cloned_games.len()
     );
 
+    // 0. Rescanner les jeux locaux (crackés)
+    let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
+        Box::new(crate::emulators::goldberg::Parser),
+        Box::new(crate::emulators::empress::Parser),
+        Box::new(crate::emulators::onlinefix::Parser),
+        Box::new(crate::emulators::rune::Parser),
+        Box::new(crate::emulators::codex::Parser),
+    ];
+    let local_games = crate::emulators::game_scanner(parsers);
+    let mut existing_ids: HashSet<u32> = cloned_games.iter().map(|g| g.steam_id).collect();
+    let mut added_local = 0;
+
+    for lg in local_games {
+        if !existing_ids.contains(&lg.steam_id) {
+            cloned_games.push(lg.clone());
+            existing_ids.insert(lg.steam_id);
+            added_local += 1;
+        }
+    }
+    if added_local > 0 {
+        println!(
+            "[DEBUG][sync_steam_metadata] Added {} new local cracked games",
+            added_local
+        );
+    }
+
     // 1. Ajouter les jeux possédés si steam_id est fourni
     let mut added_steam_games = false;
     if !steam_id.trim().is_empty() && !effective_api_key.is_empty() {
@@ -107,7 +133,6 @@ pub(crate) async fn sync_steam_metadata(
                     "[DEBUG][sync_steam_metadata] Found {} owned games",
                     owned.len()
                 );
-                let existing_ids: HashSet<u32> = cloned_games.iter().map(|g| g.steam_id).collect();
                 let mut added_count = 0;
                 for og in owned {
                     if !existing_ids.contains(&og.appid) {
@@ -126,6 +151,7 @@ pub(crate) async fn sync_steam_metadata(
                             path_buf: String::new(),
                             emulator: Emulator::Steam,
                         });
+                        existing_ids.insert(og.appid);
                         added_count += 1;
                         added_steam_games = true;
                     }
@@ -145,7 +171,7 @@ pub(crate) async fn sync_steam_metadata(
     }
 
     // Si on a ajouté des jeux, on met à jour l'état global immédiatement pour qu'ils apparaissent au moins en "squelette"
-    if added_steam_games {
+    if added_steam_games || added_local > 0 {
         if let Ok(mut games) = state.games.lock() {
             *games = cloned_games.clone();
         }
@@ -186,7 +212,7 @@ pub(crate) async fn sync_steam_metadata(
 
     let result: Vec<Game> = cloned_games
         .into_iter()
-        .filter(|g| g.steam_id != 0)
+        .filter(|g| g.steam_id != 0 && !g.achievements.is_empty())
         .collect();
     println!(
         "[DEBUG][sync_steam_metadata] Returning {} games",

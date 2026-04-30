@@ -22,6 +22,7 @@
         height: 100vh;
         gap: 8px;
         padding: 8px;
+        overflow: hidden;
     }
 
     .main-slot {

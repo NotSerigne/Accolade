@@ -74,7 +74,7 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
     merged
 }
 
-pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str, steam_id: &str) {
+pub(crate) async fn enrich_games_with_steam(games: &mut Vec<Game>, api_key: &str, steam_id: &str) {
     if api_key.trim().is_empty() || games.is_empty() {
         return;
     }
@@ -85,17 +85,18 @@ pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str, s
     let api_key_str = api_key.to_string();
     let steam_id_str = steam_id.to_string();
 
-    let index_by_id: HashMap<u32, usize> = games
+    let jobs: Vec<(u32, crate::achievements::models::Emulator, Vec<Achievement>)> = games
         .iter()
-        .enumerate()
-        .map(|(idx, game)| (game.steam_id, idx))
-        .collect();
-    let jobs: Vec<(u32, Vec<Achievement>)> = games
-        .iter()
-        .map(|game| (game.steam_id, game.achievements.clone()))
+        .map(|game| {
+            (
+                game.steam_id,
+                game.emulator.clone(),
+                game.achievements.clone(),
+            )
+        })
         .collect();
 
-    let updates = stream::iter(jobs.into_iter().map(|(steam_id, local_state)| {
+    let updates = stream::iter(jobs.into_iter().map(|(steam_id, emulator, local_state)| {
         let client = client.clone();
         let api_key = api_key_str.clone();
         let steam_id_inner = steam_id_str.clone();
@@ -104,34 +105,51 @@ pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str, s
                 .await
                 .ok();
 
-            let player_achievements = if !steam_id_inner.is_empty() {
-                fetch_player_achievements(&api_key, &steam_id_inner, steam_id)
-                    .await
-                    .ok()
+            let player_achievements_res = if !steam_id_inner.is_empty() {
+                Some(fetch_player_achievements(&api_key, &steam_id_inner, steam_id).await)
             } else {
                 None
             };
 
-            (steam_id, local_state, metadata, player_achievements)
+            (
+                steam_id,
+                emulator,
+                local_state,
+                metadata,
+                player_achievements_res,
+            )
         }
     }))
     .buffer_unordered(STEAM_METADATA_CONCURRENCY)
     .collect::<Vec<_>>()
     .await;
 
-    for (steam_id, local_state, metadata, player_achievements) in updates {
+    let mut to_remove = HashSet::new();
+
+    for (steam_id, emulator, local_state, metadata, player_achievements_res) in updates {
+        if let Some(Err(err)) = &player_achievements_res {
+            if emulator == crate::achievements::models::Emulator::Steam {
+                println!(
+                    "[DEBUG] Removing Steam Game AppID {} due to API error: {}",
+                    steam_id, err
+                );
+                to_remove.insert(steam_id);
+                continue;
+            }
+        }
+
         let Some(metadata) = metadata else {
             continue;
         };
-        let Some(index) = index_by_id.get(&steam_id).copied() else {
+
+        let Some(game) = games.iter_mut().find(|g| g.steam_id == steam_id) else {
             continue;
         };
 
-        let game = &mut games[index];
         let mut merged_achievements = merge_schema_with_local(metadata.achievements, &local_state);
 
         // Appliquer les achievements du joueur si disponibles
-        if let Some(pa) = player_achievements {
+        if let Some(Ok(pa)) = player_achievements_res {
             for ach in &mut merged_achievements {
                 if let Some((unlocked, time)) = pa.get(&ach.key) {
                     if *unlocked {
@@ -155,6 +173,8 @@ pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str, s
             game.background_image_url = metadata.background_image_url;
         }
     }
+
+    games.retain(|g| !to_remove.contains(&g.steam_id));
 }
 
 async fn fetch_sgdb_icon(
@@ -238,6 +258,8 @@ pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             dotenv::dotenv().ok();

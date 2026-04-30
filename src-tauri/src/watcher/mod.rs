@@ -7,7 +7,7 @@ use notify::{recommended_watcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::Emitter;
 use tauri::Manager;
 
@@ -23,6 +23,7 @@ pub struct AchievementNotifPayload {
     #[serde(default)]
     pub test: bool,
     pub is_platinum: bool,
+    pub unlocked_time: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -30,14 +31,6 @@ pub struct AchievementsUpdatedPayload {
     pub steam_id: u32,
     pub achievements: Vec<Achievement>,
     pub achievements_total: u32,
-}
-
-fn unlocked_keys(achievements: &[Achievement]) -> HashSet<String> {
-    achievements
-        .iter()
-        .filter(|achievement| achievement.unlocked || achievement.unlocked_time.is_some())
-        .map(|achievement| achievement.key.trim().to_lowercase())
-        .collect()
 }
 
 fn live_keys(achievements: &[Achievement]) -> HashSet<String> {
@@ -67,8 +60,23 @@ fn merge_live_achievements(
             seen_schema_keys.insert(key.clone());
 
             if let Some(live_ach) = live_map.get(&key) {
-                s.unlocked = live_ach.unlocked || live_ach.unlocked_time.is_some();
-                s.unlocked_time = live_ach.unlocked_time;
+                // On fait confiance à l'état du fichier de l'émulateur.
+                s.unlocked = live_ach.unlocked;
+                if live_ach.unlocked {
+                    if let Some(t) = live_ach.unlocked_time {
+                        if t > 0 {
+                            s.unlocked_time = Some(t);
+                        } else if s.unlocked_time.is_none() {
+                            s.unlocked_time = Some(0);
+                        }
+                    } else if s.unlocked_time.is_none() {
+                        s.unlocked_time = Some(0);
+                    }
+                } else {
+                    s.unlocked_time = None;
+                }
+
+                // Mise à jour des métadonnées si elles manquent
                 if s.name.is_empty() && !live_ach.name.is_empty() {
                     s.name = live_ach.name.clone();
                 }
@@ -78,19 +86,13 @@ fn merge_live_achievements(
                 if s.icon.is_empty() && !live_ach.icon.is_empty() {
                     s.icon = live_ach.icon.clone();
                 }
-                if s.icon_gray.is_empty() && !live_ach.icon_gray.is_empty() {
-                    s.icon_gray = live_ach.icon_gray.clone();
-                }
-                if !live_ach.rarity.is_empty() {
-                    s.rarity = live_ach.rarity.clone();
-                }
-                if !live_ach.completionpercentage.is_empty() {
-                    s.completionpercentage = live_ach.completionpercentage.clone();
-                }
             } else if previous_live_keys.contains(&key) && !current_live_keys.contains(&key) {
+                // Le succès a été physiquement retiré du fichier local, on le verrouille.
                 s.unlocked = false;
                 s.unlocked_time = None;
             }
+            // S'il n'est pas dans le fichier local et n'y était pas avant, on ne touche à rien
+            // (il peut avoir été débloqué via Steam).
 
             s
         })
@@ -187,52 +189,70 @@ fn rarity_label(percentage: Option<f32>) -> String {
 }
 
 pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
-    const RESCAN_DEBOUNCE_MS: u64 = 400;
-
     let (tx, rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
         let mut watcher = recommended_watcher(tx).unwrap();
         let mut unlocked_by_game: HashMap<u32, HashSet<String>> = games
             .iter()
-            .map(|game| (game.steam_id, unlocked_keys(&game.achievements)))
+            .map(|game| {
+                let unlocked = game
+                    .achievements
+                    .iter()
+                    .filter(|a| a.unlocked || a.unlocked_time.is_some())
+                    .map(|a| a.key.trim().to_lowercase())
+                    .collect();
+                (game.steam_id, unlocked)
+            })
             .collect();
         let mut live_keys_by_game: HashMap<u32, HashSet<String>> = games
             .iter()
             .map(|game| (game.steam_id, live_keys(&game.achievements)))
             .collect();
-        let mut last_scan_by_game: HashMap<u32, Instant> = HashMap::new();
+
         let mut game_name_cache: HashMap<u32, String> = HashMap::new();
         let mut api_lookup_attempted: HashSet<u32> = HashSet::new();
 
         for game in &games {
             let path = std::path::Path::new(&game.path_buf);
-            let _ = watcher.watch(path, RecursiveMode::Recursive);
+            if path.exists() {
+                let _ = watcher.watch(path, RecursiveMode::Recursive);
+            }
         }
 
         let _ = app_handle.emit("watcher-status", true);
 
-        while let Ok(Ok(event)) = rx.recv() {
+        // Boucle avec Debounce robuste (accumulation d'événements)
+        while let Ok(Ok(first_event)) = rx.recv() {
+            let mut paths_changed = HashSet::new();
+            for p in first_event.paths {
+                paths_changed.insert(p);
+            }
+
+            // On attend 200ms pour laisser le temps aux éditeurs de texte de finir leur écriture (truncate + write)
+            std::thread::sleep(Duration::from_millis(200));
+
+            // On draine tous les autres événements arrivés entre temps
+            while let Ok(Ok(evt)) = rx.try_recv() {
+                for p in evt.paths {
+                    paths_changed.insert(p);
+                }
+            }
+
             for game in &games {
                 let game_path = std::path::Path::new(&game.path_buf);
 
-                if event.paths.iter().any(|p| p.starts_with(game_path)) {
-                    let now = Instant::now();
-                    if let Some(last) = last_scan_by_game.get(&game.steam_id) {
-                        if now.duration_since(*last) < Duration::from_millis(RESCAN_DEBOUNCE_MS) {
-                            continue;
-                        }
-                    }
-                    last_scan_by_game.insert(game.steam_id, now);
-
+                if !game.path_buf.is_empty()
+                    && paths_changed.iter().any(|p| p.starts_with(game_path))
+                {
                     let achievements = match_emulator(game.clone());
                     let current_live_keys = live_keys(&achievements);
                     let previous_live_keys = live_keys_by_game
                         .get(&game.steam_id)
                         .cloned()
                         .unwrap_or_default();
-                    let current_unlocked = unlocked_keys(&achievements);
                     let previous_unlocked = unlocked_by_game.entry(game.steam_id).or_default();
+
                     let (ui_achievements, ui_total) = {
                         let state = app_handle.state::<AppState>();
                         state
@@ -261,17 +281,26 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                                 (fallback, total)
                             })
                     };
-                    let unlocked_count = ui_achievements
-                        .iter()
-                        .filter(|a| a.unlocked || a.unlocked_time.is_some())
-                        .count() as u32;
 
-                    let newly_unlocked: Vec<&Achievement> = achievements
+                    // On détermine l'état "unlocked" final calculé pour UI
+                    let mut true_current_unlocked = HashSet::new();
+                    for a in &ui_achievements {
+                        if a.unlocked || a.unlocked_time.is_some() {
+                            true_current_unlocked.insert(a.key.trim().to_lowercase());
+                        }
+                    }
+
+                    let unlocked_count = true_current_unlocked.len() as u32;
+
+                    // Les succès nouvellement débloqués sont ceux présents dans true_current_unlocked mais pas dans previous_unlocked
+                    let newly_unlocked: Vec<Achievement> = ui_achievements
                         .iter()
                         .filter(|a| {
                             let key = a.key.trim().to_lowercase();
-                            current_unlocked.contains(&key) && !previous_unlocked.contains(&key)
+                            true_current_unlocked.contains(&key)
+                                && !previous_unlocked.contains(&key)
                         })
+                        .cloned()
                         .collect();
 
                     if !newly_unlocked.is_empty() {
@@ -289,7 +318,7 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                                 display_name, game.steam_id, ach.key
                             );
 
-                            // Look up enriched Steam metadata from AppState (live, post-sync)
+                            // Cherche les métadonnées enrichies Steam dans AppState
                             let enriched = enriched_game_achievements.iter().find(|a| {
                                 a.key.trim().to_lowercase() == ach.key.trim().to_lowercase()
                             });
@@ -330,6 +359,7 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                                 total,
                                 test: false,
                                 is_platinum,
+                                unlocked_time: ach.unlocked_time,
                             };
 
                             let _ = app_handle.emit_to(
@@ -340,8 +370,10 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                         }
                     }
 
-                    *previous_unlocked = current_unlocked;
+                    // Mise à jour de l'état interne pour la prochaine itération
+                    *previous_unlocked = true_current_unlocked;
                     live_keys_by_game.insert(game.steam_id, current_live_keys);
+
                     let updated_payload = AchievementsUpdatedPayload {
                         steam_id: game.steam_id,
                         achievements: ui_achievements,
@@ -365,6 +397,7 @@ pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
         total: 50,
         test: true,
         is_platinum: false,
+        unlocked_time: Some(1714470000), // Example timestamp
     };
 
     let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);

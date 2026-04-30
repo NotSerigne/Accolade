@@ -21,11 +21,12 @@
 <style>
     .app-container {
         display: grid;
-        grid-template-columns: 72px 1fr;
+        grid-template-columns: 72px minmax(0, 1fr);
         grid-template-rows: 56px 1fr;
         height: 100vh;
         gap: 8px;
         padding: 8px;
+        overflow: hidden;
     }
 
     .main-slot {

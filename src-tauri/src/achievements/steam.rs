@@ -215,9 +215,8 @@ pub async fn fetch_player_achievements(
     api_key: &str,
     steam_id: &str,
     app_id: u32,
-) -> Result<HashMap<String, (bool, u64)>, reqwest::Error> {
+) -> Result<HashMap<String, (bool, u64)>, String> {
     let client = reqwest::Client::new();
-    // Correction : Utilisation de ISteamUserStats au lieu de ISteamUser
     let url = format!(
         "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/?appid={app_id}&key={api_key}&steamid={steam_id}"
     );
@@ -225,9 +224,11 @@ pub async fn fetch_player_achievements(
     let resp = client
         .get(url)
         .send()
-        .await?
+        .await
+        .map_err(|e| e.to_string())?
         .json::<PlayerAchievementsResponse>()
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
     let mut map = HashMap::new();
 
     if resp.playerstats.success {
@@ -241,6 +242,7 @@ pub async fn fetch_player_achievements(
             "[DEBUG][fetch_player_achievements] Steam API Error for AppID {}: {}",
             app_id, err
         );
+        return Err(err);
     }
 
     Ok(map)
@@ -397,12 +399,4 @@ pub async fn fetch_steam_metadata_with_client(
         background_image_url,
         achievements,
     })
-}
-
-pub async fn fetch_steam_metadata(
-    steam_id: u32,
-    api_key: &str,
-) -> Result<SteamMetadata, reqwest::Error> {
-    let client = reqwest::Client::new();
-    fetch_steam_metadata_with_client(&client, steam_id, api_key).await
 }
