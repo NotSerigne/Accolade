@@ -3,18 +3,32 @@
     import favicon from '$lib/assets/favicon.svg';
     import Settings from '$lib/Settings.svelte';
     import { loadSettings, settings } from '$lib/stores/settings.js';
-    import { settingsOpen } from '$lib/stores/ui.js';
-    import { syncSteamMetadata } from '$lib/stores/Games.js';
+    import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
+    import { setupAchievementsRealtimeSync, syncSteamMetadata } from '$lib/stores/Games.js';
+    import { refreshSteamUser } from '$lib/stores/user.js';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
+    import { listen } from '@tauri-apps/api/event';
 
     let { children } = $props();
 
     onMount(() => {
+        setupAchievementsRealtimeSync();
+
+        const unlisten = listen<boolean>('watcher-status', (event) => {
+            watcherActive.set(event.payload);
+        });
+
         void (async () => {
             await loadSettings();
-            await syncSteamMetadata(get(settings).steamApiKey);
+            const s = get(settings);
+            await refreshSteamUser();
+            await syncSteamMetadata(s.steamApiKey, s.steamGridDbApiKey);
         })();
+
+        return () => {
+            unlisten.then(u => u());
+        };
     });
 
     function closeSettings(): void {

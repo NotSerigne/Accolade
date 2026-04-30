@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Achievement {
-    pub key: String, // Nom de l'achievement du fichier
-    pub name: String, // Nom de l'achievement retourné par l'API Steam/serveur
+    pub key: String,    // Nom de l'achievement du fichier
+    pub name: String,   // Nom de l'achievement retourné par l'API Steam/serveur
     pub unlocked: bool, // True/False
     pub icon: String,
     pub icon_gray: String,
@@ -13,13 +13,14 @@ pub struct Achievement {
     pub hidden: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Emulator {
     Goldberg,
     Empress,
     Codex,
     OnlineFix,
-    Rune
+    Rune,
+    Steam,
 }
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Game {
@@ -32,5 +33,5 @@ pub struct Game {
     pub achievements_total: u32,
     pub achievements: Vec<Achievement>,
     pub path_buf: String,
-    pub emulator: Emulator
+    pub emulator: Emulator,
 }

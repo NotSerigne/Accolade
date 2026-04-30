@@ -13,3 +13,5 @@ export type AchievementJumpIntent = {
 
 export const achievementJumpIntent = writable<AchievementJumpIntent | null>(null);
 
+export const watcherActive = writable(false);
+export const isSyncing = writable(false);

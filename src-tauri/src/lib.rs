@@ -1,9 +1,10 @@
-use tauri::Manager;
+use crate::achievements::models::{Achievement, Game};
+use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata_with_client};
+use crate::emulators::{codex, empress, game_scanner, goldberg, onlinefix, rune, EmulatorParser};
+use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use crate::emulators::{EmulatorParser, goldberg, empress, onlinefix, rune, codex, game_scanner};
-use crate::achievements::steam::fetch_steam_metadata;
-use crate::achievements::models::{Achievement, Game};
+use tauri::{window::Color, Manager};
 
 pub struct AppState {
     pub(crate) games: Mutex<Vec<Game>>,
@@ -26,14 +27,34 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
             if let Some(live) = local_map.get(&key) {
                 Achievement {
                     key: s.key,
-                    name: if s.name.is_empty() { live.name.clone() } else { s.name },
+                    name: if s.name.is_empty() {
+                        live.name.clone()
+                    } else {
+                        s.name
+                    },
                     unlocked: live.unlocked,
-                    icon: if s.icon.is_empty() { live.icon.clone() } else { s.icon },
-                    icon_gray: if s.icon_gray.is_empty() { live.icon_gray.clone() } else { s.icon_gray },
+                    icon: if s.icon.is_empty() {
+                        live.icon.clone()
+                    } else {
+                        s.icon
+                    },
+                    icon_gray: if s.icon_gray.is_empty() {
+                        live.icon_gray.clone()
+                    } else {
+                        s.icon_gray
+                    },
                     unlocked_time: live.unlocked_time,
                     rarity: live.rarity.clone(),
-                    completionpercentage: if s.completionpercentage.is_empty() { live.completionpercentage.clone() } else { s.completionpercentage.clone() },
-                    desc: if s.desc.is_empty() { live.desc.clone() } else { s.desc },
+                    completionpercentage: if s.completionpercentage.is_empty() {
+                        live.completionpercentage.clone()
+                    } else {
+                        s.completionpercentage.clone()
+                    },
+                    desc: if s.desc.is_empty() {
+                        live.desc.clone()
+                    } else {
+                        s.desc
+                    },
                     hidden: s.hidden,
                 }
             } else {
@@ -53,51 +74,117 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
     merged
 }
 
-pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str) {
-    if api_key.trim().is_empty() {
+pub(crate) async fn enrich_games_with_steam(games: &mut [Game], api_key: &str, steam_id: &str) {
+    if api_key.trim().is_empty() || games.is_empty() {
         return;
     }
 
-    for game in games {
-        let local_state = game.achievements.clone();
-        if let Ok(metadata) = fetch_steam_metadata(game.steam_id, api_key).await {
-            game.achievements = merge_schema_with_local(metadata.achievements, &local_state);
-            game.achievements_total = game.achievements.len() as u32;
+    const STEAM_METADATA_CONCURRENCY: usize = 6;
 
-            if !metadata.name.is_empty() {
-                game.name = metadata.name;
+    let client = reqwest::Client::new();
+    let api_key_str = api_key.to_string();
+    let steam_id_str = steam_id.to_string();
+
+    let index_by_id: HashMap<u32, usize> = games
+        .iter()
+        .enumerate()
+        .map(|(idx, game)| (game.steam_id, idx))
+        .collect();
+    let jobs: Vec<(u32, Vec<Achievement>)> = games
+        .iter()
+        .map(|game| (game.steam_id, game.achievements.clone()))
+        .collect();
+
+    let updates = stream::iter(jobs.into_iter().map(|(steam_id, local_state)| {
+        let client = client.clone();
+        let api_key = api_key_str.clone();
+        let steam_id_inner = steam_id_str.clone();
+        async move {
+            let metadata = fetch_steam_metadata_with_client(&client, steam_id, &api_key)
+                .await
+                .ok();
+
+            let player_achievements = if !steam_id_inner.is_empty() {
+                fetch_player_achievements(&api_key, &steam_id_inner, steam_id)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+
+            (steam_id, local_state, metadata, player_achievements)
+        }
+    }))
+    .buffer_unordered(STEAM_METADATA_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    for (steam_id, local_state, metadata, player_achievements) in updates {
+        let Some(metadata) = metadata else {
+            continue;
+        };
+        let Some(index) = index_by_id.get(&steam_id).copied() else {
+            continue;
+        };
+
+        let game = &mut games[index];
+        let mut merged_achievements = merge_schema_with_local(metadata.achievements, &local_state);
+
+        // Appliquer les achievements du joueur si disponibles
+        if let Some(pa) = player_achievements {
+            for ach in &mut merged_achievements {
+                if let Some((unlocked, time)) = pa.get(&ach.key) {
+                    if *unlocked {
+                        ach.unlocked = true;
+                        ach.unlocked_time = Some(*time);
+                    }
+                }
             }
-            if !metadata.game_icon_url.is_empty() && game.game_icon.is_empty() {
-                game.game_icon = metadata.game_icon_url;
-            }
-            if !metadata.header_image_url.is_empty() {
-                game.header_image_url = metadata.header_image_url;
-            }
-            if !metadata.background_image_url.is_empty() {
-                game.background_image_url = metadata.background_image_url;
-            }
+        }
+
+        game.achievements = merged_achievements;
+        game.achievements_total = game.achievements.len() as u32;
+
+        if !metadata.name.is_empty() {
+            game.name = metadata.name;
+        }
+        if !metadata.header_image_url.is_empty() {
+            game.header_image_url = metadata.header_image_url;
+        }
+        if !metadata.background_image_url.is_empty() {
+            game.background_image_url = metadata.background_image_url;
         }
     }
 }
 
-async fn fetch_sgdb_icon(client: &reqwest::Client, steam_id: u32, api_key: &str, styles_filter: Option<&str>) -> Option<String> {
-    let mut icons_url = format!(
-        "https://www.steamgriddb.com/api/v2/icons/steam/{}?dimensions=256",
-        steam_id
+async fn fetch_sgdb_icon(
+    client: &reqwest::Client,
+    steam_id: u32,
+    api_key: &str,
+    styles: &str,
+) -> Option<String> {
+    let url = format!(
+        "https://www.steamgriddb.com/api/v2/icons/steam/{}?styles={}&dimensions=256",
+        steam_id, styles
     );
 
-    if let Some(styles) = styles_filter {
-        icons_url.push_str(&format!("&styles={}", styles));
-    }
-
     match client
-        .get(&icons_url)
+        .get(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .send()
         .await
     {
         Ok(resp) => match resp.json::<serde_json::Value>().await {
-            Ok(json) => json["data"][0]["thumb"].as_str().map(|s| s.to_string()),
+            Ok(json) => {
+                if let Some(data) = json["data"].as_array() {
+                    if !data.is_empty() {
+                        if let Some(icon_url) = data[0]["thumb"].as_str() {
+                            return Some(icon_url.to_string());
+                        }
+                    }
+                }
+                None
+            }
             Err(_) => None,
         },
         Err(_) => None,
@@ -105,30 +192,46 @@ async fn fetch_sgdb_icon(client: &reqwest::Client, steam_id: u32, api_key: &str,
 }
 
 pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
-    if api_key.trim().is_empty() {
+    if api_key.trim().is_empty() || games.is_empty() {
         return;
     }
 
+    const SGDB_CONCURRENCY: usize = 8;
+
     let client = reqwest::Client::new();
+    let api_key = api_key.to_string();
+    let index_by_id: HashMap<u32, usize> = games
+        .iter()
+        .enumerate()
+        .map(|(idx, game)| (game.steam_id, idx))
+        .collect();
+    let game_ids: Vec<u32> = games.iter().map(|game| game.steam_id).collect();
 
-    for game in games.iter_mut() {
-        if game.game_icon.is_empty() {
-            // Essaie official d'abord
-            if let Some(icon_url) = fetch_sgdb_icon(&client, game.steam_id, api_key, Some("official")).await {
-                println!("DEBUG sgdb icon (official): app_id={} url={}", game.steam_id, icon_url);
-                game.game_icon = icon_url;
-                continue;
-            }
-
-            // Fallback sur community si pas d'official
-            if let Some(icon_url) = fetch_sgdb_icon(&client, game.steam_id, api_key, None).await {
-                println!("DEBUG sgdb icon (community): app_id={} url={}", game.steam_id, icon_url);
-                game.game_icon = icon_url;
-                continue;
-            }
-
-            println!("DEBUG sgdb no icon for app_id={}", game.steam_id);
+    let updates = stream::iter(game_ids.into_iter().map(|steam_id| {
+        let client = client.clone();
+        let api_key = api_key.clone();
+        async move {
+            let official = fetch_sgdb_icon(&client, steam_id, &api_key, "official").await;
+            let icon_url = if official.is_some() {
+                official
+            } else {
+                fetch_sgdb_icon(&client, steam_id, &api_key, "").await
+            };
+            (steam_id, icon_url)
         }
+    }))
+    .buffer_unordered(SGDB_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    for (steam_id, icon_url) in updates {
+        let Some(icon_url) = icon_url else {
+            continue;
+        };
+        let Some(index) = index_by_id.get(&steam_id).copied() else {
+            continue;
+        };
+        games[index].steamgrid_icon_url = icon_url;
     }
 }
 
@@ -146,13 +249,8 @@ pub fn run() {
                 Box::new(codex::Parser),
             ];
 
-            let mut games = game_scanner(parsers);
+            let games = game_scanner(parsers);
             let api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
-
-            tauri::async_runtime::block_on(enrich_games_with_steam(&mut games, &api_key));
-
-            let sgdb_key = std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default();
-            tauri::async_runtime::block_on(apply_steamgriddb_icons(&mut games, &sgdb_key));
 
             let overlay_url = if cfg!(debug_assertions) {
                 "http://localhost:5173/overlay"
@@ -165,15 +263,17 @@ pub fn run() {
                 "achievement-overlay",
                 tauri::WebviewUrl::App(overlay_url.into()),
             )
-                .title("")
-                .inner_size(460.0, 160.0)
-                .position(30.0, 30.0)
-                .transparent(true)
-                .decorations(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .visible(false)
-                .build()?;
+            .title("")
+            .inner_size(460.0, 260.0)
+            .position(30.0, 30.0)
+            .transparent(true)
+            .decorations(false)
+            .shadow(false)
+            .background_color(Color(0, 0, 0, 0))
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .build()?;
 
             #[cfg(debug_assertions)]
             {
@@ -200,13 +300,15 @@ pub fn run() {
             commands::test_achievement_notif,
             commands::get_achievements,
             commands::get_all_games,
-            commands::sync_steam_metadata
+            commands::sync_steam_metadata,
+            commands::get_steam_user,
+            commands::get_steam_owned_games
         ])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application")
 }
 
-pub mod watcher;
-pub mod emulators;
 pub mod achievements;
 pub mod commands;
+pub mod emulators;
+pub mod watcher;

@@ -3,17 +3,23 @@ import { Store } from '@tauri-apps/plugin-store';
 import { writable } from 'svelte/store';
 
 export interface AppSettings {
+    steamId: string;
     steamApiKey: string;
+    steamGridDbApiKey: string;
     searchPaths: string[];
-    windowPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+    windowPosition: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+    notificationSound: string;
     theme: 'dark' | 'light';
     accentColor: string;
 }
 
 const DEFAULTS: AppSettings = {
+    steamId: '',
     steamApiKey: '',
+    steamGridDbApiKey: '',
     searchPaths: [],
     windowPosition: 'bottom-right',
+    notificationSound: 'Steam.mp3',
     theme: 'dark',
     accentColor: '#c8a96e',
 };
@@ -74,9 +80,15 @@ export async function loadSettings(): Promise<void> {
 
     const s = await getStore();
     const saved: Partial<AppSettings> = {};
+    const keys = Object.keys(DEFAULTS) as (keyof AppSettings)[];
+    const entries = await Promise.all(
+        keys.map(async (key) => {
+            const val = await s.get<AppSettings[typeof key]>(key);
+            return [key, val] as const;
+        })
+    );
 
-    for (const key of Object.keys(DEFAULTS) as (keyof AppSettings)[]) {
-        const val = await s.get<AppSettings[typeof key]>(key);
+    for (const [key, val] of entries) {
         if (val !== null && val !== undefined) {
             (saved as Record<string, unknown>)[key] = val;
         }
@@ -90,9 +102,7 @@ export async function loadSettings(): Promise<void> {
 
 export async function saveSettings(next: AppSettings): Promise<void> {
     const s = await getStore();
-    for (const [key, val] of Object.entries(next)) {
-        await s.set(key, val);
-    }
+    await Promise.all(Object.entries(next).map(([key, val]) => s.set(key, val)));
     await s.save();
     settings.set(next);
     applyTheme(next);

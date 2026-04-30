@@ -45,7 +45,16 @@
             .slice(0, 6);
     });
 
-    let recentGames = $derived($games.slice(0, 4));
+    let recentGames = $derived.by(() => {
+        return [...$games]
+            .filter((g: any) => (g.achievements ?? []).some((a: any) => a.unlocked || a.unlocked_time))
+            .sort((a: any, b: any) => {
+                const lastUnlockA = Math.max(...(a.achievements ?? []).map((x: any) => x.unlocked_time ?? 0), 0);
+                const lastUnlockB = Math.max(...(b.achievements ?? []).map((x: any) => x.unlocked_time ?? 0), 0);
+                return lastUnlockB - lastUnlockA;
+            })
+            .slice(0, 4);
+    });
 </script>
 
 <main class="main-content">

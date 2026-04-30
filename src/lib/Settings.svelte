@@ -4,12 +4,16 @@
     import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
     import { settingsOpen } from '$lib/stores/ui.js';
     import { syncSteamMetadata } from '$lib/stores/Games.js';
+    import { refreshSteamUser } from '$lib/stores/user.js';
 
     let draft = $state<AppSettings>({ ...get(settings) });
 
     let isSaving = $state(false);
     let saveError = $state('');
     let apiKeyVisible = $state(false);
+    let sgdbKeyVisible = $state(false);
+    let previewAudio = $state<HTMLAudioElement | null>(null);
+    let previewingSound = $state('');
 
     // Preset accent colors
     const accentPresets = [
@@ -21,12 +25,27 @@
         { label: 'Orange',   value: '#fb923c' },
     ];
 
+    const soundOptions = [
+        { value: 'none',              label: 'Aucun son' },
+        { value: 'PS4.mp3',           label: 'PS4' },
+        { value: 'PS5.mp3',           label: 'PS5' },
+        { value: 'PS5 Platinum.mp3',  label: 'PS5 Platinum' },
+        { value: 'Steam.mp3',         label: 'Steam' },
+        { value: 'Steamdeck.mp3',     label: 'Steam Deck' },
+        { value: 'Windows 8.mp3',     label: 'Windows 8' },
+        { value: 'Windows 10.mp3',    label: 'Windows 10' },
+        { value: 'Windows 11.mp3',    label: 'Windows 11' },
+        { value: 'Xbox.mp3',          label: 'Xbox' },
+        { value: 'Xbox Rare.mp3',     label: 'Xbox Rare' },
+    ] as const;
+
     const positionOptions = [
-        { value: 'top-left', label: 'Haut gauche', style: 'grid-area: 1 / 1 / 2 / 2;' },
-        { value: 'top-right', label: 'Haut droite', style: 'grid-area: 1 / 3 / 2 / 4;' },
-        { value: 'center', label: 'Centre', style: 'grid-area: 2 / 2 / 3 / 3;' },
-        { value: 'bottom-left', label: 'Bas gauche', style: 'grid-area: 3 / 1 / 4 / 2;' },
-        { value: 'bottom-right', label: 'Bas droite', style: 'grid-area: 3 / 3 / 4 / 4;' },
+        { value: 'top-left',     label: 'Haut gauche',  style: 'grid-area: 1 / 1 / 2 / 2;' },
+        { value: 'top-center',   label: 'Haut centre',  style: 'grid-area: 1 / 2 / 2 / 3;' },
+        { value: 'top-right',    label: 'Haut droite',  style: 'grid-area: 1 / 3 / 2 / 4;' },
+        { value: 'bottom-left',  label: 'Bas gauche',   style: 'grid-area: 3 / 1 / 4 / 2;' },
+        { value: 'bottom-center', label: 'Bas centre',  style: 'grid-area: 3 / 2 / 4 / 3;' },
+        { value: 'bottom-right', label: 'Bas droite',   style: 'grid-area: 3 / 3 / 4 / 4;' },
     ] as const;
 
 
@@ -49,12 +68,34 @@
         draft.windowPosition = value;
     }
 
+    function previewSound(filename: string): void {
+        if (previewAudio) {
+            previewAudio.pause();
+            previewAudio = null;
+        }
+        if (!filename || filename === 'none' || previewingSound === filename) {
+            previewingSound = '';
+            return;
+        }
+        const audio = new Audio(`/sounds/${encodeURIComponent(filename)}`);
+        audio.volume = 0.7;
+        previewAudio = audio;
+        previewingSound = filename;
+        audio.play().catch(() => {});
+        audio.addEventListener('ended', () => { previewingSound = ''; previewAudio = null; });
+    }
+
     async function testNotification(): Promise<void> {
         try {
+            // Ecriture immediate des settings de notif dans le store pour le test en temps reel
+            const { Store } = await import('@tauri-apps/plugin-store');
+            const store = await Store.load('settings.json');
+            await store.set('windowPosition', draft.windowPosition);
+            await store.set('notificationSound', draft.notificationSound);
+            await store.save();
+
             const { invoke } = await import('@tauri-apps/api/core');
-            console.log('[TEST] Avant invoke...');
             await invoke('test_achievement_notif');
-            console.log('[TEST] Invoke OK');
         } catch (error) {
             console.error('Test notification failed:', error);
             saveError = `Erreur lors du test: ${error instanceof Error ? error.message : String(error)}`;
@@ -69,14 +110,18 @@
 
         try {
             const next: AppSettings = {
+                steamId: draft.steamId,
                 steamApiKey: draft.steamApiKey,
+                steamGridDbApiKey: draft.steamGridDbApiKey,
                 searchPaths: [...draft.searchPaths],
                 windowPosition: draft.windowPosition,
+                notificationSound: draft.notificationSound,
                 theme: draft.theme,
                 accentColor: draft.accentColor,
             };
             await saveSettings(next);
-            await syncSteamMetadata(next.steamApiKey);
+            await refreshSteamUser();
+            await syncSteamMetadata(next.steamApiKey, next.steamGridDbApiKey);
             settingsOpen.set(false);
         } catch (error) {
             const details = error instanceof Error ? error.message : String(error);
@@ -123,8 +168,21 @@
 
             <div class="setting-row">
                 <div class="setting-info">
+                    <div class="setting-name">Steam ID (64 bits)</div>
+                    <div class="setting-desc">Pour afficher votre profil et vos jeux possédés</div>
+                </div>
+                <input
+                        class="text-input"
+                        type="text"
+                        placeholder="7656119XXXXXXXXXX"
+                        bind:value={draft.steamId}
+                />
+            </div>
+
+            <div class="setting-row" style="margin-top: 14px;">
+                <div class="setting-info">
                     <div class="setting-name">Clé API Steam</div>
-                    <div class="setting-desc">Nécessaire pour récupérer les noms et icônes des succès</div>
+                    <div class="setting-desc">Nécessaire pour récupérer les succès et les infos profil</div>
                 </div>
                 <div class="api-key-wrap">
                     <input
@@ -132,28 +190,61 @@
                             type={apiKeyVisible ? 'text' : 'password'}
                             placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
                             bind:value={draft.steamApiKey}
-                    />
-                    <button
-                            class="toggle-btn"
-                            onclick={() => (apiKeyVisible = !apiKeyVisible)}
-                            title={apiKeyVisible ? 'Masquer' : 'Afficher'}
-                    >
-                        {#if apiKeyVisible}
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                                <line x1="1" y1="1" x2="23" y2="23"/>
-                            </svg>
-                        {:else}
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                <circle cx="12" cy="12" r="3"/>
-                            </svg>
-                        {/if}
-                    </button>
-                </div>
-            </div>
-        </section>
+                            />
+                            <button
+                                    class="toggle-btn"
+                                    onclick={() => (apiKeyVisible = !apiKeyVisible)}
+                                    title={apiKeyVisible ? 'Masquer' : 'Afficher'}
+                            >
+                                {#if apiKeyVisible}
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                        <line x1="1" y1="1" x2="23" y2="23"/>
+                                    </svg>
+                                {:else}
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                        <circle cx="12" cy="12" r="3"/>
+                                    </svg>
+                                {/if}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="setting-row" style="margin-top: 14px;">
+                        <div class="setting-info">
+                            <div class="setting-name">Clé API SteamGridDB</div>
+                            <div class="setting-desc">Optionnel — pour les icones de jeux manquantes</div>
+                        </div>
+                        <div class="api-key-wrap">
+                            <input
+                                    class="text-input"
+                                    type={sgdbKeyVisible ? 'text' : 'password'}
+                                    placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                                    bind:value={draft.steamGridDbApiKey}
+                            />
+                            <button
+                                    class="toggle-btn"
+                                    onclick={() => (sgdbKeyVisible = !sgdbKeyVisible)}
+                                    title={sgdbKeyVisible ? 'Masquer' : 'Afficher'}
+                            >
+                                {#if sgdbKeyVisible}
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                        <line x1="1" y1="1" x2="23" y2="23"/>
+                                    </svg>
+                                {:else}
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                        <circle cx="12" cy="12" r="3"/>
+                                    </svg>
+                                {/if}
+                            </button>
+                        </div>
+                    </div>
+                </section>
 
         <div class="separator"></div>
 
@@ -214,7 +305,35 @@
                 </div>
 
                 <div class="position-side">
-                    <p class="position-side-label">Tester</p>
+                    <p class="position-side-label">Son</p>
+                    <div class="sound-row">
+                        <select class="sound-select" bind:value={draft.notificationSound}>
+                            {#each soundOptions as opt}
+                                <option value={opt.value}>{opt.label}</option>
+                            {/each}
+                        </select>
+                        <button
+                            class="sound-preview-btn"
+                            class:playing={previewingSound === draft.notificationSound && draft.notificationSound !== 'none'}
+                            onclick={() => previewSound(draft.notificationSound)}
+                            title={previewingSound === draft.notificationSound ? 'Stopper' : 'Ecouter'}
+                            disabled={draft.notificationSound === 'none'}
+                        >
+                            {#if previewingSound === draft.notificationSound && draft.notificationSound !== 'none'}
+                                <!-- Stop icon -->
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="4" y="4" width="16" height="16" rx="2"/>
+                                </svg>
+                            {:else}
+                                <!-- Play icon -->
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5,3 19,12 5,21"/>
+                                </svg>
+                            {/if}
+                        </button>
+                    </div>
+
+                    <p class="position-side-label" style="margin-top: 12px;">Tester</p>
                     <button class="test-btn" onclick={testNotification}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
@@ -796,5 +915,69 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
     }
-    
+
+    /* ── Son ── */
+    .sound-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .sound-select {
+        flex: 1;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 8px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #d0d4de;
+        font-size: 13px;
+        font-family: inherit;
+        cursor: pointer;
+        outline: none;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236a7080' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        padding-right: 28px;
+        transition: border-color 0.12s, background-color 0.12s;
+    }
+    .sound-select:focus {
+        border-color: var(--accent, #c8a96e);
+        background-color: rgba(255,255,255,0.07);
+    }
+    .sound-select option {
+        background: #1a1c24;
+        color: #d0d4de;
+    }
+
+    .sound-preview-btn {
+        width: 34px;
+        height: 34px;
+        flex-shrink: 0;
+        border-radius: 8px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #6a7080;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .sound-preview-btn:hover:not(:disabled) {
+        background: rgba(255,255,255,0.1);
+        color: #fff;
+    }
+    .sound-preview-btn.playing {
+        background: color-mix(in srgb, var(--accent, #c8a96e) 16%, transparent);
+        border-color: var(--accent, #c8a96e);
+        color: var(--accent, #c8a96e);
+    }
+    .sound-preview-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
 </style>

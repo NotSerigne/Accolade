@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { games, totalUnlockedAchievements } from '$lib/stores/Games.js';
+    import { games, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
 
     type RarityBreakdown = {
         mythic: number;
@@ -10,6 +10,28 @@
         uncommon: number;
         common: number;
     };
+
+    function getGameIcon(game: Game): string {
+        // Priority 1: Steam Grid DB icon (SGDB)
+        if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
+            return game.steamgrid_icon_url;
+        }
+        
+        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
+        if (game.game_icon && game.game_icon.startsWith('http')) {
+            return game.game_icon;
+        }
+        
+        // Priority 3: header image
+        if (game.header_image_url) return game.header_image_url;
+        
+        // Priority 4: game_icon if it's a valid hash (Steam client icon)
+        if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
+            return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
+        }
+        
+        return '';
+    }
 
     let totalAchievements = $derived(
         $games.reduce((acc, g) => acc + (g.achievements_total || g.achievements?.length || 0), 0)
@@ -125,7 +147,7 @@
     <ul class="completed-list">
         {#each recentlyCompleted as game}
             <li class="completed-item">
-                <img src={game.game_icon_url || game.game_icon} alt={game.name} class="game-icon" />
+                <img src={getGameIcon(game)} alt={game.name} class="game-icon" />
                 <div class="completed-info">
                     <span class="completed-name">{game.name}</span>
                     <span class="completed-sub">

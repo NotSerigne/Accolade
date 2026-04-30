@@ -3,9 +3,13 @@
     import { listen } from '@tauri-apps/api/event';
     import { loadAchievements, type Game, type Achievement } from '$lib/stores/Games.js';
     import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
-    import headerLogo from '$lib/assets/favicon.svg';
+
 
     let { game }: { game: Game | null } = $props();
+    type AchievementsUpdatedPayload = {
+        steam_id: number;
+        achievements: Achievement[];
+    };
 
     let achievements = $state<Achievement[]>([]);
     let filter = $state<'all' | 'unlocked' | 'locked'>('all');
@@ -13,7 +17,9 @@
     let sort = $state<'date' | 'rarity' | 'name'>('date');
     let revealed = $state(true);
     let loading = $state(true);
-    let showHeaderLogo = $state(true);
+    let loadedGameId = $state<number | null>(null);
+    let loadRequestToken = 0;
+
     let jumpedToken = $state<number | null>(null);
     let flashAchievementKey = $state('');
 
@@ -21,22 +27,34 @@
     let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
     $effect(() => {
-        if (game) {
-            loading = true;
-            // Pas d'annotation de type dans le callback → évite le conflit void/PromiseLike
-            loadAchievements(game).then((result) => {
-                achievements = result;
-                loading = false;
-            });
+        if (!game) {
+            loadRequestToken += 1;
+            loadedGameId = null;
+            achievements = [];
+            loading = false;
+            return;
         }
+
+        if (loadedGameId === game.steam_id) return;
+
+        loadedGameId = game.steam_id;
+        loading = true;
+        const requestToken = ++loadRequestToken;
+
+        void loadAchievements(game).then((result) => {
+            if (requestToken !== loadRequestToken) return;
+            achievements = result;
+            loading = false;
+        });
     });
 
     onMount(() => {
         let unlisten: (() => void) | undefined;
 
-        listen<Achievement[]>('achievement-unlocked', (event) => {
-            if (game && Array.isArray(event.payload)) {
-                achievements = event.payload;
+        listen<AchievementsUpdatedPayload>('achievements-updated', (event) => {
+            const payload = event.payload;
+            if (game && payload?.steam_id === game.steam_id && Array.isArray(payload.achievements)) {
+                achievements = payload.achievements;
             }
         }).then((fn) => {
             unlisten = fn;
@@ -291,17 +309,7 @@
 
         <!-- Header -->
         <div class="game-header" style:--game-bg={heroBackground(game) ? `url('${heroBackground(game)}')` : 'none'}>
-            {#if showHeaderLogo}
-                <div class="game-logo-bg" aria-hidden="true">
-                    <img
-                        src={headerLogo}
-                        alt=""
-                        onerror={() => {
-                            showHeaderLogo = false;
-                        }}
-                    />
-                </div>
-            {/if}
+
             <div class="game-header-overlay"></div>
             <div class="game-title-row">
                 <h1 class="game-title">{gameTitle(game)}</h1>
@@ -385,6 +393,7 @@
                     {@const showDescription = Boolean(descText) && (isUnlocked || !isSecret || revealed)}
                     {@const showMaskedDescription = isLocked && isSecret && !revealed}
                     {@const palette = rarityPalette(ach.completionpercentage)}
+                    {@const displayIcon = isLocked && ach.icon_gray ? ach.icon_gray : ach.icon}
                     {@const achNormalizedKey = normalizeAchievementKey(ach.key)}
                     {@const isTopbarMatch = globalAchievementHighlight && (
                         ach.name.toLowerCase().includes(globalAchievementHighlight) ||
@@ -398,9 +407,9 @@
                         class:jump-flash={flashAchievementKey === achNormalizedKey}
                         use:trackAchievementRow={ach.key}
                     >
-                        <div class="ach-icon-wrap" class:grayscale={isLocked} style:border-color={palette.border} style:box-shadow={palette.shadow}>
-                            {#if ach.icon}
-                                <img src={ach.icon} alt={ach.name} />
+                        <div class="ach-icon-wrap" style:border-color={palette.border} style:box-shadow={palette.shadow}>
+                            {#if displayIcon}
+                                <img src={displayIcon} alt={ach.name} class:muted-icon={isLocked} />
                             {:else}
                                 <span class="ach-placeholder">🏆</span>
                             {/if}
@@ -611,7 +620,7 @@
         background: #1e1e1e; border: 2px solid transparent;
     }
     .ach-icon-wrap img { width: 100%; height: 100%; object-fit: cover; }
-    .ach-icon-wrap.grayscale { filter: grayscale(100%) brightness(0.5); }
+    .ach-icon-wrap img.muted-icon { opacity: 0.55; }
     .ach-placeholder { font-size: 22px; }
 
     .ach-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }

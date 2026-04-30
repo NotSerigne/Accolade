@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
-    import { games, selectedGameId, type Game } from '$lib/stores/Games.js';
-    import { searchQuery, searchDraft, achievementJumpIntent } from '$lib/stores/ui.js';
+    import { games, selectedGameId, syncSteamMetadata, type Game } from '$lib/stores/Games.js';
+    import { searchQuery, searchDraft, achievementJumpIntent, watcherActive, isSyncing } from '$lib/stores/ui.js';
 
     let inputEl: HTMLInputElement | null = null;
     let searchWrapEl: HTMLDivElement | null = null;
@@ -18,13 +18,35 @@
         achievementKey?: string;
     };
 
+    type AchievementSearchCandidate = {
+        gameId: number;
+        title: string;
+        subtitle: string;
+        query: string;
+        iconUrl: string;
+        achievementKey: string;
+        haystack: string;
+    };
+
     function gameSuggestionIcon(game: Game): string {
+        // Priority 1: Steam Grid DB icon (SGDB)
+        if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
+            return game.steamgrid_icon_url;
+        }
+
+        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
+        if (game.game_icon && game.game_icon.startsWith('http')) {
+            return game.game_icon;
+        }
+
+        // Priority 3: header image
         if (game.header_image_url) return game.header_image_url;
-        if (game.game_icon_url) return game.game_icon_url;
-        if (game.game_icon) {
-            if (game.game_icon.startsWith('http')) return game.game_icon;
+
+        // Priority 4: game_icon if it's a valid hash (Steam client icon)
+        if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
             return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
         }
+
         return '';
     }
 
@@ -32,10 +54,28 @@
 
     let normalizedDraft = $derived($searchDraft.trim().toLowerCase());
 
+    let achievementSearchCandidates = $derived.by((): AchievementSearchCandidate[] => {
+        return $games.flatMap((g) =>
+            (g.achievements ?? []).map((a) => {
+                const title = a.name || a.key;
+                const subtitle = `${g.name || `AppID ${g.steam_id}`} · ${(a.desc || '').slice(0, 60)}`;
+                return {
+                    gameId: g.steam_id,
+                    title,
+                    subtitle,
+                    query: title,
+                    iconUrl: a.icon || '',
+                    achievementKey: a.key,
+                    haystack: `${a.name || ''} ${a.desc || ''}`.toLowerCase(),
+                };
+            })
+        );
+    });
+
     let suggestions = $derived.by((): Suggestion[] => {
         if (!normalizedDraft) return [];
 
-        const gameSuggestions = $games
+        const results: Suggestion[] = $games
             .filter((g) => `${g.name || ''} ${g.steam_id}`.toLowerCase().includes(normalizedDraft))
             .slice(0, 4)
             .map((g) => ({
@@ -48,26 +88,23 @@
                 achievementKey: undefined,
             }));
 
-        const achievementSuggestions = $games
-            .flatMap((g) =>
-                (g.achievements ?? []).map((a) => ({ g, a }))
-            )
-            .filter(({ a }) => {
-                const haystack = `${a.name || ''} ${a.desc || ''}`.toLowerCase();
-                return haystack.includes(normalizedDraft);
-            })
-            .slice(0, 8)
-            .map(({ g, a }) => ({
-                kind: 'achievement' as const,
-                gameId: g.steam_id,
-                title: a.name || a.key,
-                subtitle: `${g.name || `AppID ${g.steam_id}`} · ${(a.desc || '').slice(0, 60)}`,
-                query: a.name || a.key,
-                iconUrl: a.icon || '',
-                achievementKey: a.key,
-            }));
+        if (results.length < 8) {
+            for (const candidate of achievementSearchCandidates) {
+                if (!candidate.haystack.includes(normalizedDraft)) continue;
+                results.push({
+                    kind: 'achievement',
+                    gameId: candidate.gameId,
+                    title: candidate.title,
+                    subtitle: candidate.subtitle,
+                    query: candidate.query,
+                    iconUrl: candidate.iconUrl,
+                    achievementKey: candidate.achievementKey,
+                });
+                if (results.length >= 8) break;
+            }
+        }
 
-        return [...gameSuggestions, ...achievementSuggestions].slice(0, 8);
+        return results;
     });
 
     function focusSearch() {
@@ -128,6 +165,11 @@
         }
     }
 
+    async function handleSync() {
+        if ($isSyncing) return;
+        await syncSteamMetadata();
+    }
+
     onMount(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
@@ -153,7 +195,7 @@
 </script>
 
 <header class="topbar">
-    <button class="topbar-icon-btn" title="Accueil">
+    <button class="topbar-icon-btn" title="Accueil" onclick={() => goto('/')}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
             <polyline points="9 22 9 12 15 12 15 22"/>
@@ -218,7 +260,24 @@
     </div>
 
     <div class="topbar-right">
-        <span class="watching-badge">● Watching</span>
+        <button
+            class="sync-btn"
+            class:syncing={$isSyncing}
+            onclick={handleSync}
+            title="Synchroniser avec Steam"
+            disabled={$isSyncing}
+        >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+            </svg>
+            {#if $isSyncing}
+                <span>Synchronisation...</span>
+            {:else}
+                <span>Actualiser</span>
+            {/if}
+        </button>
+
+        <span class="watching-badge" class:active={$watcherActive}>● Scan</span>
         <button class="topbar-icon-btn" title="Bibliothèque">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -430,12 +489,58 @@
     .topbar-right {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
         flex-shrink: 0;
     }
 
+    .sync-btn {
+        height: 32px;
+        padding: 0 12px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: inherit;
+    }
+
+    .sync-btn:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.2);
+        color: #fff;
+    }
+
+    .sync-btn.syncing {
+        color: var(--accent, #c8a96e);
+        border-color: rgba(200, 169, 110, 0.3);
+    }
+
+    .sync-btn.syncing svg {
+        animation: spin 1.2s linear infinite;
+    }
+
+    .sync-btn:disabled {
+        cursor: wait;
+        opacity: 0.8;
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
     .watching-badge {
-        color: #3ddc84;
+        color: #6a7080;
         font-size: 13px;
+        transition: color 0.3s;
+    }
+    .watching-badge.active {
+        color: #3ddc84;
     }
 </style>

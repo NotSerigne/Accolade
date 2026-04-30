@@ -1,5 +1,5 @@
 use crate::achievements::models::Achievement;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -11,7 +11,61 @@ pub struct SteamMetadata {
     pub achievements: Vec<Achievement>,
 }
 
-// Struct intermédiaire pour parser un <message> de l'API XML
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SteamUser {
+    pub steamid: String,
+    pub personaname: String,
+    pub avatarfull: String,
+}
+
+#[derive(Deserialize)]
+struct PlayerSummariesResponse {
+    response: PlayerSummariesData,
+}
+
+#[derive(Deserialize)]
+struct PlayerSummariesData {
+    players: Vec<SteamUser>,
+}
+
+#[derive(Deserialize)]
+struct OwnedGamesResponse {
+    response: OwnedGamesData,
+}
+
+#[derive(Deserialize)]
+struct OwnedGamesData {
+    games: Option<Vec<OwnedGame>>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct OwnedGame {
+    pub appid: u32,
+    pub name: Option<String>,
+    pub img_icon_url: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct PlayerAchievementsResponse {
+    playerstats: PlayerStats,
+}
+
+#[derive(Deserialize, Debug)]
+struct PlayerStats {
+    achievements: Option<Vec<PlayerAchievement>>,
+    success: bool,
+    error: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct PlayerAchievement {
+    apiname: String,
+    achieved: u32,
+    unlocktime: u64,
+}
+
+// ── Struct intermédiaire pour parser un <message> de l'API XML ───────────────
+
 #[derive(Default)]
 struct RawAchievement {
     internal_name: String,
@@ -22,6 +76,8 @@ struct RawAchievement {
     hidden: bool,
     player_percent_unlocked: f64,
 }
+
+// ── Store appdetails ─────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct AppDetailsEnvelope {
@@ -43,26 +99,24 @@ struct AppDetailsData {
     background_raw: String,
 }
 
+// ── Helpers XML ──────────────────────────────────────────────────────────────
+
 fn build_icon_url(steam_id: u32, hash: &str) -> String {
     if hash.is_empty() {
         return String::new();
     }
-    format!(
-        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{steam_id}/{hash}"
-    )
+    format!("https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{steam_id}/{hash}")
 }
 
 fn extract_xml_value(line: &str, tag: &str) -> Option<String> {
     let open = format!("<{}>", tag);
     let close = format!("</{}>", tag);
-
     if let Some(start) = line.find(&open) {
         let start_pos = start + open.len();
         if let Some(end) = line[start_pos..].find(&close) {
             return Some(line[start_pos..start_pos + end].to_string());
         }
     }
-
     None
 }
 
@@ -81,21 +135,19 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
     for line in xml.lines() {
         let trimmed = line.trim();
 
-        // Détecte le début d'un achievement
         if trimmed.contains("<message>") {
             current = Some(RawAchievement::default());
         }
 
-        // Parse les champs
         if let Some(ref mut ach) = current {
-            if let Some(value) = extract_xml_value(trimmed, "internal_name") {
-                ach.internal_name = decode_html_entities(&value);
+            if let Some(v) = extract_xml_value(trimmed, "internal_name") {
+                ach.internal_name = decode_html_entities(&v);
             }
-            if let Some(value) = extract_xml_value(trimmed, "localized_name") {
-                ach.localized_name = decode_html_entities(&value);
+            if let Some(v) = extract_xml_value(trimmed, "localized_name") {
+                ach.localized_name = decode_html_entities(&v);
             }
-            if let Some(value) = extract_xml_value(trimmed, "localized_desc") {
-                ach.localized_desc = decode_html_entities(&value);
+            if let Some(v) = extract_xml_value(trimmed, "localized_desc") {
+                ach.localized_desc = decode_html_entities(&v);
             }
             if let Some(hash) = extract_xml_value(trimmed, "icon") {
                 ach.icon = build_icon_url(steam_id, &hash);
@@ -103,15 +155,14 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
             if let Some(hash) = extract_xml_value(trimmed, "icon_gray") {
                 ach.icon_gray = build_icon_url(steam_id, &hash);
             }
-            if let Some(value) = extract_xml_value(trimmed, "hidden") {
-                ach.hidden = value == "true";
+            if let Some(v) = extract_xml_value(trimmed, "hidden") {
+                ach.hidden = v == "true";
             }
-            if let Some(value) = extract_xml_value(trimmed, "player_percent_unlocked") {
-                ach.player_percent_unlocked = value.parse().unwrap_or(0.0);
+            if let Some(v) = extract_xml_value(trimmed, "player_percent_unlocked") {
+                ach.player_percent_unlocked = v.parse().unwrap_or(0.0);
             }
         }
 
-        // Détecte la fin d'un achievement
         if trimmed.contains("</message>") {
             if let Some(ach) = current.take() {
                 if !ach.internal_name.is_empty() {
@@ -124,14 +175,85 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
     achievements
 }
 
-pub async fn fetch_app_name_by_appid(steam_id: u32) -> Result<Option<String>, reqwest::Error> {
+// ── API publique ─────────────────────────────────────────────────────────────
+
+pub async fn fetch_steam_user(
+    api_key: &str,
+    steam_id: &str,
+) -> Result<Option<SteamUser>, reqwest::Error> {
     let client = reqwest::Client::new();
-    let details_url = format!(
-        "https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french"
+    let url = format!(
+        "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={steam_id}"
+    );
+    let resp = client
+        .get(url)
+        .send()
+        .await?
+        .json::<PlayerSummariesResponse>()
+        .await?;
+    Ok(resp.response.players.into_iter().next())
+}
+
+pub async fn fetch_owned_games(
+    api_key: &str,
+    steam_id: &str,
+) -> Result<Vec<OwnedGame>, reqwest::Error> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={steam_id}&include_appinfo=1&format=json"
+    );
+    let resp = client
+        .get(url)
+        .send()
+        .await?
+        .json::<OwnedGamesResponse>()
+        .await?;
+    Ok(resp.response.games.unwrap_or_default())
+}
+
+pub async fn fetch_player_achievements(
+    api_key: &str,
+    steam_id: &str,
+    app_id: u32,
+) -> Result<HashMap<String, (bool, u64)>, reqwest::Error> {
+    let client = reqwest::Client::new();
+    // Correction : Utilisation de ISteamUserStats au lieu de ISteamUser
+    let url = format!(
+        "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/?appid={app_id}&key={api_key}&steamid={steam_id}"
     );
 
+    let resp = client
+        .get(url)
+        .send()
+        .await?
+        .json::<PlayerAchievementsResponse>()
+        .await?;
+    let mut map = HashMap::new();
+
+    if resp.playerstats.success {
+        if let Some(achievements) = resp.playerstats.achievements {
+            for ach in achievements {
+                map.insert(ach.apiname, (ach.achieved == 1, ach.unlocktime));
+            }
+        }
+    } else if let Some(err) = resp.playerstats.error {
+        println!(
+            "[DEBUG][fetch_player_achievements] Steam API Error for AppID {}: {}",
+            app_id, err
+        );
+    }
+
+    Ok(map)
+}
+
+pub async fn fetch_app_name_by_appid_with_client(
+    client: &reqwest::Client,
+    steam_id: u32,
+) -> Result<Option<String>, reqwest::Error> {
     let details_map = client
-        .get(details_url)
+        .get(format!(
+            "https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french"
+        ))
         .send()
         .await?
         .json::<HashMap<String, AppDetailsEnvelope>>()
@@ -139,61 +261,79 @@ pub async fn fetch_app_name_by_appid(steam_id: u32) -> Result<Option<String>, re
 
     let app_name = details_map
         .get(&steam_id.to_string())
-        .and_then(|entry| if entry.success { entry.data.as_ref() } else { None })
+        .and_then(|e| if e.success { e.data.as_ref() } else { None })
         .map(|d| d.name.trim().to_string())
-        .filter(|name| !name.is_empty());
+        .filter(|n| !n.is_empty());
 
     Ok(app_name)
 }
 
-pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamMetadata, reqwest::Error> {
+pub async fn fetch_app_name_by_appid(steam_id: u32) -> Result<Option<String>, reqwest::Error> {
     let client = reqwest::Client::new();
+    fetch_app_name_by_appid_with_client(&client, steam_id).await
+}
 
-    // Appel FR
-    let url_fr = format!(
-        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=french&format=xml"
-    );
-    let xml_fr = client.get(&url_fr).send().await?.text().await?;
+pub async fn fetch_steam_metadata_with_client(
+    client: &reqwest::Client,
+    steam_id: u32,
+    api_key: &str,
+) -> Result<SteamMetadata, reqwest::Error> {
+    // ── 1. Achievements FR ────────────────────────────────────────────────────
+    let xml_fr = client
+        .get(format!(
+            "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=french&format=xml"
+        ))
+        .send()
+        .await?
+        .text()
+        .await?;
     let achievements_fr = parse_achievements_xml(&xml_fr, steam_id);
 
-    // Appel EN (fallback)
-    let url_en = format!(
-        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
-    );
-    let xml_en = client.get(&url_en).send().await?.text().await?;
+    // ── 2. Achievements EN (fallback) ─────────────────────────────────────────
+    let xml_en = client
+        .get(format!(
+            "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
+        ))
+        .send()
+        .await?
+        .text()
+        .await?;
     let achievements_en = parse_achievements_xml(&xml_en, steam_id);
 
-    // Map EN pour fallback: key -> RawAchievement
     let en_map: HashMap<String, &RawAchievement> = achievements_en
         .iter()
         .map(|a| (a.internal_name.to_lowercase(), a))
         .collect();
 
-    let mut achievements: Vec<Achievement> = achievements_fr
+    // ── 3. Fusion FR + fallback EN ────────────────────────────────────────────
+    let source = if !achievements_fr.is_empty() {
+        &achievements_fr
+    } else {
+        &achievements_en
+    };
+
+    let achievements: Vec<Achievement> = source
         .iter()
         .map(|a| {
-            let fallback = en_map.get(&a.internal_name.to_lowercase());
+            let en = en_map.get(&a.internal_name.to_lowercase());
 
             let name = if a.localized_name.trim().is_empty() {
-                fallback.map(|f| f.localized_name.clone()).unwrap_or_default()
+                en.map(|e| e.localized_name.clone()).unwrap_or_default()
             } else {
                 a.localized_name.clone()
             };
-
             let desc = if a.localized_desc.trim().is_empty() {
-                fallback.map(|f| f.localized_desc.clone()).unwrap_or_default()
+                en.map(|e| e.localized_desc.clone()).unwrap_or_default()
             } else {
                 a.localized_desc.clone()
             };
-
             let icon = if a.icon.is_empty() {
-                fallback.map(|f| f.icon.clone()).unwrap_or_default()
+                en.map(|e| e.icon.clone()).unwrap_or_default()
             } else {
                 a.icon.clone()
             };
-
             let icon_gray = if a.icon_gray.is_empty() {
-                fallback.map(|f| f.icon_gray.clone()).unwrap_or_default()
+                en.map(|e| e.icon_gray.clone()).unwrap_or_default()
             } else {
                 a.icon_gray.clone()
             };
@@ -213,48 +353,30 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
         })
         .collect();
 
-    // Si FR vide, fallback total sur EN
-    if achievements.is_empty() {
-        achievements = achievements_en
-            .into_iter()
-            .map(|a| Achievement {
-                key: a.internal_name,
-                name: a.localized_name,
-                unlocked: false,
-                icon: a.icon,
-                icon_gray: a.icon_gray,
-                unlocked_time: None,
-                rarity: String::new(),
-                completionpercentage: a.player_percent_unlocked.to_string(),
-                desc: a.localized_desc,
-                hidden: a.hidden,
-            })
-            .collect();
-    }
-
-    // Infos du jeu via appdetails
-    let details_url = format!(
-        "https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french"
-    );
+    // ── 4. Infos du jeu via appdetails ────────────────────────────────────────
     let details_map = client
-        .get(details_url)
+        .get(format!(
+            "https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french"
+        ))
         .send()
         .await?
         .json::<HashMap<String, AppDetailsEnvelope>>()
         .await?;
 
-    let details = details_map
-        .get(&steam_id.to_string())
-        .and_then(|entry| if entry.success { entry.data.as_ref() } else { None });
+    let details = details_map.get(&steam_id.to_string()).and_then(|e| {
+        if e.success {
+            e.data.as_ref()
+        } else {
+            None
+        }
+    });
 
     let game_icon_url = details
         .map(|d| d.capsule_imagev5.clone())
         .filter(|s| !s.is_empty())
         .unwrap_or_default();
 
-    let header_image_url = details
-        .map(|d| d.header_image.clone())
-        .unwrap_or_default();
+    let header_image_url = details.map(|d| d.header_image.clone()).unwrap_or_default();
 
     let background_image_url = details
         .map(|d| {
@@ -266,9 +388,7 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
         })
         .unwrap_or_default();
 
-    let game_name = details
-        .map(|d| d.name.clone())
-        .filter(|s| !s.is_empty());
+    let game_name = details.map(|d| d.name.clone()).filter(|s| !s.is_empty());
 
     Ok(SteamMetadata {
         name: game_name.unwrap_or_default(),
@@ -277,4 +397,12 @@ pub async fn fetch_steam_metadata(steam_id: u32, api_key: &str) -> Result<SteamM
         background_image_url,
         achievements,
     })
+}
+
+pub async fn fetch_steam_metadata(
+    steam_id: u32,
+    api_key: &str,
+) -> Result<SteamMetadata, reqwest::Error> {
+    let client = reqwest::Client::new();
+    fetch_steam_metadata_with_client(&client, steam_id, api_key).await
 }

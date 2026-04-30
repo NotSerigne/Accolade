@@ -42,20 +42,22 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
             // Si c'est un fichier achievements, parse-le
             if is_achievements_file(&entry_path) {
                 let achievements = parser.parse(entry_path.to_str().unwrap_or(""));
-                if !achievements.is_empty() {
-                    games.push(Game {
-                        name: String::new(),
-                        steam_id: extract_steam_id_from_path(&entry_path.to_string_lossy()),
-                        game_icon: String::new(),
-                        steamgrid_icon_url: String::new(),
-                        header_image_url: String::new(),
-                        background_image_url: String::new(),
-                        achievements_total: 0,
-                        achievements,
-                        path_buf: entry_path.to_string_lossy().to_string(),
-                        emulator: parser.emulator(),
-                    });
+                let steam_id = extract_steam_id_from_path(&entry_path.to_string_lossy());
+                if steam_id == 0 {
+                    continue;
                 }
+                games.push(Game {
+                    name: String::new(),
+                    steam_id,
+                    game_icon: String::new(),
+                    steamgrid_icon_url: String::new(),
+                    header_image_url: String::new(),
+                    background_image_url: String::new(),
+                    achievements_total: 0,
+                    achievements,
+                    path_buf: entry_path.to_string_lossy().to_string(),
+                    emulator: parser.emulator(),
+                });
             }
             // Si c'est un dossier, descend dedans
             else if entry_path.is_dir() {

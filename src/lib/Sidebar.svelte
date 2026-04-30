@@ -1,6 +1,7 @@
 <script lang="ts">
     import { games, selectedGameId, loadGames, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
-    import { settingsOpen } from '$lib/stores/ui.js';
+    import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
+    import { steamUser } from '$lib/stores/user.js';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { page } from '$app/state';
@@ -40,13 +41,24 @@
     }
 
     function iconUrl(game: Game): string {
-        if (game.game_icon) {
-            // C'est un hash clienticon si ça ne commence pas par http
-            if (game.game_icon.startsWith('http')) {
-                return game.game_icon;
-            }
+        // Priority 1: Steam Grid DB icon (SGDB)
+        if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
+            return game.steamgrid_icon_url;
+        }
+
+        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
+        if (game.game_icon && game.game_icon.startsWith('http')) {
+            return game.game_icon;
+        }
+
+        // Priority 3: game_icon if it's a valid hash (Steam client icon)
+        if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
             return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
         }
+
+        // Priority 4: header image as fallback
+        if (game.header_image_url) return game.header_image_url;
+
         return '';
     }
 
@@ -62,6 +74,15 @@
     let pathname = $derived(String(page.url.pathname));
     let isHomeActive = $derived(pathname === '/');
     let isSettingsActive = $derived($settingsOpen);
+    let sortedGames = $derived.by(() => {
+        return [...$games].sort((a, b) =>
+            (a.name || String(a.steam_id)).localeCompare(
+                b.name || String(b.steam_id),
+                'fr',
+                { sensitivity: 'base', numeric: true }
+            )
+        );
+    });
 
 </script>
 
@@ -86,7 +107,7 @@
 
     <!-- Icônes des jeux détectés -->
     <div class="games-list">
-        {#each $games as game (game.steam_id)}
+        {#each sortedGames as game (game.steam_id)}
             {@const isActive = $selectedGameId === game.steam_id}
             <div class="nav-wrap">
                 <div class="pill" class:visible={isActive}></div>
@@ -115,27 +136,35 @@
             </div>
         {/each}
 
-        {#if $games.length === 0}
+        {#if sortedGames.length === 0}
             <div class="empty-hint">Aucun<br/>jeu</div>
         {/if}
     </div>
 
     <!-- User panel flottant style Discord -->
     <div class="user-panel">
-        <div class="avatar">SG</div>
-        <div class="user-info">
-            <div class="user-name">Serigne</div>
-            <div class="user-meta">{$totalUnlockedAchievements} succès · 0 platines</div>
-        </div>
+        {#if $steamUser}
+            <img class="avatar" src={$steamUser.avatarfull} alt={$steamUser.personaname} />
+            <div class="user-info">
+                <div class="user-name">{$steamUser.personaname}</div>
+                <div class="user-meta">{$totalUnlockedAchievements} succès · 0 platines</div>
+            </div>
+        {:else}
+            <div class="avatar">?</div>
+            <div class="user-info">
+                <div class="user-name">Non connecté</div>
+                <div class="user-meta">Configurez votre Steam ID</div>
+            </div>
+        {/if}
         <div class="user-actions">
-            <div class="watcher-dot" title="Watcher actif"></div>
+            <div class="watcher-dot" class:active={$watcherActive} title={$watcherActive ? "Watcher actif" : "Watcher inactif"}></div>
             <button
                     class="icon-btn"
                     class:active={isSettingsActive}
                     onclick={goSettings}
                     title="Paramètres"
             >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg width="15.75" height="15.75" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                 </svg>
@@ -259,38 +288,39 @@
     /* ── User panel flottant ── */
     .user-panel {
         position: absolute;
-        bottom: 8px;
-        left: 8px;
-        width: 260px;
+        bottom: 9px;
+        left: 9px;
+        width: 292.5px;
         background: #1a1a1a;
         border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 10px;
-        padding: 10px 12px;
+        border-radius: 11.25px;
+        padding: 11.25px 13.5px;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 11.25px;
         z-index: 100;
         box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     }
 
     .avatar {
-        width: 36px;
-        height: 36px;
+        width: 40.5px;
+        height: 40.5px;
         border-radius: 50%;
         background: var(--accent, #c8a96e);
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 12px;
+        font-size: 13.5px;
         font-weight: 700;
         color: #1a1400;
+        object-fit: cover;
     }
 
     .user-info { flex: 1; min-width: 0; }
 
     .user-name {
-        font-size: 13px;
+        font-size: 15px;
         font-weight: 700;
         color: #fff;
         white-space: nowrap;
@@ -299,20 +329,21 @@
     }
 
     .user-meta {
-        font-size: 11px;
+        font-size: 12px;
         color: #6a7080;
         white-space: nowrap;
-        margin-top: 1px;
+        margin-top: 1.5px;
     }
 
-    .user-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .user-actions { display: flex; align-items: center; gap: 6.75px; flex-shrink: 0; }
 
-    .watcher-dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; }
+    .watcher-dot { width: 9px; height: 9px; border-radius: 50%; background: #6a7080; transition: background 0.3s; }
+    .watcher-dot.active { background: #3ddc84; }
 
     .icon-btn {
-        width: 24px;
-        height: 24px;
-        border-radius: 5px;
+        width: 27px;
+        height: 27px;
+        border-radius: 6px;
         background: transparent;
         border: none;
         cursor: pointer;
