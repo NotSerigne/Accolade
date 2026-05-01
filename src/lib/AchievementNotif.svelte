@@ -154,10 +154,12 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		padding: 28px 20px 26px;
+		padding: 28px 36px 26px;
 		box-sizing: border-box;
 		opacity: 0;
 		pointer-events: none;
+		transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+		overflow: visible;
 	}
 
 	.notif-wrapper.visible {

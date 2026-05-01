@@ -23,7 +23,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
         .lock()
         .map(|gs| {
             gs.iter()
-                .filter(|g| g.steam_id != 0 && !g.achievements.is_empty())
+                .filter(|g| g.steam_id != 0)
                 .cloned()
                 .collect::<Vec<Game>>()
         })
@@ -73,16 +73,17 @@ pub(crate) async fn sync_steam_metadata(
     language: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Game>, String> {
-    println!(
-        "[DEBUG][sync_steam_metadata] Start. steam_id='{}', language='{}'",
-        steam_id, language
-    );
     dotenv::dotenv().ok();
     let effective_api_key = if !api_key.trim().is_empty() {
         api_key
     } else {
         std::env::var("STEAM_API_KEY").unwrap_or_default()
     };
+
+    println!(
+        "[DEBUG][sync_steam_metadata] Start. steam_id='{}', language='{}', api_key_len={}, sgdb_key_len={}",
+        steam_id, language, effective_api_key.len(), sgdb_api_key.len()
+    );
 
     if effective_api_key.is_empty() {
         println!("[DEBUG][sync_steam_metadata] No API key found.");
@@ -230,7 +231,7 @@ pub(crate) async fn sync_steam_metadata(
 
     let result: Vec<Game> = cloned_games
         .into_iter()
-        .filter(|g| g.steam_id != 0 && !g.achievements.is_empty())
+        .filter(|g| g.steam_id != 0)
         .collect();
     println!(
         "[DEBUG][sync_steam_metadata] Returning {} games",

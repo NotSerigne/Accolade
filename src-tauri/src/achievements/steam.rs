@@ -330,14 +330,38 @@ pub async fn fetch_steam_metadata_with_client(
 
     let (lang_res, en_res, details_res) = futures::join!(lang_req, en_req, details_req);
 
-    let xml_lang = lang_res?.text().await?;
-    let xml_en = en_res?.text().await?;
+    let xml_lang = lang_res.ok().and_then(|r| {
+        if r.status().is_success() {
+            Some(r)
+        } else {
+            None
+        }
+    });
+    let xml_en = en_res.ok().and_then(|r| {
+        if r.status().is_success() {
+            Some(r)
+        } else {
+            None
+        }
+    });
+
+    let mut achievements_lang = Vec::new();
+    if let Some(r) = xml_lang {
+        if let Ok(text) = r.text().await {
+            achievements_lang = parse_achievements_xml(&text, steam_id);
+        }
+    }
+
+    let mut achievements_en = Vec::new();
+    if let Some(r) = xml_en {
+        if let Ok(text) = r.text().await {
+            achievements_en = parse_achievements_xml(&text, steam_id);
+        }
+    }
+
     let details_map = details_res?
         .json::<HashMap<String, AppDetailsEnvelope>>()
         .await?;
-
-    let achievements_lang = parse_achievements_xml(&xml_lang, steam_id);
-    let achievements_en = parse_achievements_xml(&xml_en, steam_id);
 
     let en_map: HashMap<String, &RawAchievement> = achievements_en
         .iter()

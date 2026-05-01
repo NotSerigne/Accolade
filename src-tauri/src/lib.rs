@@ -133,17 +133,25 @@ pub(crate) async fn enrich_games_with_steam(
     .collect::<Vec<_>>()
     .await;
 
-    let mut to_remove = HashSet::new();
+    let results = updates;
+    let to_remove: HashSet<u32> = HashSet::new();
 
-    for (steam_id, emulator, local_state, metadata, player_achievements_res) in updates {
-        if let Some(Err(err)) = &player_achievements_res {
+    for game in games.iter_mut() {
+        let steam_id = game.steam_id;
+        let emulator = game.emulator.clone();
+
+        let Some(res) = results.iter().find(|r| r.0 == steam_id) else {
+            continue;
+        };
+
+        let (_, _, local_state, metadata, player_achievements_res) = res;
+
+        if let Some(Err(err)) = player_achievements_res {
             if emulator == crate::achievements::models::Emulator::Steam {
                 println!(
-                    "[DEBUG] Removing Steam Game AppID {} due to API error: {}",
+                    "[DEBUG] Steam API error for AppID {}: {}. Keeping game but achievements might be missing.",
                     steam_id, err
                 );
-                to_remove.insert(steam_id);
-                continue;
             }
         }
 
@@ -151,11 +159,8 @@ pub(crate) async fn enrich_games_with_steam(
             continue;
         };
 
-        let Some(game) = games.iter_mut().find(|g| g.steam_id == steam_id) else {
-            continue;
-        };
-
-        let mut merged_achievements = merge_schema_with_local(metadata.achievements, &local_state);
+        let mut merged_achievements =
+            merge_schema_with_local(metadata.achievements.clone(), local_state);
 
         if let Some(Ok(pa)) = player_achievements_res {
             for ach in &mut merged_achievements {
@@ -172,10 +177,10 @@ pub(crate) async fn enrich_games_with_steam(
         game.achievements_total = game.achievements.len() as u32;
 
         if !metadata.name.is_empty() {
-            game.name = metadata.name;
+            game.name = metadata.name.clone();
         }
         if !metadata.header_image_url.is_empty() {
-            game.header_image_url = metadata.header_image_url;
+            game.header_image_url = metadata.header_image_url.clone();
         } else {
             game.header_image_url = format!(
                 "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
@@ -183,10 +188,10 @@ pub(crate) async fn enrich_games_with_steam(
             );
         }
         if !metadata.game_icon_url.is_empty() {
-            game.game_icon = metadata.game_icon_url;
+            game.game_icon = metadata.game_icon_url.clone();
         }
         if !metadata.background_image_url.is_empty() {
-            game.background_image_url = metadata.background_image_url;
+            game.background_image_url = metadata.background_image_url.clone();
         }
     }
 
