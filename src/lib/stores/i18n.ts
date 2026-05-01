@@ -138,6 +138,10 @@ const translations = {
 		'settings.accent.purple': 'Violet',
 		'settings.accent.red': 'Rouge',
 		'settings.accent.orange': 'Orange',
+		'settings.behavior': 'Comportement',
+		'settings.launchOnStartup': 'Lancer au démarrage de Windows',
+		'settings.startMinimized': 'Démarrer en minimisé',
+		'settings.minimizeToTray': "Minimiser l'app à la place de fermer",
 		'button.close': 'Fermer',
 		'button.save': 'Enregistrer',
 		'button.remove': 'Supprimer',
@@ -736,7 +740,7 @@ export function translate(
 	key: TranslationKey,
 	params?: TranslationParams
 ): string {
-	const localized = translations[language][key] ?? translations.fr[key];
+	const localized = (translations[language] as any)[key] ?? translations.fr[key];
 	return interpolate(localized, params);
 }
 

@@ -155,9 +155,24 @@
 				windowPosition: draft.windowPosition,
 				notificationSound: draft.notificationSound,
 				theme: draft.theme,
-				accentColor: draft.accentColor
+				accentColor: draft.accentColor,
+				launchOnStartup: draft.launchOnStartup,
+				startMinimized: draft.startMinimized,
+				minimizeToTray: draft.minimizeToTray
 			};
 			await saveSettings(next);
+
+			try {
+				const { enable, disable } = await import('@tauri-apps/plugin-autostart');
+				if (next.launchOnStartup) {
+					await enable();
+				} else {
+					await disable();
+				}
+			} catch (e) {
+				console.warn('Failed to configure autostart:', e);
+			}
+
 			await refreshSteamUser();
 			await syncSteamMetadata(next.steamApiKey, next.steamGridDbApiKey);
 			settingsOpen.set(false);
@@ -475,6 +490,49 @@
 						{$i18n.t('settings.testNotif')}
 					</button>
 				</div>
+			</div>
+		</section>
+
+		<div class="separator"></div>
+
+		<!-- ── Section Comportement ── -->
+		<section class="settings-section">
+			<div class="section-label">{$i18n.t('settings.behavior') || 'Comportement'}</div>
+
+			<div class="setting-row">
+				<div class="setting-info">
+					<div class="setting-name">
+						{$i18n.t('settings.launchOnStartup') || 'Lancer au démarrage de Windows'}
+					</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.launchOnStartup} />
+					<span class="slider"></span>
+				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">
+						{$i18n.t('settings.startMinimized') || 'Démarrer en minimisé'}
+					</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.startMinimized} />
+					<span class="slider"></span>
+				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">
+						{$i18n.t('settings.minimizeToTray') || "Minimiser l'app à la place de fermer"}
+					</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.minimizeToTray} />
+					<span class="slider"></span>
+				</label>
 			</div>
 		</section>
 
@@ -1216,5 +1274,50 @@
 	.sound-preview-btn:disabled {
 		opacity: 0.3;
 		cursor: not-allowed;
+	}
+
+	/* ── Toggles ── */
+	.toggle-switch {
+		position: relative;
+		display: inline-block;
+		width: 40px;
+		height: 22px;
+		flex-shrink: 0;
+	}
+	.toggle-switch input {
+		opacity: 0;
+		width: 0;
+		height: 0;
+	}
+	.slider {
+		position: absolute;
+		cursor: pointer;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background-color: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		transition: 0.2s;
+		border-radius: 22px;
+	}
+	.slider:before {
+		position: absolute;
+		content: '';
+		height: 14px;
+		width: 14px;
+		left: 3px;
+		bottom: 3px;
+		background-color: var(--text-muted);
+		transition: 0.2s;
+		border-radius: 50%;
+	}
+	input:checked + .slider {
+		background-color: color-mix(in srgb, var(--accent, #c8a96e) 20%, var(--surface-2));
+		border-color: var(--accent, #c8a96e);
+	}
+	input:checked + .slider:before {
+		transform: translateX(18px);
+		background-color: var(--accent, #c8a96e);
 	}
 </style>

@@ -21,7 +21,7 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0.149"
 serde = { version = "1.0.228", features = ["derive"] }
 log = "0.4.29"
-tauri = { version = "2.10.3", features = [] }
+tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-log = "2.8.0"
 notify = "9.0.0-rc.2"
 rust-ini = "0.21"
@@ -34,6 +34,7 @@ winreg = "0.56.0"
 scraper = "0.26.0"
 quick-xml = "0.39.2"
 futures = "0.3.31"
+tauri-plugin-autostart = "2.5.1"
 
 [profile.release]
 panic = "abort" # Strip expensive panic clean-up logic
