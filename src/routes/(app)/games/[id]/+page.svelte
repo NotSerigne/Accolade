@@ -13,7 +13,7 @@
 
 <style>
     .game-main {
-        background: #161616;
+        background: var(--bg-panel);
         border-radius: 12px;
         overflow: hidden;
         display: flex;

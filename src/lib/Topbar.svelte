@@ -5,6 +5,7 @@
     import { resolve } from '$app/paths';
     import { games, selectedGameId, syncSteamMetadata, type Game } from '$lib/stores/Games.js';
     import { searchQuery, searchDraft, achievementJumpIntent, watcherActive, isSyncing } from '$lib/stores/ui.js';
+    import { i18n } from '$lib/stores/i18n.js';
 
     let inputEl: HTMLInputElement | null = null;
     let searchWrapEl: HTMLDivElement | null = null;
@@ -49,7 +50,7 @@
         return `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
-    let searchPlaceholder = $derived('Rechercher un jeu ou un succes');
+    let searchPlaceholder = $derived($i18n.t('topbar.searchPlaceholder'));
 
     let normalizedDraft = $derived($searchDraft.trim().toLowerCase());
 
@@ -81,7 +82,7 @@
                 kind: 'game' as const,
                 gameId: g.steam_id,
                 title: g.name || `AppID ${g.steam_id}`,
-                subtitle: `Jeu · AppID ${g.steam_id}`,
+                subtitle: $i18n.t('topbar.gameSubtitle', { id: g.steam_id }),
                 query: g.name || String(g.steam_id),
                 iconUrl: gameSuggestionIcon(g),
                 achievementKey: undefined,
@@ -213,9 +214,9 @@
         </div>
 
         {#if suggestionsOpen && normalizedDraft}
-            <div class="search-suggestions" role="listbox" aria-label="Suggestions de recherche">
+            <div class="search-suggestions" role="listbox" aria-label={$i18n.t('topbar.searchSuggestions')}>
                 {#if suggestions.length === 0}
-                    <div class="suggestion-empty">Aucune suggestion</div>
+                    <div class="suggestion-empty">{$i18n.t('topbar.noSuggestion')}</div>
                 {:else}
                     {#each suggestions as item (item.kind + ':' + item.gameId + ':' + item.title)}
                         <button
@@ -240,7 +241,7 @@
                                 <span class="suggestion-fallback">{item.kind === 'game' ? '🎮' : '🏆'}</span>
                             </div>
                             <span class="suggestion-content">
-                                <span class="suggestion-kind">{item.kind === 'game' ? 'Jeu' : 'Succes'}</span>
+                                <span class="suggestion-kind">{item.kind === 'game' ? $i18n.t('topbar.kind.game') : $i18n.t('topbar.kind.achievement')}</span>
                                 <span class="suggestion-title">{item.title}</span>
                                 <span class="suggestion-subtitle">{item.subtitle}</span>
                             </span>
@@ -256,21 +257,21 @@
             class="sync-btn"
             class:syncing={$isSyncing}
             onclick={handleSync}
-            title="Synchroniser avec Steam"
+            title={$i18n.t('topbar.syncTitle')}
             disabled={$isSyncing}
         >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
             </svg>
             {#if $isSyncing}
-                <span>Synchronisation...</span>
+                <span>{$i18n.t('topbar.syncing')}</span>
             {:else}
-                <span>Actualiser</span>
+                <span>{$i18n.t('topbar.sync')}</span>
             {/if}
         </button>
 
-        <span class="watching-badge" class:active={$watcherActive}>● Scan</span>
-        <button class="topbar-icon-btn" title="Bibliothèque">
+        <span class="watching-badge" class:active={$watcherActive}>{$i18n.t('topbar.scan')}</span>
+        <button class="topbar-icon-btn" title={$i18n.t('topbar.library')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
@@ -282,7 +283,7 @@
     .topbar {
         grid-column: 2 / -1;
         grid-row: 1 / 2;
-        background: #161616;
+        background: var(--bg-panel);
         border-radius: 12px;
         padding: 0 16px;
         height: 100%;
@@ -295,24 +296,24 @@
         width: 32px;
         height: 32px;
         border-radius: 8px;
-        border: 0.5px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.05);
+        border: 0.5px solid var(--border-soft);
+        background: var(--surface-2);
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        color: rgba(255, 255, 255, 0.55);
+        color: var(--text-muted);
         flex-shrink: 0;
         transition: background 0.15s;
     }
 
-    .topbar-icon-btn:hover { background: rgba(255, 255, 255, 0.1); }
+    .topbar-icon-btn:hover { background: var(--surface-hover); }
 
     .topbar-search {
         width: 100%;
         height: 32px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 0.5px solid rgba(255, 255, 255, 0.1);
+        background: var(--surface-2);
+        border: 0.5px solid var(--border-soft);
         border-radius: 8px;
         display: flex;
         align-items: center;
@@ -322,8 +323,8 @@
         text-align: left;
     }
     .topbar-search:focus-within {
-        border-color: rgba(255, 255, 255, 0.42);
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+        border-color: color-mix(in srgb, var(--accent) 40%, var(--border-soft));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
     }
 
     .topbar-search-wrap {
@@ -337,7 +338,7 @@
         flex: 1;
         border: none;
         background: transparent;
-        color: #fff;
+        color: var(--text-primary);
         font-size: 13px;
         outline: none;
         box-shadow: none;
@@ -345,13 +346,13 @@
     }
 
     .search-input::placeholder {
-        color: rgba(255, 255, 255, 0.25);
+        color: var(--text-muted);
     }
 
     .search-shortcut {
         font-size: 10px;
-        color: rgba(255, 255, 255, 0.2);
-        border: 0.5px solid rgba(255, 255, 255, 0.12);
+        color: var(--text-muted);
+        border: 0.5px solid var(--border-soft);
         border-radius: 3px;
         padding: 1px 5px;
         font-family: inherit;
@@ -362,8 +363,8 @@
         top: calc(100% + 6px);
         left: 0;
         right: 0;
-        background: #161616;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: var(--surface-1);
+        border: 1px solid var(--border-soft);
         border-radius: 10px;
         padding: 6px;
         display: flex;
@@ -376,9 +377,9 @@
     .suggestion-item {
         width: 100%;
         border: 1px solid transparent;
-        background: rgba(255, 255, 255, 0.02);
+        background: var(--surface-2);
         border-radius: 8px;
-        color: #fff;
+        color: var(--text-primary);
         display: flex;
         align-items: center;
         gap: 8px;
@@ -388,8 +389,8 @@
     }
 
     .suggestion-item:hover {
-        background: rgba(255, 255, 255, 0.06);
-        border-color: rgba(255, 255, 255, 0.12);
+        background: var(--surface-hover);
+        border-color: var(--border-soft);
     }
 
     .suggestion-item.game {
@@ -406,21 +407,21 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #1a1a1a;
+        background: var(--surface-3);
     }
 
     .suggestion-thumb.game {
         width: 76px;
         height: 42px;
         border-radius: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--border-soft);
     }
 
     .suggestion-thumb.achievement {
         width: 42px;
         height: 42px;
         border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--border-soft);
     }
 
     .suggestion-thumb img {
@@ -442,8 +443,8 @@
         font-size: 9px;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #6a7080;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--text-muted);
+        border: 1px solid var(--border-soft);
         border-radius: 4px;
         padding: 1px 5px;
         width: fit-content;
@@ -458,7 +459,7 @@
 
     .suggestion-title {
         font-size: 13px;
-        color: #e9edf8;
+        color: var(--text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -466,7 +467,7 @@
 
     .suggestion-subtitle {
         font-size: 11px;
-        color: #7f8698;
+        color: var(--text-secondary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -474,7 +475,7 @@
 
     .suggestion-empty {
         font-size: 12px;
-        color: #6a7080;
+        color: var(--text-muted);
         padding: 8px;
     }
 
@@ -489,9 +490,9 @@
         height: 32px;
         padding: 0 12px;
         border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.05);
-        color: rgba(255, 255, 255, 0.6);
+        border: 1px solid var(--border-soft);
+        background: var(--surface-2);
+        color: var(--text-secondary);
         font-size: 12px;
         font-weight: 500;
         display: flex;
@@ -503,9 +504,9 @@
     }
 
     .sync-btn:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.1);
-        border-color: rgba(255, 255, 255, 0.2);
-        color: #fff;
+        background: var(--surface-hover);
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--border-soft));
+        color: var(--text-primary);
     }
 
     .sync-btn.syncing {
@@ -528,7 +529,7 @@
     }
 
     .watching-badge {
-        color: #6a7080;
+        color: var(--text-muted);
         font-size: 13px;
         transition: color 0.3s;
     }

@@ -35,9 +35,6 @@ scraper = "0.26.0"
 quick-xml = "0.39.2"
 futures = "0.3.31"
 
-[build]
-script = "build.rs"
-
 [profile.release]
 panic = "abort" # Strip expensive panic clean-up logic
 codegen-units = 1 # Compile crates one after another so the compiler can optimize better

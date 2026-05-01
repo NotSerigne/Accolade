@@ -7,9 +7,11 @@ export interface AppSettings {
     steamApiKey: string;
     steamGridDbApiKey: string;
     searchPaths: string[];
+    language: 'fr' | 'en' | 'es' | 'de' | 'it';
+    setupCompleted: boolean;
     windowPosition: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
     notificationSound: string;
-    theme: 'dark' | 'light';
+    theme: 'dark' | 'light' | 'system';
     accentColor: string;
 }
 
@@ -18,9 +20,11 @@ const DEFAULTS: AppSettings = {
     steamApiKey: '',
     steamGridDbApiKey: '',
     searchPaths: [],
+    language: 'fr',
+    setupCompleted: false,
     windowPosition: 'bottom-right',
     notificationSound: 'Steam.mp3',
-    theme: 'dark',
+    theme: 'system',
     accentColor: '#c8a96e',
 };
 
@@ -36,7 +40,7 @@ function readThemeCache(): ThemeCache | null {
         if (!raw) return null;
 
         const parsed = JSON.parse(raw) as Partial<ThemeCache>;
-        const theme = parsed.theme === 'light' ? 'light' : parsed.theme === 'dark' ? 'dark' : null;
+        const theme = parsed.theme === 'light' || parsed.theme === 'dark' || parsed.theme === 'system' ? parsed.theme : null;
         const accentColor = typeof parsed.accentColor === 'string' ? parsed.accentColor : null;
 
         if (!theme || !accentColor) return null;
@@ -61,6 +65,7 @@ const INITIAL_SETTINGS: AppSettings = { ...DEFAULTS, ...(readThemeCache() ?? {})
 export const settings = writable<AppSettings>(INITIAL_SETTINGS);
 
 let store: Store | null = null;
+let removeSystemThemeListener: (() => void) | null = null;
 
 async function getStore(): Promise<Store> {
     if (!store) {
@@ -110,7 +115,29 @@ export async function saveSettings(next: AppSettings): Promise<void> {
 
 export function applyTheme(s: AppSettings): void {
     if (typeof document === 'undefined') return;
+
     const root = document.documentElement;
-    root.setAttribute('data-theme', s.theme);
+    const mediaQuery = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    const prefersDark = mediaQuery ? mediaQuery.matches : true;
+    const resolvedTheme = s.theme === 'system' ? (prefersDark ? 'dark' : 'light') : s.theme;
+
+    root.setAttribute('data-theme', resolvedTheme);
     root.style.setProperty('--accent', s.accentColor);
+    root.style.colorScheme = resolvedTheme;
+
+    if (removeSystemThemeListener) {
+        removeSystemThemeListener();
+        removeSystemThemeListener = null;
+    }
+
+    if (!mediaQuery || s.theme !== 'system') return;
+
+    const onChange = () => {
+        const nextTheme = mediaQuery.matches ? 'dark' : 'light';
+        root.setAttribute('data-theme', nextTheme);
+        root.style.colorScheme = nextTheme;
+        root.style.setProperty('--accent', s.accentColor);
+    };
+    mediaQuery.addEventListener('change', onChange);
+    removeSystemThemeListener = () => mediaQuery.removeEventListener('change', onChange);
 }

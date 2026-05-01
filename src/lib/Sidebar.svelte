@@ -3,6 +3,7 @@
     import { games, selectedGameId, loadGames, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
     import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
     import { steamUser } from '$lib/stores/user.js';
+    import { i18n } from '$lib/stores/i18n.js';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { resolve } from '$app/paths';
@@ -96,16 +97,16 @@
 
     let pathname = $derived(String(page.url.pathname));
     let isHomeActive = $derived(pathname === '/');
-    let isStatsActive = $derived(pathname === '/stats');
-    let isObjectivesActive = $derived(pathname === '/objectives');
-    let isJournalActive = $derived(pathname === '/journal');
+    let isStatsActive = $derived(pathname.startsWith('/stats'));
+    let isObjectivesActive = $derived(pathname.startsWith('/objectives'));
+    let isJournalActive = $derived(pathname.startsWith('/journal'));
 
     let isSettingsActive = $derived($settingsOpen);
     let sortedGames = $derived.by(() => {
         return [...$games].sort((a, b) =>
             (a.name || String(a.steam_id)).localeCompare(
                 b.name || String(b.steam_id),
-                'fr',
+                $i18n.locale,
                 { sensitivity: 'base', numeric: true }
             )
         );
@@ -121,7 +122,7 @@
                 class="game-slot home-slot"
                 class:active={isHomeActive}
                 onclick={goHome}
-                title="Accueil"
+                title={$i18n.t('sidebar.home')}
         >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -138,7 +139,7 @@
                 class="game-slot nav-btn"
                 class:active={isStatsActive}
                 onclick={goStats}
-                title="Statistiques"
+                title={$i18n.t('sidebar.stats')}
         >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
@@ -153,7 +154,7 @@
                 class="game-slot nav-btn"
                 class:active={isObjectivesActive}
                 onclick={goObjectives}
-                title="Objectifs"
+                title={$i18n.t('sidebar.objectives')}
         >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <circle cx="12" cy="12" r="10" />
@@ -168,7 +169,7 @@
                 class="game-slot nav-btn"
                 class:active={isJournalActive}
                 onclick={goJournal}
-                title="Journal"
+                title={$i18n.t('sidebar.journal')}
         >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -211,7 +212,7 @@
         {/each}
 
         {#if sortedGames.length === 0}
-            <div class="empty-hint">Aucun<br/>jeu</div>
+            <div class="empty-hint">{$i18n.t('sidebar.emptyGames')}</div>
         {/if}
     </div>
 
@@ -220,22 +221,22 @@
             <img class="avatar" src={$steamUser.avatarfull} alt={$steamUser.personaname} />
             <div class="user-info">
                 <div class="user-name">{$steamUser.personaname}</div>
-                <div class="user-meta">{$totalUnlockedAchievements} succès · 0 platines</div>
+                <div class="user-meta">{$i18n.t('sidebar.user.achievements', { count: $totalUnlockedAchievements })}</div>
             </div>
         {:else}
             <div class="avatar">?</div>
             <div class="user-info">
-                <div class="user-name">Non connecté</div>
-                <div class="user-meta">Configurez votre Steam ID</div>
+                <div class="user-name">{$i18n.t('sidebar.user.disconnected')}</div>
+                <div class="user-meta">{$i18n.t('sidebar.user.configureSteam')}</div>
             </div>
         {/if}
         <div class="user-actions">
-            <div class="watcher-dot" class:active={$watcherActive} title={$watcherActive ? "Watcher actif" : "Watcher inactif"}></div>
+            <div class="watcher-dot" class:active={$watcherActive} title={$watcherActive ? $i18n.t('sidebar.watcher.active') : $i18n.t('sidebar.watcher.inactive')}></div>
             <button
                     class="icon-btn"
                     class:active={isSettingsActive}
                     onclick={goSettings}
-                    title="Paramètres"
+                    title={$i18n.t('sidebar.advancedSettings')}
             >
                 <svg width="15.75" height="15.75" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/>
@@ -251,7 +252,7 @@
         grid-column: 1 / 2;
         grid-row: 1 / 3;
         height: 100%;
-        background: #0e0e0e;
+        background: var(--bg-sidebar);
         border-radius: 0;
         display: flex;
         flex-direction: column;
@@ -287,7 +288,7 @@
         width: 48px;
         height: 48px;
         border-radius: 12px;
-        background: #1e1e1e;
+        background: var(--surface-2);
         border: none;
         cursor: pointer;
         display: flex;
@@ -300,12 +301,12 @@
                 box-shadow 0.15s;
         flex-shrink: 0;
         margin: 3px 0;
-        color: rgba(255,255,255,0.5);
+        color: var(--text-muted);
     }
 
     .game-slot:hover {
         border-radius: 30%;
-        background: #2a2a2a;
+        background: var(--surface-hover);
         box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #c8a96e) 30%, transparent);
     }
 
@@ -314,15 +315,13 @@
         box-shadow: 0 0 0 2px var(--accent, #c8a96e);
     }
 
-    .home-slot { background: #1a1a1a; }
+    .home-slot { background: var(--surface-1); }
     .home-slot.active,
     .home-slot:hover { color: var(--accent, #c8a96e); }
 
-    .nav-btn { background: #1a1a1a; }
+    .nav-btn { background: var(--surface-1); }
     .nav-btn.active,
     .nav-btn:hover { color: var(--accent, #c8a96e); }
-    .nav-btn[title="Journal"].active,
-    .nav-btn[title="Journal"]:hover { color: var(--accent, #c8a96e); }
 
     .game-icon-img { width: 100%; height: 100%; object-fit: cover; }
 
@@ -340,7 +339,7 @@
     .divider {
         width: 32px;
         height: 1px;
-        background: rgba(255,255,255,0.08);
+        background: var(--border-soft);
         margin: 6px 0;
         flex-shrink: 0;
     }
@@ -360,10 +359,11 @@
 
     .empty-hint {
         font-size: 10px;
-        color: rgba(255,255,255,0.2);
+        color: var(--text-muted);
         text-align: center;
         margin-top: 12px;
         line-height: 1.5;
+        white-space: pre-line;
     }
 
     .user-panel {
@@ -371,8 +371,8 @@
         bottom: 20px;
         left: 16px;
         width: 320px;
-        background: #1a1a1a;
-        border: 1px solid rgba(255,255,255,0.08);
+        background: var(--surface-1);
+        border: 1px solid var(--border-soft);
         border-radius: 16px;
         padding: 16px 20px;
         display: flex;
@@ -403,7 +403,7 @@
     .user-name {
         font-size: 16px;
         font-weight: 700;
-        color: #fff;
+        color: var(--text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -411,7 +411,7 @@
 
     .user-meta {
         font-size: 13px;
-        color: #6a7080;
+        color: var(--text-muted);
         white-space: nowrap;
         margin-top: 2px;
     }
@@ -428,12 +428,12 @@
         background: transparent;
         border: none;
         cursor: pointer;
-        color: rgba(255,255,255,0.35);
+        color: var(--text-muted);
         display: flex;
         align-items: center;
         justify-content: center;
         transition: background 0.12s, color 0.12s;
     }
-    .icon-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .icon-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
     .icon-btn.active { color: var(--accent, #c8a96e); }
 </style>

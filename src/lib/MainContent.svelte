@@ -3,17 +3,18 @@
     import { games, type Game, type Achievement } from '$lib/stores/Games.js';
     import { goto } from '$app/navigation';
     import { resolve } from '$app/paths';
+    import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 
     function rarityLabel(pct: string): string {
         const n = parseFloat(pct);
-        if (isNaN(n)) return 'Commun';
-        if (n <= 0.1) return 'Mythic';
-        if (n <= 1) return 'Légendaire';
-        if (n <= 3) return 'Épique';
-        if (n <= 7) return 'Très rare';
-        if (n <= 15) return 'Rare';
-        if (n <= 35) return 'Peu commun';
-        return 'Commun';
+        if (isNaN(n)) return rarityLabelByIndex($i18n.language, 6);
+        if (n <= 0.1) return rarityLabelByIndex($i18n.language, 0);
+        if (n <= 1) return rarityLabelByIndex($i18n.language, 1);
+        if (n <= 3) return rarityLabelByIndex($i18n.language, 2);
+        if (n <= 7) return rarityLabelByIndex($i18n.language, 3);
+        if (n <= 15) return rarityLabelByIndex($i18n.language, 4);
+        if (n <= 35) return rarityLabelByIndex($i18n.language, 5);
+        return rarityLabelByIndex($i18n.language, 6);
     }
 
     function rarityPalette(pct: string) {
@@ -37,7 +38,7 @@
 
     function formatDateTime(ts: number | null | undefined): string {
         if (!ts) return '';
-        return new Date(ts * 1000).toLocaleString('fr-FR', {
+        return new Date(ts * 1000).toLocaleString($i18n.locale, {
             day: '2-digit',
             month: '2-digit',
             year: 'numeric',
@@ -74,7 +75,7 @@
 
 <main class="main-content">
     <section class="activity-section">
-        <h2 class="section-title">Activité récente</h2>
+        <h2 class="section-title">{$i18n.t('main.recentActivity')}</h2>
         <div class="activity-grid">
             {#each recentActivity as item (item.gameId + ':' + item.key)}
                 {@const palette = rarityPalette(item.completionpercentage)}
@@ -113,12 +114,12 @@
         </div>
 
         {#if recentActivity.length === 0}
-            <div class="empty-hint">Aucune activité récente</div>
+            <div class="empty-hint">{$i18n.t('main.noRecentActivity')}</div>
         {/if}
     </section>
 
     <section class="activity-section" style="margin-top: 32px;">
-        <h2 class="section-title">Bibliothèque récente</h2>
+        <h2 class="section-title">{$i18n.t('main.recentLibrary')}</h2>
         <div class="game-grid">
             {#each recentGames as game (game.steam_id)}
                 <button class="game-card" onclick={() => void goto(resolve('/(app)/games/[id]', { id: String(game.steam_id) }))}>
@@ -156,7 +157,7 @@
 
 <style>
     .main-content {
-        background: #161616;
+        background: var(--bg-panel);
         border-radius: 12px;
         padding: 32px;
         overflow-y: auto;
@@ -179,7 +180,7 @@
         font-weight: 800;
         margin-bottom: 20px;
         letter-spacing: -0.5px;
-        color: #fff;
+        color: var(--text-primary);
     }
 
     .activity-grid {
@@ -192,8 +193,8 @@
         display: flex;
         gap: 14px;
         padding: 12px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        background: var(--surface-2);
+        border: 1px solid var(--border-soft);
         border-radius: 12px;
         cursor: pointer;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -203,8 +204,8 @@
     }
 
     .activity-card:hover {
-        background: rgba(255, 255, 255, 0.06);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: var(--surface-hover);
+        border-color: var(--border-soft);
         transform: translateY(-2px);
     }
 
@@ -217,7 +218,7 @@
         height: 56px;
         border-radius: 8px;
         object-fit: cover;
-        background: #1a1a1a;
+        background: var(--surface-3);
     }
 
     .activity-info {
@@ -238,7 +239,7 @@
     .activity-name {
         font-size: 14px;
         font-weight: 700;
-        color: #fff;
+        color: var(--text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -247,7 +248,7 @@
     .activity-game {
         font-size: 12px;
         font-weight: 500;
-        color: #6a7080;
+        color: var(--text-muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -277,7 +278,7 @@
 
     .empty-hint {
         font-size: 13px;
-        color: #444;
+        color: var(--text-muted);
         padding: 16px 0;
     }
 
@@ -292,9 +293,9 @@
         height: 120px;
         border-radius: 10px;
         overflow: hidden;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border-soft);
         cursor: pointer;
-        background: #1a1a1a;
+        background: var(--surface-3);
         padding: 0;
         transition: all 0.2s;
     }
@@ -328,7 +329,7 @@
     .game-card-title {
         font-size: 11px;
         font-weight: 700;
-        color: #fff;
+        color: var(--text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -337,7 +338,7 @@
 
     .game-card-bar {
         height: 3px;
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--surface-hover);
         border-radius: 2px;
         overflow: hidden;
         margin-bottom: 4px;

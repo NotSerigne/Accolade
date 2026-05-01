@@ -1,6 +1,7 @@
 <script lang="ts">
     // src/lib/StatsPanel.svelte
     import { games, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
+    import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 
     type RarityBreakdown = {
         mythic: number;
@@ -102,41 +103,51 @@
             })
             .slice(0, 3);
     });
+
+    let rarityRows = $derived.by(() => [
+        { label: rarityLabelByIndex($i18n.language, 0), count: rarityBreakdown.mythic, className: 'mythic' },
+        { label: rarityLabelByIndex($i18n.language, 1), count: rarityBreakdown.legendary, className: 'legendary' },
+        { label: rarityLabelByIndex($i18n.language, 2), count: rarityBreakdown.epic, className: 'epic' },
+        { label: rarityLabelByIndex($i18n.language, 3), count: rarityBreakdown.veryRare, className: 'very-rare' },
+        { label: rarityLabelByIndex($i18n.language, 4), count: rarityBreakdown.rare, className: 'rare' },
+        { label: rarityLabelByIndex($i18n.language, 5), count: rarityBreakdown.uncommon, className: 'uncommon' },
+        { label: rarityLabelByIndex($i18n.language, 6), count: rarityBreakdown.common, className: 'common' }
+    ]);
 </script>
 
 <div class="stats-panel">
 
-    <h2 class="section-title">Stats</h2>
+    <h2 class="section-title">{$i18n.t('statsPanel.stats')}</h2>
 
     <div class="stat-card">
-        <span class="stat-label">Succès débloqués</span>
+        <span class="stat-label">{$i18n.t('statsPanel.unlocked')}</span>
         <span class="stat-value">{$totalUnlockedAchievements}</span>
-        <span class="stat-sub">sur {totalAchievements} total</span>
+        <span class="stat-sub">{$i18n.t('statsPanel.outOf', { total: totalAchievements })}</span>
     </div>
 
     <div class="stat-card">
-        <span class="stat-label">Progression moy.</span>
+        <span class="stat-label">{$i18n.t('statsPanel.avgProgress')}</span>
         <span class="stat-value">{avgProgression}%</span>
     </div>
 
     <div class="stat-card">
-        <span class="stat-label">Rareté moyenne</span>
+        <span class="stat-label">{$i18n.t('statsPanel.avgRarity')}</span>
         <span class="stat-value">{highRarityPct}%</span>
     </div>
 
-    <h2 class="section-title">Répartition Rareté</h2>
+    <h2 class="section-title">{$i18n.t('statsPanel.rarityBreakdown')}</h2>
 
     <ul class="rarity-list">
-        <li><span class="dot mythic"></span><span class="rarity-label">Mythique</span><span class="rarity-count">{rarityBreakdown.mythic}</span></li>
-        <li><span class="dot legendary"></span><span class="rarity-label">Légendaire</span><span class="rarity-count">{rarityBreakdown.legendary}</span></li>
-        <li><span class="dot epic"></span><span class="rarity-label">Épique</span><span class="rarity-count">{rarityBreakdown.epic}</span></li>
-        <li><span class="dot very-rare"></span><span class="rarity-label">Très rare</span><span class="rarity-count">{rarityBreakdown.veryRare}</span></li>
-        <li><span class="dot rare"></span><span class="rarity-label">Rare</span><span class="rarity-count">{rarityBreakdown.rare}</span></li>
-        <li><span class="dot uncommon"></span><span class="rarity-label">Peu commun</span><span class="rarity-count">{rarityBreakdown.uncommon}</span></li>
-        <li><span class="dot common"></span><span class="rarity-label">Commun</span><span class="rarity-count">{rarityBreakdown.common}</span></li>
+        {#each rarityRows as row (row.className)}
+            <li>
+                <span class={'dot ' + row.className}></span>
+                <span class="rarity-label">{row.label}</span>
+                <span class="rarity-count">{row.count}</span>
+            </li>
+        {/each}
     </ul>
 
-    <h2 class="section-title">Complétés récents</h2>
+    <h2 class="section-title">{$i18n.t('statsPanel.recentCompleted')}</h2>
 
     <ul class="completed-list">
         {#each recentlyCompleted as game (game.steam_id)}
@@ -166,7 +177,7 @@
 
 <style>
     .stats-panel {
-        background: #161616;
+        background: var(--bg-panel);
         border-radius: 12px;
         padding: 24px;
         overflow-y: auto;
@@ -181,15 +192,15 @@
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #6a7080;
+        color: var(--text-muted);
         margin-top: 16px;
         margin-bottom: 4px;
     }
 
     .stat-card {
-        background: #1a1a1a;
+        background: var(--surface-1);
         border-radius: 8px;
-        border: 0.5px solid #1e1e1e;
+        border: 0.5px solid var(--border-soft);
         padding: 16px;
         display: flex;
         flex-direction: column;
@@ -201,7 +212,7 @@
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #6a7080;
+        color: var(--text-muted);
     }
 
     .stat-value {
@@ -248,8 +259,8 @@
     .dot.uncommon  { background: #3ddc84; }
     .dot.common    { background: #6a7080; }
 
-    .rarity-label { flex: 1; color: #b0b8c8; }
-    .rarity-count { color: #ffffff; font-weight: 600; }
+    .rarity-label { flex: 1; color: var(--text-secondary); }
+    .rarity-count { color: var(--text-primary); font-weight: 600; }
 
     .completed-list {
         list-style: none;
@@ -265,7 +276,7 @@
         align-items: center;
         gap: 12px;
         padding: 10px 0;
-        border-bottom: 1px solid #1e1e1e;
+        border-bottom: 1px solid var(--border-soft);
     }
 
     .completed-item:last-child { border-bottom: none; }
@@ -275,7 +286,7 @@
         height: 36px;
         border-radius: 6px;
         object-fit: cover;
-        background: #1a1a1a;
+        background: var(--surface-2);
         flex-shrink: 0;
     }
 
@@ -289,7 +300,7 @@
     .completed-name {
         font-size: 13px;
         font-weight: 600;
-        color: #e0e0e0;
+        color: var(--text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;

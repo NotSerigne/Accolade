@@ -10,10 +10,19 @@
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
     import { listen } from '@tauri-apps/api/event';
+    import { goto } from '$app/navigation';
+    import { resolve } from '$app/paths';
+    import { page } from '$app/state';
     import Sidebar from '$lib/Sidebar.svelte';
     import Topbar from '$lib/Topbar.svelte';
 
     let { children } = $props();
+    let isSetupRoute = $derived(page.url.pathname.startsWith('/setup'));
+
+    function hasEmptyApiKeys(): boolean {
+        const s = get(settings);
+        return !s.steamApiKey.trim() && !s.steamGridDbApiKey.trim();
+    }
 
     onMount(() => {
         setupAchievementsRealtimeSync();
@@ -25,6 +34,18 @@
         void (async () => {
             await loadSettings();
             const s = get(settings);
+            const needsSetup = !s.setupCompleted || hasEmptyApiKeys();
+
+            if (needsSetup && !isSetupRoute) {
+                await goto(resolve('/setup/'));
+                return;
+            }
+
+            if (!needsSetup && isSetupRoute) {
+                await goto(resolve('/'));
+                return;
+            }
+
             await refreshSteamUser();
             await syncSteamMetadata(s.steamApiKey, s.steamGridDbApiKey);
         })();
@@ -43,13 +64,15 @@
     <link rel="icon" href={favicon} />
 </svelte:head>
 
-<div class="app-container">
-    <div class="sidebar-slot">
-        <Sidebar />
-    </div>
-    <div class="topbar-slot">
-        <Topbar />
-    </div>
+<div class="app-container" class:setup={isSetupRoute}>
+    {#if !isSetupRoute}
+        <div class="sidebar-slot">
+            <Sidebar />
+        </div>
+        <div class="topbar-slot">
+            <Topbar />
+        </div>
+    {/if}
     <div class="content-slot">
         {@render children()}
     </div>
@@ -78,7 +101,7 @@
         gap: 0;
         padding: 0;
         overflow: hidden;
-        background: #000;
+        background: var(--bg-app);
     }
 
     .sidebar-slot {
@@ -99,6 +122,18 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+    }
+
+    .app-container.setup {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr;
+        padding: 8px;
+    }
+
+    .app-container.setup .content-slot {
+        grid-column: 1 / 2;
+        grid-row: 1 / 2;
+        padding: 0;
     }
 
     .settings-overlay {
@@ -127,8 +162,8 @@
         position: relative;
         width: min(1100px, 100%);
         height: min(88vh, 860px);
-        background: #161616;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: var(--bg-panel);
+        border: 1px solid var(--border-soft);
         border-radius: 18px;
         overflow: hidden;
         box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
