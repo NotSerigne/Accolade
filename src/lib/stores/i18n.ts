@@ -755,7 +755,8 @@ export function translate(
 	key: TranslationKey,
 	params?: TranslationParams
 ): string {
-	const localized = (translations[language] as any)[key] ?? translations.fr[key];
+	const localized =
+		(translations[language] as Record<TranslationKey, string>)[key] ?? translations.fr[key];
 	return interpolate(localized, params);
 }
 

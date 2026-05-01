@@ -1,44 +1,49 @@
 /* src/routes/(app)/layout.css */
 @import 'tailwindcss';
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
 
 :root {
-    --accent: #c8a96e;
-    --text-primary: #ffffff;
-    --text-secondary: #b4bccf;
-    --text-muted: #6a7080;
-    --bg-app: #0d0d0d;
-    --bg-sidebar: #0e0e0e;
-    --bg-panel: #161616;
-    --surface-1: #1a1a1a;
-    --surface-2: rgba(255, 255, 255, 0.05);
-    --surface-3: #22242a;
-    --surface-hover: rgba(255, 255, 255, 0.1);
-    --border-soft: rgba(255, 255, 255, 0.1);
+	--accent: #c8a96e;
+	--text-primary: #ffffff;
+	--text-secondary: #b4bccf;
+	--text-muted: #6a7080;
+	--bg-app: #0d0d0d;
+	--bg-sidebar: #0e0e0e;
+	--bg-panel: #161616;
+	--surface-1: #1a1a1a;
+	--surface-2: rgba(255, 255, 255, 0.05);
+	--surface-3: #22242a;
+	--surface-hover: rgba(255, 255, 255, 0.1);
+	--border-soft: rgba(255, 255, 255, 0.1);
 }
 
 :root[data-theme='light'] {
-    --text-primary: #101828;
-    --text-secondary: #334155;
-    --text-muted: #64748b;
-    --bg-app: #edf1f6;
-    --bg-sidebar: #e2e8f0;
-    --bg-panel: #f8fafc;
-    --surface-1: #ffffff;
-    --surface-2: rgba(148, 163, 184, 0.16);
-    --surface-3: #f1f5f9;
-    --surface-hover: rgba(148, 163, 184, 0.26);
-    --border-soft: rgba(15, 23, 42, 0.12);
+	--text-primary: #101828;
+	--text-secondary: #334155;
+	--text-muted: #64748b;
+	--bg-app: #edf1f6;
+	--bg-sidebar: #e2e8f0;
+	--bg-panel: #f8fafc;
+	--surface-1: #ffffff;
+	--surface-2: rgba(148, 163, 184, 0.16);
+	--surface-3: #f1f5f9;
+	--surface-hover: rgba(148, 163, 184, 0.26);
+	--border-soft: rgba(15, 23, 42, 0.12);
 }
 
-html, body {
-    background: var(--bg-app);
-    color: var(--text-primary);
-    font-family: 'Roboto', sans-serif;
-    height: 100vh;
-    width: 100vw;
-    overflow: hidden;
-    margin: 0;
-    padding: 0;
+html,
+body {
+	background: var(--bg-app);
+	color: var(--text-primary);
+	font-family: 'Roboto', sans-serif;
+	height: 100vh;
+	width: 100vw;
+	overflow: hidden;
+	margin: 0;
+	padding: 0;
 }
