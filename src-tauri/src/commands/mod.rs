@@ -4,6 +4,7 @@ use crate::achievements::models::{Achievement, Emulator, Game};
 use crate::achievements::steam::{fetch_owned_games, fetch_steam_user, OwnedGame, SteamUser};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
 use std::collections::HashSet;
+use tauri::Manager;
 
 #[tauri::command]
 pub fn test_achievement_notif(app_handle: tauri::AppHandle) {
@@ -50,6 +51,18 @@ pub async fn get_steam_owned_games(
     fetch_owned_games(&api_key, &steam_id, &language)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn exit_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
+}
+
+#[tauri::command]
+pub fn hide_app(app_handle: tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
 }
 
 #[tauri::command]

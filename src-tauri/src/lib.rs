@@ -369,7 +369,9 @@ pub fn run() {
             commands::get_all_games,
             commands::sync_steam_metadata,
             commands::get_steam_user,
-            commands::get_steam_owned_games
+            commands::get_steam_owned_games,
+            commands::exit_app,
+            commands::hide_app
         ])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application")

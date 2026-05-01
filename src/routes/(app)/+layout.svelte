@@ -10,6 +10,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { listen } from '@tauri-apps/api/event';
+	import { invoke } from '@tauri-apps/api/core';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -38,9 +39,11 @@
 		appWindow
 			.onCloseRequested(async (event) => {
 				const s = get(settings);
+				event.preventDefault();
 				if (s.minimizeToTray) {
-					event.preventDefault();
-					await appWindow.hide();
+					await invoke('hide_app');
+				} else {
+					await invoke('exit_app');
 				}
 			})
 			.then((unlisten) => {
@@ -52,7 +55,7 @@
 			const s = get(settings);
 
 			if (s.startMinimized) {
-				await appWindow.hide();
+				await invoke('hide_app');
 			}
 
 			const needsSetup = !s.setupCompleted || hasEmptyApiKeys();
