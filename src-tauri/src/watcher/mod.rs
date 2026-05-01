@@ -60,7 +60,6 @@ fn merge_live_achievements(
             seen_schema_keys.insert(key.clone());
 
             if let Some(live_ach) = live_map.get(&key) {
-
                 s.unlocked = live_ach.unlocked;
                 if live_ach.unlocked {
                     if let Some(t) = live_ach.unlocked_time {
@@ -86,7 +85,6 @@ fn merge_live_achievements(
                     s.icon = live_ach.icon.clone();
                 }
             } else if previous_live_keys.contains(&key) && !current_live_keys.contains(&key) {
-
                 s.unlocked = false;
                 s.unlocked_time = None;
             }
@@ -143,6 +141,7 @@ fn display_game_name(
     game: &Game,
     name_cache: &mut HashMap<u32, String>,
     api_lookup_attempted: &mut HashSet<u32>,
+    language: &str,
 ) -> String {
     let direct_name = game.name.trim();
     if !direct_name.is_empty() && !is_technical_name(direct_name) {
@@ -155,7 +154,7 @@ fn display_game_name(
 
     if game.steam_id > 0 && api_lookup_attempted.insert(game.steam_id) {
         if let Ok(Some(api_name)) =
-            tauri::async_runtime::block_on(fetch_app_name_by_appid(game.steam_id))
+            tauri::async_runtime::block_on(fetch_app_name_by_appid(game.steam_id, language))
         {
             if !is_technical_name(&api_name) {
                 name_cache.insert(game.steam_id, api_name.clone());
@@ -169,19 +168,80 @@ fn display_game_name(
         return path_name;
     }
 
-    format!("Jeu inconnu (AppID {})", game.steam_id)
+    let unknown = match language {
+        "fr" => "Jeu inconnu",
+        "en" => "Unknown Game",
+        "es" => "Juego desconocido",
+        "de" => "Unbekanntes Spiel",
+        "it" => "Gioco sconosciuto",
+        _ => "Unknown Game",
+    };
+
+    format!("{} (AppID {})", unknown, game.steam_id)
 }
 
-fn rarity_label(percentage: Option<f32>) -> String {
-    match percentage {
-        Some(p) if p <= 0.1 => "Mythique".to_string(),
-        Some(p) if p <= 1.0 => "Légendaire".to_string(),
-        Some(p) if p <= 3.0 => "Épique".to_string(),
-        Some(p) if p <= 7.0 => "Très rare".to_string(),
-        Some(p) if p <= 15.0 => "Rare".to_string(),
-        Some(p) if p <= 35.0 => "Peu commun".to_string(),
-        Some(_) => "Commun".to_string(),
-        None => String::new(),
+fn rarity_label(percentage: Option<f32>, language: &str) -> String {
+    match language {
+        "fr" => match percentage {
+            Some(p) if p <= 0.1 => "Mythique".to_string(),
+            Some(p) if p <= 1.0 => "Légendaire".to_string(),
+            Some(p) if p <= 3.0 => "Épique".to_string(),
+            Some(p) if p <= 7.0 => "Très rare".to_string(),
+            Some(p) if p <= 15.0 => "Rare".to_string(),
+            Some(p) if p <= 35.0 => "Peu commun".to_string(),
+            Some(_) => "Commun".to_string(),
+            None => String::new(),
+        },
+        "en" => match percentage {
+            Some(p) if p <= 0.1 => "Mythic".to_string(),
+            Some(p) if p <= 1.0 => "Legendary".to_string(),
+            Some(p) if p <= 3.0 => "Epic".to_string(),
+            Some(p) if p <= 7.0 => "Very Rare".to_string(),
+            Some(p) if p <= 15.0 => "Rare".to_string(),
+            Some(p) if p <= 35.0 => "Uncommon".to_string(),
+            Some(_) => "Common".to_string(),
+            None => String::new(),
+        },
+        "es" => match percentage {
+            Some(p) if p <= 0.1 => "Mítico".to_string(),
+            Some(p) if p <= 1.0 => "Legendario".to_string(),
+            Some(p) if p <= 3.0 => "Épico".to_string(),
+            Some(p) if p <= 7.0 => "Muy raro".to_string(),
+            Some(p) if p <= 15.0 => "Raro".to_string(),
+            Some(p) if p <= 35.0 => "Poco común".to_string(),
+            Some(_) => "Común".to_string(),
+            None => String::new(),
+        },
+        "de" => match percentage {
+            Some(p) if p <= 0.1 => "Mythisch".to_string(),
+            Some(p) if p <= 1.0 => "Legendär".to_string(),
+            Some(p) if p <= 3.0 => "Episch".to_string(),
+            Some(p) if p <= 7.0 => "Sehr selten".to_string(),
+            Some(p) if p <= 15.0 => "Selten".to_string(),
+            Some(p) if p <= 35.0 => "Ungewöhnlich".to_string(),
+            Some(_) => "Häufig".to_string(),
+            None => String::new(),
+        },
+        "it" => match percentage {
+            Some(p) if p <= 0.1 => "Mitico".to_string(),
+            Some(p) if p <= 1.0 => "Leggendario".to_string(),
+            Some(p) if p <= 3.0 => "Epico".to_string(),
+            Some(p) if p <= 7.0 => "Molto raro".to_string(),
+            Some(p) if p <= 15.0 => "Raro".to_string(),
+            Some(p) if p <= 35.0 => "Non comune".to_string(),
+            Some(_) => "Comune".to_string(),
+            None => String::new(),
+        },
+        _ => match percentage {
+            Some(p) if p <= 0.1 => "Mythic".to_string(),
+            Some(p) if p <= 1.0 => "Legendary".to_string(),
+            Some(p) if p <= 3.0 => "Epic".to_string(),
+            Some(p) if p <= 7.0 => "Very Rare".to_string(),
+            Some(p) if p <= 15.0 => "Rare".to_string(),
+            Some(p) if p <= 35.0 => "Uncommon".to_string(),
+            Some(_) => "Common".to_string(),
+            None => String::new(),
+        },
     }
 }
 
@@ -296,10 +356,20 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                         .collect();
 
                     if !newly_unlocked.is_empty() {
+                        let language = {
+                            let state = app_handle.state::<AppState>();
+                            state
+                                .language
+                                .lock()
+                                .map(|l| l.clone())
+                                .unwrap_or_else(|_| "fr".to_string())
+                        };
+
                         let display_name = display_game_name(
                             game,
                             &mut game_name_cache,
                             &mut api_lookup_attempted,
+                            &language,
                         );
                         let total = ui_total;
                         let enriched_game_achievements: Vec<Achievement> = ui_achievements.clone();
@@ -333,7 +403,7 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                                 .and_then(|e| e.completionpercentage.parse::<f32>().ok())
                                 .filter(|&p| p > 0.0);
 
-                            let rarity = rarity_label(completion_pct);
+                            let rarity = rarity_label(completion_pct, &language);
                             let is_platinum = total > 0 && unlocked_count == total;
 
                             let payload = AchievementNotifPayload {
@@ -377,12 +447,21 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
 }
 
 pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
+    let language = {
+        let state = app_handle.state::<AppState>();
+        state
+            .language
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_else(|_| "fr".to_string())
+    };
+
     let payload = AchievementNotifPayload {
         name: "Test Achievement".to_string(),
         desc: "This is a test notification".to_string(),
         icon: None,
-        rarity: "EPIC".to_string(),
-        completionpercentage: Some(12.5),
+        rarity: rarity_label(Some(2.5), &language),
+        completionpercentage: Some(2.5),
         unlocked: 5,
         total: 50,
         test: true,

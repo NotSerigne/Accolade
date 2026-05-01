@@ -8,6 +8,7 @@
 	import { resolve } from '$app/paths';
 	import { open } from '@tauri-apps/plugin-shell';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 
 	let { game }: { game: Game | null } = $props();
 
@@ -226,13 +227,13 @@
 	function rarityLabel(pct: string): string {
 		const n = parseFloat(pct);
 		if (isNaN(n)) return '';
-		if (n <= 0.1) return 'Mythique';
-		if (n <= 1) return 'Légendaire';
-		if (n <= 3) return 'Épique';
-		if (n <= 7) return 'Très rare';
-		if (n <= 15) return 'Rare';
-		if (n <= 35) return 'Peu commun';
-		return 'Commun';
+		if (n <= 0.1) return rarityLabelByIndex($i18n.language, 0);
+		if (n <= 1) return rarityLabelByIndex($i18n.language, 1);
+		if (n <= 3) return rarityLabelByIndex($i18n.language, 2);
+		if (n <= 7) return rarityLabelByIndex($i18n.language, 3);
+		if (n <= 15) return rarityLabelByIndex($i18n.language, 4);
+		if (n <= 35) return rarityLabelByIndex($i18n.language, 5);
+		return rarityLabelByIndex($i18n.language, 6);
 	}
 
 	type RarityPalette = {

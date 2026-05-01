@@ -45,8 +45,9 @@ pub async fn get_steam_user(
 pub async fn get_steam_owned_games(
     api_key: String,
     steam_id: String,
+    language: String,
 ) -> Result<Vec<OwnedGame>, String> {
-    fetch_owned_games(&api_key, &steam_id)
+    fetch_owned_games(&api_key, &steam_id, &language)
         .await
         .map_err(|e| e.to_string())
 }
@@ -56,11 +57,12 @@ pub(crate) async fn sync_steam_metadata(
     api_key: String,
     steam_id: String,
     sgdb_api_key: String,
+    language: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Game>, String> {
     println!(
-        "[DEBUG][sync_steam_metadata] Start. steam_id='{}'",
-        steam_id
+        "[DEBUG][sync_steam_metadata] Start. steam_id='{}', language='{}'",
+        steam_id, language
     );
     dotenv::dotenv().ok();
     let effective_api_key = if !api_key.trim().is_empty() {
@@ -79,6 +81,12 @@ pub(crate) async fn sync_steam_metadata(
             .lock()
             .map_err(|_| String::from("Impossible d'acceder a la cle API"))?;
         *key = effective_api_key.clone();
+
+        let mut lang = state
+            .language
+            .lock()
+            .map_err(|_| String::from("Impossible d'acceder a la langue"))?;
+        *lang = language.clone();
     }
 
     let mut cloned_games: Vec<Game> = {
@@ -124,7 +132,7 @@ pub(crate) async fn sync_steam_metadata(
             "[DEBUG][sync_steam_metadata] Fetching owned games for {}",
             steam_id
         );
-        match fetch_owned_games(&effective_api_key, &steam_id).await {
+        match fetch_owned_games(&effective_api_key, &steam_id, &language).await {
             Ok(owned) => {
                 println!(
                     "[DEBUG][sync_steam_metadata] Found {} owned games",
@@ -178,7 +186,7 @@ pub(crate) async fn sync_steam_metadata(
             "[DEBUG][sync_steam_metadata] Enriching {} games with Steam metadata",
             cloned_games.len()
         );
-        enrich_games_with_steam(&mut cloned_games, &effective_api_key, &steam_id).await;
+        enrich_games_with_steam(&mut cloned_games, &effective_api_key, &steam_id, &language).await;
     }
 
     let sgdb_key = if !sgdb_api_key.trim().is_empty() {

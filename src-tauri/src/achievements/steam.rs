@@ -190,10 +190,19 @@ pub async fn fetch_steam_user(
 pub async fn fetch_owned_games(
     api_key: &str,
     steam_id: &str,
+    language: &str,
 ) -> Result<Vec<OwnedGame>, reqwest::Error> {
     let client = reqwest::Client::new();
+    let steam_language = match language {
+        "fr" => "french",
+        "en" => "english",
+        "es" => "spanish",
+        "de" => "german",
+        "it" => "italian",
+        _ => "english",
+    };
     let url = format!(
-        "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={steam_id}&include_appinfo=1&format=json"
+        "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={steam_id}&include_appinfo=1&l={steam_language}&format=json"
     );
     let resp = client
         .get(url)
@@ -208,10 +217,19 @@ pub async fn fetch_player_achievements(
     api_key: &str,
     steam_id: &str,
     app_id: u32,
+    language: &str,
 ) -> Result<HashMap<String, (bool, u64)>, String> {
     let client = reqwest::Client::new();
+    let steam_language = match language {
+        "fr" => "french",
+        "en" => "english",
+        "es" => "spanish",
+        "de" => "german",
+        "it" => "italian",
+        _ => "english",
+    };
     let url = format!(
-        "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/?appid={app_id}&key={api_key}&steamid={steam_id}"
+        "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/?appid={app_id}&key={api_key}&steamid={steam_id}&l={steam_language}"
     );
 
     let resp = client
@@ -244,10 +262,20 @@ pub async fn fetch_player_achievements(
 pub async fn fetch_app_name_by_appid_with_client(
     client: &reqwest::Client,
     steam_id: u32,
+    language: &str,
 ) -> Result<Option<String>, reqwest::Error> {
+    let steam_language = match language {
+        "fr" => "french",
+        "en" => "english",
+        "es" => "spanish",
+        "de" => "german",
+        "it" => "italian",
+        _ => "english",
+    };
+
     let details_map = client
         .get(format!(
-            "https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french"
+            "https://store.steampowered.com/api/appdetails?appids={steam_id}&l={steam_language}"
         ))
         .send()
         .await?
@@ -263,38 +291,52 @@ pub async fn fetch_app_name_by_appid_with_client(
     Ok(app_name)
 }
 
-pub async fn fetch_app_name_by_appid(steam_id: u32) -> Result<Option<String>, reqwest::Error> {
+pub async fn fetch_app_name_by_appid(
+    steam_id: u32,
+    language: &str,
+) -> Result<Option<String>, reqwest::Error> {
     let client = reqwest::Client::new();
-    fetch_app_name_by_appid_with_client(&client, steam_id).await
+    fetch_app_name_by_appid_with_client(&client, steam_id, language).await
 }
 
 pub async fn fetch_steam_metadata_with_client(
     client: &reqwest::Client,
     steam_id: u32,
     api_key: &str,
+    language: &str,
 ) -> Result<SteamMetadata, reqwest::Error> {
-    let fr_url = format!(
-        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=french&format=xml"
+    let steam_language = match language {
+        "fr" => "french",
+        "en" => "english",
+        "es" => "spanish",
+        "de" => "german",
+        "it" => "italian",
+        _ => "english",
+    };
+
+    let lang_url = format!(
+        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language={steam_language}&format=xml"
     );
     let en_url = format!(
         "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
     );
-    let details_url =
-        format!("https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french");
+    let details_url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={steam_id}&l={steam_language}"
+    );
 
-    let fr_req = client.get(fr_url).send();
+    let lang_req = client.get(lang_url).send();
     let en_req = client.get(en_url).send();
     let details_req = client.get(details_url).send();
 
-    let (fr_res, en_res, details_res) = futures::join!(fr_req, en_req, details_req);
+    let (lang_res, en_res, details_res) = futures::join!(lang_req, en_req, details_req);
 
-    let xml_fr = fr_res?.text().await?;
+    let xml_lang = lang_res?.text().await?;
     let xml_en = en_res?.text().await?;
     let details_map = details_res?
         .json::<HashMap<String, AppDetailsEnvelope>>()
         .await?;
 
-    let achievements_fr = parse_achievements_xml(&xml_fr, steam_id);
+    let achievements_lang = parse_achievements_xml(&xml_lang, steam_id);
     let achievements_en = parse_achievements_xml(&xml_en, steam_id);
 
     let en_map: HashMap<String, &RawAchievement> = achievements_en
@@ -302,8 +344,8 @@ pub async fn fetch_steam_metadata_with_client(
         .map(|a| (a.internal_name.to_lowercase(), a))
         .collect();
 
-    let source = if !achievements_fr.is_empty() {
-        &achievements_fr
+    let source = if !achievements_lang.is_empty() {
+        &achievements_lang
     } else {
         &achievements_en
     };

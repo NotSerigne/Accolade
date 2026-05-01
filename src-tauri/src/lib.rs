@@ -10,6 +10,7 @@ use tauri::{window::Color, Manager};
 pub struct AppState {
     pub(crate) games: Mutex<Vec<Game>>,
     pub(crate) steam_api_key: Mutex<String>,
+    pub(crate) language: Mutex<String>,
 }
 
 fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> Vec<Achievement> {
@@ -74,7 +75,12 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
     merged
 }
 
-pub(crate) async fn enrich_games_with_steam(games: &mut Vec<Game>, api_key: &str, steam_id: &str) {
+pub(crate) async fn enrich_games_with_steam(
+    games: &mut Vec<Game>,
+    api_key: &str,
+    steam_id: &str,
+    language: &str,
+) {
     if api_key.trim().is_empty() || games.is_empty() {
         return;
     }
@@ -84,6 +90,7 @@ pub(crate) async fn enrich_games_with_steam(games: &mut Vec<Game>, api_key: &str
     let client = reqwest::Client::new();
     let api_key_str = api_key.to_string();
     let steam_id_str = steam_id.to_string();
+    let language_str = language.to_string();
 
     let jobs: Vec<(u32, crate::achievements::models::Emulator, Vec<Achievement>)> = games
         .iter()
@@ -100,13 +107,16 @@ pub(crate) async fn enrich_games_with_steam(games: &mut Vec<Game>, api_key: &str
         let client = client.clone();
         let api_key = api_key_str.clone();
         let steam_id_inner = steam_id_str.clone();
+        let language = language_str.clone();
         async move {
-            let metadata = fetch_steam_metadata_with_client(&client, steam_id, &api_key)
+            let metadata = fetch_steam_metadata_with_client(&client, steam_id, &api_key, &language)
                 .await
                 .ok();
 
             let player_achievements_res = if !steam_id_inner.is_empty() {
-                Some(fetch_player_achievements(&api_key, &steam_id_inner, steam_id).await)
+                Some(
+                    fetch_player_achievements(&api_key, &steam_id_inner, steam_id, &language).await,
+                )
             } else {
                 None
             };
@@ -313,6 +323,7 @@ pub fn run() {
             app.manage(AppState {
                 games: Mutex::new(games.clone()),
                 steam_api_key: Mutex::new(api_key),
+                language: Mutex::new("fr".to_string()),
             });
             watcher::start(games, app.handle().clone());
 

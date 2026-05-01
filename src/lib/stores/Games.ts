@@ -81,12 +81,13 @@ export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): P
 
     isSyncing.set(true);
     try {
-        console.log('Syncing Steam metadata for ID:', s.steamId);
+        console.log('Syncing Steam metadata for ID:', s.steamId, 'Language:', s.language);
 
         const result = await invoke<Game[]>('sync_steam_metadata', {
             apiKey: effectiveApiKey,
             steamId: s.steamId,
-            sgdbApiKey: effectiveSgdbApiKey
+            sgdbApiKey: effectiveSgdbApiKey,
+            language: s.language
         });
 
         if (result && result.length > 0) {
