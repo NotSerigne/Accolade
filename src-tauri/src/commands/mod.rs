@@ -101,14 +101,18 @@ pub(crate) async fn sync_steam_metadata(
         cloned_games.len()
     );
 
-    let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
-        Box::new(crate::emulators::goldberg::Parser),
-        Box::new(crate::emulators::empress::Parser),
-        Box::new(crate::emulators::onlinefix::Parser),
-        Box::new(crate::emulators::rune::Parser),
-        Box::new(crate::emulators::codex::Parser),
-    ];
-    let local_games = crate::emulators::game_scanner(parsers);
+    let local_games = tauri::async_runtime::spawn_blocking(|| {
+        let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
+            Box::new(crate::emulators::goldberg::Parser),
+            Box::new(crate::emulators::empress::Parser),
+            Box::new(crate::emulators::onlinefix::Parser),
+            Box::new(crate::emulators::rune::Parser),
+            Box::new(crate::emulators::codex::Parser),
+        ];
+        crate::emulators::game_scanner(parsers)
+    })
+    .await
+    .unwrap_or_default();
     let mut existing_ids: HashSet<u32> = cloned_games.iter().map(|g| g.steam_id).collect();
     let mut added_local = 0;
 

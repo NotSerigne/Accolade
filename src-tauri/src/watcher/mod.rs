@@ -245,35 +245,51 @@ fn rarity_label(percentage: Option<f32>, language: &str) -> String {
     }
 }
 
-pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
+pub fn start(app_handle: tauri::AppHandle) {
     let (tx, rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
         let mut watcher = recommended_watcher(tx).unwrap();
-        let mut unlocked_by_game: HashMap<u32, HashSet<String>> = games
-            .iter()
-            .map(|game| {
-                let unlocked = game
-                    .achievements
-                    .iter()
-                    .filter(|a| a.unlocked || a.unlocked_time.is_some())
-                    .map(|a| a.key.trim().to_lowercase())
-                    .collect();
-                (game.steam_id, unlocked)
-            })
-            .collect();
-        let mut live_keys_by_game: HashMap<u32, HashSet<String>> = games
-            .iter()
-            .map(|game| (game.steam_id, live_keys(&game.achievements)))
-            .collect();
 
+        let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
+            Box::new(crate::emulators::goldberg::Parser),
+            Box::new(crate::emulators::empress::Parser),
+            Box::new(crate::emulators::onlinefix::Parser),
+            Box::new(crate::emulators::rune::Parser),
+            Box::new(crate::emulators::codex::Parser),
+        ];
+
+        let mut watch_paths = HashSet::new();
+        for parser in &parsers {
+            for loc in parser.known_locations() {
+                if loc.exists() {
+                    watch_paths.insert(loc);
+                }
+            }
+        }
+
+        for path in watch_paths {
+            let _ = watcher.watch(&path, RecursiveMode::Recursive);
+        }
+
+        let mut unlocked_by_game: HashMap<u32, HashSet<String>> = HashMap::new();
+        let mut live_keys_by_game: HashMap<u32, HashSet<String>> = HashMap::new();
         let mut game_name_cache: HashMap<u32, String> = HashMap::new();
         let mut api_lookup_attempted: HashSet<u32> = HashSet::new();
 
-        for game in &games {
-            let path = std::path::Path::new(&game.path_buf);
-            if path.exists() {
-                let _ = watcher.watch(path, RecursiveMode::Recursive);
+        // Initialize state from AppState if any
+        {
+            if let Ok(games) = app_handle.state::<AppState>().games.lock() {
+                for game in games.iter() {
+                    let unlocked = game
+                        .achievements
+                        .iter()
+                        .filter(|a| a.unlocked || a.unlocked_time.is_some())
+                        .map(|a| a.key.trim().to_lowercase())
+                        .collect();
+                    unlocked_by_game.insert(game.steam_id, unlocked);
+                    live_keys_by_game.insert(game.steam_id, live_keys(&game.achievements));
+                }
             }
         }
 
@@ -292,6 +308,11 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                     paths_changed.insert(p);
                 }
             }
+
+            let games = {
+                let state = app_handle.state::<AppState>();
+                state.games.lock().map(|g| g.clone()).unwrap_or_default()
+            };
 
             for game in &games {
                 let game_path = std::path::Path::new(&game.path_buf);

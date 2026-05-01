@@ -1,7 +1,6 @@
 // src-tauri/src/lib.rs
 use crate::achievements::models::{Achievement, Game};
 use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata_with_client};
-use crate::emulators::{codex, empress, game_scanner, goldberg, onlinefix, rune, EmulatorParser};
 use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -280,15 +279,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             dotenv::dotenv().ok();
-            let parsers: Vec<Box<dyn EmulatorParser>> = vec![
-                Box::new(goldberg::Parser),
-                Box::new(empress::Parser),
-                Box::new(onlinefix::Parser),
-                Box::new(rune::Parser),
-                Box::new(codex::Parser),
-            ];
 
-            let games = game_scanner(parsers);
             let api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
 
             let overlay_url = if cfg!(debug_assertions) {
@@ -314,9 +305,20 @@ pub fn run() {
             .visible(false)
             .build()?;
 
+            let quit_i =
+                tauri::menu::MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
+            let menu = tauri::menu::Menu::with_items(app, &[&quit_i])?;
+
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Accolade")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "quit" {
+                        app.exit(0);
+                    }
+                })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
@@ -344,11 +346,13 @@ pub fn run() {
             }
 
             app.manage(AppState {
-                games: Mutex::new(games.clone()),
+                games: Mutex::new(Vec::new()),
                 steam_api_key: Mutex::new(api_key),
                 language: Mutex::new("fr".to_string()),
             });
-            watcher::start(games, app.handle().clone());
+
+            let app_handle = app.handle().clone();
+            watcher::start(app_handle);
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
