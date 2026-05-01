@@ -1,5 +1,6 @@
 <script lang="ts">
 	// src/lib/AchievementNotif.svelte
+	import { i18n } from '$lib/stores/i18n.js';
 	interface Achievement {
 		name?: string;
 		desc?: string;
@@ -58,9 +59,9 @@
 		if (!achievement?.unlocked_time) return null;
 		const d = new Date(achievement.unlocked_time * 1000);
 		return (
-			d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+			d.toLocaleDateString($i18n.locale, { day: '2-digit', month: '2-digit', year: 'numeric' }) +
 			' · ' +
-			d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+			d.toLocaleTimeString($i18n.locale, { hour: '2-digit', minute: '2-digit' })
 		);
 	});
 
@@ -92,7 +93,7 @@
 					? PLATINUM_GRADIENT
 					: rarityStyle().accent}; box-shadow: 0 0 12px 2px {rarityStyle().glow};"
 			>
-				{achievement.is_platinum ? '🏆 PLATINE — 100%' : 'ACHIEVEMENT UNLOCKED'}
+				{achievement.is_platinum ? $i18n.t('notif.platinum') : $i18n.t('notif.unlocked')}
 			</span>
 		</div>
 		{#key achievement}

@@ -4,8 +4,9 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { i18n, languageOptions } from '$lib/stores/i18n.js';
+	import { syncSteamMetadata } from '$lib/stores/Games.js';
+	import { refreshSteamUser } from '$lib/stores/user.js';
 	import { applyTheme, saveSettings, settings, type AppSettings } from '$lib/stores/settings.js';
-
 	let draft = $state<AppSettings>({ ...get(settings) });
 	let isSaving = $state(false);
 	let saveError = $state('');
@@ -139,6 +140,11 @@
 			};
 			await saveSettings(next);
 			saveSuccess = $i18n.t('setup.saved');
+
+			// Trigger immediate sync
+			void refreshSteamUser();
+			void syncSteamMetadata(next.steamApiKey, next.steamGridDbApiKey);
+
 			await goto(resolve('/'));
 		} catch (error) {
 			saveError = $i18n.t('setup.errorSave', {

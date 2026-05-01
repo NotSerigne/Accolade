@@ -146,6 +146,9 @@ const translations = {
 		'button.save': 'Enregistrer',
 		'button.remove': 'Supprimer',
 
+		'notif.platinum': '🏆 COMPLÉTÉ — 100%',
+		'notif.unlocked': 'SUCCÈS DÉBLOQUÉ',
+
 		'game.notFound': 'Jeu introuvable.',
 		'game.total': 'TOTAL',
 		'game.unlocked': 'DÉBLOQUÉS',
@@ -284,6 +287,9 @@ const translations = {
 		'button.close': 'Close',
 		'button.save': 'Save',
 		'button.remove': 'Remove',
+
+		'notif.platinum': '🏆 COMPLETED — 100%',
+		'notif.unlocked': 'ACHIEVEMENT UNLOCKED',
 
 		'game.notFound': 'Game not found.',
 		'game.total': 'TOTAL',
@@ -424,6 +430,9 @@ const translations = {
 		'button.save': 'Guardar',
 		'button.remove': 'Eliminar',
 
+		'notif.platinum': '🏆 COMPLETADO — 100%',
+		'notif.unlocked': 'LOGRO DESBLOQUEADO',
+
 		'game.notFound': 'Juego no encontrado.',
 		'game.total': 'TOTAL',
 		'game.unlocked': 'DESBLOQUEADOS',
@@ -563,6 +572,9 @@ const translations = {
 		'button.save': 'Speichern',
 		'button.remove': 'Entfernen',
 
+		'notif.platinum': '🏆 ABGESCHLOSSEN — 100%',
+		'notif.unlocked': 'ERFOLG FREIGESCHALTET',
+
 		'game.notFound': 'Spiel nicht gefunden.',
 		'game.total': 'GESAMT',
 		'game.unlocked': 'FREIGESCHALTET',
@@ -701,6 +713,9 @@ const translations = {
 		'button.close': 'Chiudi',
 		'button.save': 'Salva',
 		'button.remove': 'Rimuovi',
+
+		'notif.platinum': '🏆 COMPLETATO — 100%',
+		'notif.unlocked': 'OBIETTIVO SBLOCCATO',
 
 		'game.notFound': 'Gioco non trovato.',
 		'game.total': 'TOTALE',
