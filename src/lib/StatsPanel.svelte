@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/lib/StatsPanel.svelte
     import { games, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
 
     type RarityBreakdown = {
@@ -12,20 +13,17 @@
     };
 
     function getGameIcon(game: Game): string {
-        // Priority 1: Steam Grid DB icon (SGDB)
+
         if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
             return game.steamgrid_icon_url;
         }
 
-        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
         if (game.game_icon && game.game_icon.startsWith('http')) {
             return game.game_icon;
         }
 
-        // Priority 3: header image
         if (game.header_image_url) return game.header_image_url;
 
-        // Final Fallback: Steam API header image (Cloudflare)
         return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
@@ -141,7 +139,7 @@
     <h2 class="section-title">Complétés récents</h2>
 
     <ul class="completed-list">
-        {#each recentlyCompleted as game}
+        {#each recentlyCompleted as game (game.steam_id)}
             <li class="completed-item">
                 <img
                     src={getGameIcon(game)}
@@ -219,7 +217,6 @@
         margin-top: 2px;
     }
 
-    /* Rarity breakdown */
     .rarity-list {
         list-style: none;
         padding: 0;
@@ -254,7 +251,6 @@
     .rarity-label { flex: 1; color: #b0b8c8; }
     .rarity-count { color: #ffffff; font-weight: 600; }
 
-    /* Completed list */
     .completed-list {
         list-style: none;
         padding: 0;

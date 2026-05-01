@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { games, type Game, type Achievement } from '$lib/stores/Games.js';
+    // src/routes/(app)/objectives/+page.svelte
+    import { games, type Game } from '$lib/stores/Games.js';
 
-    let sortBy = $state('progression'); // 'progression' | 'remaining'
+    let sortBy = $state('progression');
 
     let sortedGames = $derived.by(() => {
         const mapped = $games.map(g => {
@@ -31,20 +32,17 @@
     });
 
     function getGameIcon(game: Game): string {
-        // Priority 1: Steam Grid DB icon (SGDB)
+
         if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
             return game.steamgrid_icon_url;
         }
 
-        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
         if (game.game_icon && game.game_icon.startsWith('http')) {
             return game.game_icon;
         }
 
-        // Priority 3: header image
         if (game.header_image_url) return game.header_image_url;
 
-        // Final Fallback: Steam API header image (Cloudflare)
         return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
@@ -74,7 +72,7 @@
                 <span class="sub">Succès les plus faciles restants</span>
             </div>
             <div class="easy-grid">
-                {#each easyAchievements as a}
+                {#each easyAchievements as a (a.gameName + ':' + a.key)}
                     <div class="easy-card">
                         <img src={a.icon_gray || a.icon} alt={a.name} />
                         <div class="info">
@@ -89,7 +87,7 @@
 
         <section class="games-section">
             <div class="games-list">
-                {#each sortedGames as game, i}
+                {#each sortedGames as game, i (game.steam_id)}
                     <div class="game-objective-card">
                         <span class="rank">{i + 1}</span>
                         <img
@@ -115,7 +113,7 @@
                             </div>
                             <span class="pct">{game.progression.toFixed(2)}%</span>
                         </div>
-                        <button class="arrow-btn">
+                        <button class="arrow-btn" aria-label="Voir les détails">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
                         </button>
                     </div>

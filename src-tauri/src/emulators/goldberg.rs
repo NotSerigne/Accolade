@@ -1,5 +1,4 @@
-// goldberg: parse le format JSON de Goldberg
-
+// src-tauri/src/emulators/goldberg.rs
 use std::path::PathBuf;
 use std::collections::HashMap;
 use serde::{Deserialize};

@@ -52,13 +52,12 @@ function writeThemeCache(s: AppSettings): void {
     try {
         localStorage.setItem(THEME_CACHE_KEY, JSON.stringify({ theme: s.theme, accentColor: s.accentColor }));
     } catch {
-        // Ignore local cache write failures.
+      // empty
     }
 }
 
 const INITIAL_SETTINGS: AppSettings = { ...DEFAULTS, ...(readThemeCache() ?? {}) };
 
-// Store Svelte réactif
 export const settings = writable<AppSettings>(INITIAL_SETTINGS);
 
 let store: Store | null = null;
@@ -109,7 +108,6 @@ export async function saveSettings(next: AppSettings): Promise<void> {
     writeThemeCache(next);
 }
 
-// Applique thème + couleur accent sur :root
 export function applyTheme(s: AppSettings): void {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;

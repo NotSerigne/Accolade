@@ -1,3 +1,4 @@
+// src-tauri/src/achievements/steam.rs
 use crate::achievements::models::Achievement;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -64,8 +65,6 @@ struct PlayerAchievement {
     unlocktime: u64,
 }
 
-// ── Struct intermédiaire pour parser un <message> de l'API XML ───────────────
-
 #[derive(Default)]
 struct RawAchievement {
     internal_name: String,
@@ -76,8 +75,6 @@ struct RawAchievement {
     hidden: bool,
     player_percent_unlocked: f64,
 }
-
-// ── Store appdetails ─────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct AppDetailsEnvelope {
@@ -98,8 +95,6 @@ struct AppDetailsData {
     #[serde(default)]
     background_raw: String,
 }
-
-// ── Helpers XML ──────────────────────────────────────────────────────────────
 
 fn build_icon_url(steam_id: u32, hash: &str) -> String {
     if hash.is_empty() {
@@ -174,8 +169,6 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
 
     achievements
 }
-
-// ── API publique ─────────────────────────────────────────────────────────────
 
 pub async fn fetch_steam_user(
     api_key: &str,
@@ -280,26 +273,28 @@ pub async fn fetch_steam_metadata_with_client(
     steam_id: u32,
     api_key: &str,
 ) -> Result<SteamMetadata, reqwest::Error> {
-    // ── 1. Achievements FR ────────────────────────────────────────────────────
-    let xml_fr = client
-        .get(format!(
-            "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=french&format=xml"
-        ))
-        .send()
-        .await?
-        .text()
-        .await?;
-    let achievements_fr = parse_achievements_xml(&xml_fr, steam_id);
+    let fr_url = format!(
+        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=french&format=xml"
+    );
+    let en_url = format!(
+        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
+    );
+    let details_url =
+        format!("https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french");
 
-    // ── 2. Achievements EN (fallback) ─────────────────────────────────────────
-    let xml_en = client
-        .get(format!(
-            "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
-        ))
-        .send()
-        .await?
-        .text()
+    let fr_req = client.get(fr_url).send();
+    let en_req = client.get(en_url).send();
+    let details_req = client.get(details_url).send();
+
+    let (fr_res, en_res, details_res) = futures::join!(fr_req, en_req, details_req);
+
+    let xml_fr = fr_res?.text().await?;
+    let xml_en = en_res?.text().await?;
+    let details_map = details_res?
+        .json::<HashMap<String, AppDetailsEnvelope>>()
         .await?;
+
+    let achievements_fr = parse_achievements_xml(&xml_fr, steam_id);
     let achievements_en = parse_achievements_xml(&xml_en, steam_id);
 
     let en_map: HashMap<String, &RawAchievement> = achievements_en
@@ -307,7 +302,6 @@ pub async fn fetch_steam_metadata_with_client(
         .map(|a| (a.internal_name.to_lowercase(), a))
         .collect();
 
-    // ── 3. Fusion FR + fallback EN ────────────────────────────────────────────
     let source = if !achievements_fr.is_empty() {
         &achievements_fr
     } else {
@@ -354,16 +348,6 @@ pub async fn fetch_steam_metadata_with_client(
             }
         })
         .collect();
-
-    // ── 4. Infos du jeu via appdetails ────────────────────────────────────────
-    let details_map = client
-        .get(format!(
-            "https://store.steampowered.com/api/appdetails?appids={steam_id}&l=french"
-        ))
-        .send()
-        .await?
-        .json::<HashMap<String, AppDetailsEnvelope>>()
-        .await?;
 
     let details = details_map.get(&steam_id.to_string()).and_then(|e| {
         if e.success {

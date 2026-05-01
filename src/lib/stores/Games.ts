@@ -1,3 +1,4 @@
+// src/lib/stores/Games.ts
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';

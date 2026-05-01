@@ -1,5 +1,4 @@
-// onlinefix: parse le format INI de OnlineFix
-
+// src-tauri/src/emulators/onlinefix.rs
 use std::path::PathBuf;
 use ini::Ini;
 use crate::achievements::models::{Achievement, Emulator};

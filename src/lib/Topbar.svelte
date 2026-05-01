@@ -1,6 +1,8 @@
 <script lang="ts">
+    // src/lib/Topbar.svelte
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
+    import { resolve } from '$app/paths';
     import { games, selectedGameId, syncSteamMetadata, type Game } from '$lib/stores/Games.js';
     import { searchQuery, searchDraft, achievementJumpIntent, watcherActive, isSyncing } from '$lib/stores/ui.js';
 
@@ -29,25 +31,21 @@
     };
 
     function gameSuggestionIcon(game: Game): string {
-        // Priority 1: Steam Grid DB icon (SGDB)
+
         if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
             return game.steamgrid_icon_url;
         }
 
-        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
         if (game.game_icon && game.game_icon.startsWith('http')) {
             return game.game_icon;
         }
 
-        // Priority 3: header image
         if (game.header_image_url) return game.header_image_url;
 
-        // Priority 4: game_icon if it's a valid hash (Steam client icon)
         if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
             return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
         }
 
-        // Final Fallback: Steam API header image
         return `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
@@ -133,7 +131,7 @@
             searchQuery.set('');
             achievementJumpIntent.set(null);
             selectedGameId.set(item.gameId);
-            goto(`/games/${item.gameId}`);
+            void goto(resolve('/(app)/games/[id]', { id: String(item.gameId) }));
         } else {
             searchQuery.set(item.query);
             achievementJumpIntent.set({
@@ -142,7 +140,7 @@
                 token: Date.now(),
             });
             selectedGameId.set(item.gameId);
-            goto(`/games/${item.gameId}`);
+            void goto(resolve('/(app)/games/[id]', { id: String(item.gameId) }));
         }
 
         searchDraft.set('');
@@ -349,7 +347,6 @@
     .search-input::placeholder {
         color: rgba(255, 255, 255, 0.25);
     }
-
 
     .search-shortcut {
         font-size: 10px;

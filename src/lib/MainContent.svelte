@@ -1,6 +1,8 @@
 <script lang="ts">
-    import { games } from '$lib/stores/Games.js';
+    // src/lib/MainContent.svelte
+    import { games, type Game, type Achievement } from '$lib/stores/Games.js';
     import { goto } from '$app/navigation';
+    import { resolve } from '$app/paths';
 
     function rarityLabel(pct: string): string {
         const n = parseFloat(pct);
@@ -26,10 +28,10 @@
         return { accent: '#6a7080', bg: 'rgba(106, 112, 128, 0.1)' };
     }
 
-    function progressPct(game: any): number {
+    function progressPct(game: Game): number {
         const total = game.achievements_total || game.achievements?.length || 0;
         if (total === 0) return 0;
-        const unlocked = game.achievements?.filter((a: any) => a.unlocked).length ?? 0;
+        const unlocked = game.achievements?.filter((a) => a.unlocked).length ?? 0;
         return Math.round((unlocked / total) * 100);
     }
 
@@ -45,23 +47,25 @@
         });
     }
 
-    let recentActivity = $derived.by(() => {
+    type RecentAchievement = Achievement & { gameName: string; gameId: number };
+
+    let recentActivity = $derived.by((): RecentAchievement[] => {
         return $games
-            .flatMap((g: any) =>
+            .flatMap((g) =>
                 (g.achievements ?? [])
-                    .filter((a: any) => a.unlocked && a.unlocked_time)
-                    .map((a: any) => ({ ...a, gameName: g.name, gameId: g.steam_id }))
+                    .filter((a) => a.unlocked && a.unlocked_time)
+                    .map((a) => ({ ...a, gameName: g.name, gameId: g.steam_id }))
             )
-            .sort((a: any, b: any) => (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0))
+            .sort((a, b) => (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0))
             .slice(0, 6);
     });
 
-    let recentGames = $derived.by(() => {
+    let recentGames = $derived.by((): Game[] => {
         return [...$games]
-            .filter((g: any) => (g.achievements ?? []).some((a: any) => a.unlocked || a.unlocked_time))
-            .sort((a: any, b: any) => {
-                const lastUnlockA = Math.max(...(a.achievements ?? []).map((x: any) => x.unlocked_time ?? 0), 0);
-                const lastUnlockB = Math.max(...(b.achievements ?? []).map((x: any) => x.unlocked_time ?? 0), 0);
+            .filter((g) => (g.achievements ?? []).some((a) => a.unlocked || a.unlocked_time))
+            .sort((a, b) => {
+                const lastUnlockA = Math.max(...(a.achievements ?? []).map((x) => x.unlocked_time ?? 0), 0);
+                const lastUnlockB = Math.max(...(b.achievements ?? []).map((x) => x.unlocked_time ?? 0), 0);
                 return lastUnlockB - lastUnlockA;
             })
             .slice(0, 12);
@@ -72,9 +76,9 @@
     <section class="activity-section">
         <h2 class="section-title">Activité récente</h2>
         <div class="activity-grid">
-            {#each recentActivity as item}
+            {#each recentActivity as item (item.gameId + ':' + item.key)}
                 {@const palette = rarityPalette(item.completionpercentage)}
-                <button class="activity-card" onclick={() => goto(`/games/${item.gameId}`)}>
+                <button class="activity-card" onclick={() => void goto(resolve('/(app)/games/[id]', { id: String(item.gameId) }))}>
                     <div class="activity-icon-wrap">
                         {#if item.icon}
                             <img
@@ -116,8 +120,8 @@
     <section class="activity-section" style="margin-top: 32px;">
         <h2 class="section-title">Bibliothèque récente</h2>
         <div class="game-grid">
-            {#each recentGames as game}
-                <button class="game-card" onclick={() => goto(`/games/${game.steam_id}`)}>
+            {#each recentGames as game (game.steam_id)}
+                <button class="game-card" onclick={() => void goto(resolve('/(app)/games/[id]', { id: String(game.steam_id) }))}>
                     <div class="game-card-bg">
                         {#if game.header_image_url}
                             <img
@@ -216,17 +220,6 @@
         background: #1a1a1a;
     }
 
-    .activity-icon-placeholder {
-        width: 56px;
-        height: 56px;
-        border-radius: 8px;
-        background: #1a1a1a;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-    }
-
     .activity-info {
         flex: 1;
         min-width: 0;
@@ -319,7 +312,6 @@
         justify-content: center;
     }
     .game-card-bg img { width: 100%; height: 100%; object-fit: cover; }
-    .game-placeholder { font-size: 28px; }
 
     .game-card-overlay {
         position: absolute;

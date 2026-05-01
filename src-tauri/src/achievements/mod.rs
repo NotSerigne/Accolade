@@ -1,4 +1,4 @@
-// achievements: logique métier, détection des unlocks
+// src-tauri/src/achievements/mod.rs
 use crate::achievements::models::{Achievement, Game};
 use crate::emulators::codex;
 use crate::emulators::empress;
@@ -18,6 +18,6 @@ pub fn match_emulator(games: Game) -> Vec<Achievement> {
         models::Emulator::Codex => codex::Parser.parse(&games.path_buf),
         models::Emulator::OnlineFix => onlinefix::Parser.parse(&games.path_buf),
         models::Emulator::Rune => rune::Parser.parse(&games.path_buf),
-        models::Emulator::Steam => Vec::new(), // Pas encore de parsing local pour Steam officiel
+        models::Emulator::Steam => Vec::new(),
     }
 }

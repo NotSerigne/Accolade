@@ -1,14 +1,11 @@
+/* src/routes/(app)/layout.css */
 @import 'tailwindcss';
-@plugin '@tailwindcss/forms';
-@plugin '@tailwindcss/typography';
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
     --accent: #c8a96e;
     --text-primary: #ffffff;
-    --text-secondary: #6a7080;
-    --text-muted: #2e3240;
 }
 
 html, body {

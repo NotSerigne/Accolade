@@ -1,5 +1,4 @@
-// codex: parse le format INI de Codex
-
+// src-tauri/src/emulators/codex.rs
 use std::path::PathBuf;
 use ini::Ini;
 use serde::{Deserialize};

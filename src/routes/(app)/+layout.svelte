@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/routes/(app)/+layout.svelte
     import './layout.css';
     import favicon from '$lib/assets/favicon.svg';
     import Settings from '$lib/Settings.svelte';

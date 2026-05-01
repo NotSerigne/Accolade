@@ -1,9 +1,10 @@
 <script lang="ts">
-    import { games, totalUnlockedAchievements, type Game, type Achievement } from '$lib/stores/Games.js';
+    // src/routes/(app)/stats/+page.svelte
+    import { games, totalUnlockedAchievements, type Achievement } from '$lib/stores/Games.js';
+    import { SvelteDate, SvelteMap } from 'svelte/reactivity';
 
     let activeTab = $state('overview');
 
-    // Stats calculations
     let totalPossibleAchievements = $derived(
         $games.reduce((acc, g) => acc + (g.achievements_total || g.achievements?.length || 0), 0)
     );
@@ -47,58 +48,69 @@
         return [...unlocked].sort((a, b) => parseFloat(a.completionpercentage) - parseFloat(b.completionpercentage))[0];
     });
 
-    // Activity calculations
-    let today = new Date();
-    let oneYearAgo = new Date();
+    let today = new SvelteDate();
+    let oneYearAgo = new SvelteDate();
     oneYearAgo.setFullYear(today.getFullYear() - 1);
 
-    function formatDate(date: Date) {
+    function formatDate(date: Date | SvelteDate) {
         return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
-    // --- Heatmap Data ---
     let heatmapData = $derived.by(() => {
         const unlocked = allUnlockedAchievements;
         const grid = [];
-        const now = new Date();
+        const now = new SvelteDate();
         now.setHours(23, 59, 59, 999);
 
         // Find the most recent Sunday to align the grid
-        const lastSunday = new Date(now);
+        const lastSunday = new SvelteDate(now.getTime());
         lastSunday.setDate(now.getDate() - now.getDay());
 
         // Start 51 weeks before that Sunday (total 52 weeks)
-        const startDate = new Date(lastSunday);
+        const startDate = new SvelteDate(lastSunday.getTime());
         startDate.setDate(lastSunday.getDate() - 51 * 7);
+        startDate.setHours(0, 0, 0, 0);
 
         // Group achievements by day
-        const dayMap = new Map<string, { count: number; achievements: any[] }>();
+        const dayMap = new SvelteMap<string, { count: number; achievements: Achievement[] }>();
         unlocked.forEach(a => {
             if (!a.unlocked_time) return;
-            const d = new Date(a.unlocked_time * 1000);
-            const key = d.toISOString().split('T')[0];
-            if (!dayMap.has(key)) {
-                dayMap.set(key, { count: 0, achievements: [] });
+            try {
+                const d = new Date(a.unlocked_time * 1000);
+                if (isNaN(d.getTime())) return;
+                const key = d.toISOString().split('T')[0];
+                if (!dayMap.has(key)) {
+                    dayMap.set(key, { count: 0, achievements: [] });
+                }
+                const data = dayMap.get(key)!;
+                data.count++;
+                data.achievements.push(a);
+            } catch {
+                console.error("Error processing achievement date");
             }
-            const data = dayMap.get(key)!;
-            data.count++;
-            data.achievements.push(a);
         });
 
         // Build 52 columns
         for (let w = 0; w < 52; w++) {
             const col = [];
             for (let d = 0; d < 7; d++) {
-                const date = new Date(startDate);
+                const date = new SvelteDate(startDate.getTime());
                 date.setDate(startDate.getDate() + w * 7 + d);
-                const key = date.toISOString().split('T')[0];
-                const dayData = dayMap.get(key) || { count: 0, achievements: [] };
 
-                // Don't show future dates
-                const isFuture = date > now;
+                const key = (() => {
+                    try {
+                        return date.toISOString().split('T')[0];
+                    } catch {
+                        // Fallback for invalid dates
+                        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    }
+                })();
+
+                const dayData = dayMap.get(key) || { count: 0, achievements: [] };
+                const isFuture = date.getTime() > now.getTime();
 
                 col.push({
-                    date,
+                    date: new SvelteDate(date.getTime()),
                     count: dayData.count,
                     achievements: dayData.achievements,
                     isFuture
@@ -110,19 +122,25 @@
     });
 
     const monthLabels = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
-    const dayLabels = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
     let heatmapMonths = $derived.by(() => {
-        const labels = [];
-        let currentMonth = -1;
-        heatmapData.forEach((col, i) => {
-            const month = col[0].date.getMonth();
-            if (month !== currentMonth) {
-                labels.push({ label: monthLabels[month], index: i });
-                currentMonth = month;
-            }
-        });
-        return labels;
+        try {
+            if (!heatmapData || heatmapData.length === 0) return [];
+            const labels: { label: string, index: number }[] = [];
+            let currentMonth = -1;
+            heatmapData.forEach((col, i) => {
+                if (!col || col.length === 0) return;
+                const month = col[0].date.getMonth();
+                if (month !== currentMonth) {
+                    labels.push({ label: monthLabels[month], index: i });
+                    currentMonth = month;
+                }
+            });
+            return labels;
+        } catch {
+            console.error("Error calculating heatmap months");
+            return [];
+        }
     });
 
     let cumulativeTimeframe = $state('all');
@@ -140,121 +158,133 @@
         }
     });
 
-    // --- Cumulative Progress Data ---
     let cumulativeData = $derived.by(() => {
-        const allUnlocked = [...allUnlockedAchievements].sort((a, b) => (a.unlocked_time ?? 0) - (b.unlocked_time ?? 0));
-        if (allUnlocked.length === 0) return [];
+        try {
+            const allUnlocked = [...allUnlockedAchievements].sort((a, b) => (a.unlocked_time ?? 0) - (b.unlocked_time ?? 0));
+            if (allUnlocked.length === 0) return [];
 
-        let startTime = 0;
-        const now = new Date();
+            let startTime = 0;
+            const now = new SvelteDate();
 
-        if (cumulativeTimeframe === '1y') {
-            const d = new Date(now);
-            d.setFullYear(d.getFullYear() - 1);
-            startTime = Math.floor(d.getTime() / 1000);
-        } else if (cumulativeTimeframe === '6m') {
-            const d = new Date(now);
-            d.setMonth(d.getMonth() - 6);
-            startTime = Math.floor(d.getTime() / 1000);
-        } else if (cumulativeTimeframe === '1m') {
-            const d = new Date(now);
-            d.setMonth(d.getMonth() - 1);
-            startTime = Math.floor(d.getTime() / 1000);
-        } else if (cumulativeTimeframe === '1w') {
-            const d = new Date(now);
-            d.setDate(d.getDate() - 7);
-            startTime = Math.floor(d.getTime() / 1000);
-        }
+            if (cumulativeTimeframe === '1y') {
+                const d = new SvelteDate(now.getTime());
+                d.setFullYear(d.getFullYear() - 1);
+                startTime = Math.floor(d.getTime() / 1000);
+            } else if (cumulativeTimeframe === '6m') {
+                const d = new SvelteDate(now.getTime());
+                d.setMonth(d.getMonth() - 6);
+                startTime = Math.floor(d.getTime() / 1000);
+            } else if (cumulativeTimeframe === '1m') {
+                const d = new SvelteDate(now.getTime());
+                d.setMonth(d.getMonth() - 1);
+                startTime = Math.floor(d.getTime() / 1000);
+            } else if (cumulativeTimeframe === '1w') {
+                const d = new SvelteDate(now.getTime());
+                d.setDate(d.getDate() - 7);
+                startTime = Math.floor(d.getTime() / 1000);
+            }
 
-        let runningCount = 0;
-        const fullHistory: { x: number; y: number; date: Date; count: number }[] = [];
+            let runningCount = 0;
+            const fullHistory: { x: number; y: number; date: Date | SvelteDate; count: number }[] = [];
 
-        allUnlocked.forEach(a => {
-            runningCount++;
-            fullHistory.push({
-                x: a.unlocked_time ?? 0,
-                y: runningCount,
-                date: new Date((a.unlocked_time ?? 0) * 1000),
-                count: runningCount
+            allUnlocked.forEach(a => {
+                runningCount++;
+                fullHistory.push({
+                    x: a.unlocked_time ?? 0,
+                    y: runningCount,
+                    date: new SvelteDate((a.unlocked_time ?? 0) * 1000),
+                    count: runningCount
+                });
             });
-        });
 
-        if (cumulativeTimeframe === 'all') {
+            if (cumulativeTimeframe === 'all') {
+                const nowTime = Math.floor(Date.now() / 1000);
+                fullHistory.push({
+                    x: nowTime,
+                    y: runningCount,
+                    date: new SvelteDate(nowTime * 1000),
+                    count: runningCount
+                });
+                return fullHistory;
+            }
+
+            const recentHistory = fullHistory.filter(p => p.x >= startTime);
+
+            const countAtStart = fullHistory.filter(p => p.x < startTime).length;
+            const startPoint = {
+                x: startTime,
+                y: countAtStart,
+                date: new SvelteDate(startTime * 1000),
+                count: countAtStart
+            };
+
+            const result = [startPoint, ...recentHistory];
+
             const nowTime = Math.floor(Date.now() / 1000);
-            fullHistory.push({
+            result.push({
                 x: nowTime,
                 y: runningCount,
-                date: new Date(nowTime * 1000),
+                date: new SvelteDate(nowTime * 1000),
                 count: runningCount
             });
-            return fullHistory;
+
+            return result;
+        } catch {
+            console.error("Error calculating cumulative progress data");
+            return [];
         }
-
-        // Filter to selected timeframe
-        const recentHistory = fullHistory.filter(p => p.x >= startTime);
-
-        // We need a starting point at exactly the start of the timeframe
-        const countAtStart = fullHistory.filter(p => p.x < startTime).length;
-        const startPoint = {
-            x: startTime,
-            y: countAtStart,
-            date: new Date(startTime * 1000),
-            count: countAtStart
-        };
-
-        const result = [startPoint, ...recentHistory];
-
-        // Add a point for today
-        const nowTime = Math.floor(Date.now() / 1000);
-        result.push({
-            x: nowTime,
-            y: runningCount,
-            date: new Date(nowTime * 1000),
-            count: runningCount
-        });
-
-        return result;
     });
 
     let cumulativeMeta = $derived.by(() => {
         const width = chartPhysicalWidth || 800;
         const height = 180;
 
-        if (cumulativeData.length === 0) return { minX: 0, maxX: 1, minY: 0, maxY: 1, path: '', points: [] as any[], width, height };
+        type Point = { x: number; y: number; px: number; py: number; date: Date | SvelteDate; count: number };
+
+        if (cumulativeData.length === 0) {
+            return { minX: 0, maxX: 1, minY: 0, maxY: 1, path: '', points: [] as Point[], width, height };
+        }
+
         const minX = cumulativeData[0].x;
         const maxX = cumulativeData[cumulativeData.length - 1].x;
+        const xRange = Math.max(1, maxX - minX);
+
         const minY = Math.min(...cumulativeData.map(p => p.y));
         const maxY = Math.max(...cumulativeData.map(p => p.y), 1);
 
-        const range = maxY - minY;
-        const displayMinY = Math.max(0, minY - range * 0.1);
-        const displayMaxY = maxY + (range * 0.1 || 10);
+        const yRange = maxY - minY;
+        const displayMinY = Math.max(0, minY - yRange * 0.1);
+        const displayMaxY = maxY + (yRange * 0.1 || 10);
+        const displayYRange = Math.max(1, displayMaxY - displayMinY);
 
-        const points = cumulativeData.map(p => ({
-            ...p,
-            px: ((p.x - minX) / (maxX - minX)) * width,
-            py: height - ((p.y - displayMinY) / (displayMaxY - displayMinY)) * height
-        }));
+        const points = cumulativeData.map(p => {
+            const px = ((p.x - minX) / xRange) * width;
+            const py = height - ((p.y - displayMinY) / displayYRange) * height;
+            return {
+                ...p,
+                px: isNaN(px) ? 0 : px,
+                py: isNaN(py) ? 0 : py
+            };
+        });
 
-        const path = points.map(p => `${p.px},${p.py}`).join(' ');
+        const path = points.map(p => `${p.px.toFixed(2)},${p.py.toFixed(2)}`).join(' ');
 
         return { minX, maxX, minY: displayMinY, maxY: displayMaxY, path, points, width, height };
     });
-    // --- Weekly Rhythm Data ---
+
     let weeklyRhythm = $derived.by(() => {
         const unlocked = allUnlockedAchievements;
         const weeks = [];
-        const now = new Date();
+        const now = new SvelteDate();
 
-        // Last 26 weeks
         for (let i = 25; i >= 0; i--) {
-            const d = new Date(now);
+            const d = new SvelteDate(now.getTime());
             d.setDate(now.getDate() - i * 7);
-            const startOfWeek = new Date(d);
+            const startOfWeek = new SvelteDate(d.getTime());
             startOfWeek.setDate(d.getDate() - d.getDay());
             startOfWeek.setHours(0,0,0,0);
 
-            const endOfWeek = new Date(startOfWeek);
+            const endOfWeek = new SvelteDate(startOfWeek.getTime());
             endOfWeek.setDate(startOfWeek.getDate() + 7);
 
             const count = unlocked.filter(a => {
@@ -276,12 +306,12 @@
         const unlocked = allUnlockedAchievements;
         if (unlocked.length === 0) return { count: 0, date: '' };
 
-        const weekMap = new Map<string, number>();
+        const weekMap = new SvelteMap<string, number>();
         unlocked.forEach(a => {
             if (!a.unlocked_time) return;
-            const d = new Date(a.unlocked_time * 1000);
-            const startOfWeek = new Date(d);
-            startOfWeek.setDate(d.getDate() - d.getDay()); // Sunday
+            const d = new SvelteDate(a.unlocked_time * 1000);
+            const startOfWeek = new SvelteDate(d.getTime());
+            startOfWeek.setDate(d.getDate() - d.getDay());
             const key = startOfWeek.toISOString().split('T')[0];
             weekMap.set(key, (weekMap.get(key) || 0) + 1);
         });
@@ -297,17 +327,6 @@
         return { count: maxCount, date: bestKey };
     });
 
-    function getGameIcon(game: Game | any): string {
-        if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) return game.steamgrid_icon_url;
-        if (game.game_icon && game.game_icon.startsWith('http')) return game.game_icon;
-        if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
-            return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
-        }
-        if (game.header_image_url) return game.header_image_url;
-        return '';
-    }
-
-    // Tooltip state
     let tooltip = $state({ show: false, x: 0, y: 0, title: '', value: '', sub: '', list: [] as string[] });
 
     function showTooltip(e: MouseEvent, title: string, value: string, sub: string = '', list: string[] = []) {
@@ -338,7 +357,7 @@
             {/if}
             {#if tooltip.list.length > 0}
                 <ul class="tooltip-list">
-                    {#each tooltip.list.slice(0, 5) as item}
+                    {#each tooltip.list.slice(0, 5) as item, i (i)}
                         <li>• {item}</li>
                     {/each}
                     {#if tooltip.list.length > 5}
@@ -353,8 +372,26 @@
         <div class="header-left">
             <h1>Statistiques</h1>
             <div class="tabs">
-                <button type="button" class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>Vue d'ensemble</button>
-                <button type="button" class:active={activeTab === 'activity'} onclick={() => activeTab = 'activity'}>Activité</button>
+                <button
+                    type="button"
+                    class:active={activeTab === 'overview'}
+                    onclick={() => {
+                        console.log("Switching to overview");
+                        activeTab = 'overview';
+                    }}
+                >
+                    Vue d'ensemble
+                </button>
+                <button
+                    type="button"
+                    class:active={activeTab === 'activity'}
+                    onclick={() => {
+                        console.log("Switching to activity");
+                        activeTab = 'activity';
+                    }}
+                >
+                    Activité
+                </button>
             </div>
         </div>
         <div class="header-right">
@@ -408,7 +445,7 @@
                         <span class="count">{$games.length} jeux</span>
                     </div>
                     <div class="games-progress-list">
-                        {#each topGames as game}
+                        {#each topGames as game (game.steam_id)}
                             <div class="game-progress-row">
                                 <div class="game-info">
                                     <span class="name">{game.name}</span>
@@ -447,7 +484,7 @@
                     <div class="card podium">
                         <h2>PODIUM</h2>
                         <div class="podium-list">
-                            {#each podium as game, i}
+                            {#each podium as game, i (game.steam_id)}
                                 <div class="podium-item">
                                     <div class="rank">{i + 1}</div>
                                     <span class="name">{game.name}</span>
@@ -499,16 +536,19 @@
                             </div>
                             <div class="heatmap-main">
                                 <div class="heatmap-months">
-                                    {#each heatmapMonths as { label, index }}
+                                    {#each heatmapMonths as { label, index }, i (label + i)}
                                         <span class="month-label" style="left: {index * 13}px">{label}</span>
                                     {/each}
                                 </div>
                                 <div class="heatmap-grid">
-                                    {#each heatmapData as col}
+                                    {#each heatmapData as col, i (i)}
                                         <div class="heatmap-col">
-                                            {#each col as cell}
+                                            {#each col as cell (cell.date.getTime())}
                                                 <div
                                                     class="heatmap-cell"
+                                                    role="gridcell"
+                                                    tabindex="-1"
+                                                    aria-label="Case d'activité"
                                                     class:lvl1={cell.count > 0 && cell.count <= 1}
                                                     class:lvl2={cell.count > 1 && cell.count <= 3}
                                                     class:lvl3={cell.count > 3 && cell.count <= 6}
@@ -553,10 +593,10 @@
                             <div class="chart-nav-group">
                                 {#if cumulativeTimeframe !== 'all'}
                                     <div class="window-nav">
-                                        <button onclick={() => currentWindowOffset++}>
+                                        <button onclick={() => currentWindowOffset++} aria-label="Précédent">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
                                         </button>
-                                        <button onclick={() => currentWindowOffset = Math.max(0, currentWindowOffset - 1)} disabled={currentWindowOffset === 0}>
+                                        <button onclick={() => currentWindowOffset = Math.max(0, currentWindowOffset - 1)} disabled={currentWindowOffset === 0} aria-label="Suivant">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
                                         </button>
                                     </div>
@@ -570,7 +610,7 @@
                             </div>
                         </div>
                         <div class="chart-container" bind:clientWidth={chartContainerWidth}>
-                            {#if cumulativeData.length > 0}
+                            {#if cumulativeData.length > 0 && cumulativeMeta.path}
                                 <svg width="100%" height="100%" viewBox="0 0 {cumulativeMeta.width} {cumulativeMeta.height}" preserveAspectRatio="none">
                                     <defs>
                                         <linearGradient id="line-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -591,13 +631,15 @@
                                         points={cumulativeMeta.path}
                                     />
 
-                                    {#each cumulativeMeta.points as p}
+                                    {#each cumulativeMeta.points as p, i (p.x + '-' + i)}
                                         <circle
                                             cx={p.px}
                                             cy={p.py}
                                             r="2.5"
                                             fill="var(--accent, #c8a96e)"
                                             class="chart-point"
+                                            role="img"
+                                            aria-label="Point de données"
                                             onmouseenter={(e) => showTooltip(
                                                 e,
                                                 p.date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
@@ -607,6 +649,8 @@
                                         />
                                     {/each}
                                 </svg>
+                            {:else if activeTab === 'activity'}
+                                <div class="empty-chart">Pas assez de données pour le graphique.</div>
                             {/if}
                         </div>
                     </div>
@@ -615,9 +659,11 @@
                         <p class="sub">Succès par semaine (26 dernières semaines)</p>
                         <div class="chart-container">
                             <div class="bar-chart">
-                                {#each weeklyRhythm as week}
+                                {#each weeklyRhythm as week, i (week.start.getTime() + '-' + i)}
                                     <div
                                         class="bar"
+                                        role="img"
+                                        aria-label="Barre d'activité hebdomadaire"
                                         class:max={week.isMax}
                                         class:empty={week.count === 0}
                                         style="height: {Math.max(week.height, 2)}%"
@@ -640,7 +686,7 @@
                         <span class="count">50 derniers succès débloqués</span>
                     </div>
                     <div class="recent-scroll">
-                        {#each allUnlockedAchievements.slice(0, 50) as a}
+                        {#each allUnlockedAchievements.slice(0, 50) as a (a.gameName + ':' + a.key)}
                             <div class="recent-item">
                                 <img src={a.icon} alt={a.name} />
                                 <div class="info">
@@ -663,8 +709,6 @@
 
 <style>
     .stats-page {
-        grid-column: 2 / -1;
-        grid-row: 2 / -1;
         display: flex;
         flex-direction: column;
         background: #161616;
@@ -820,7 +864,6 @@
     .best-week-val .val { font-size: 32px; font-weight: 700; color: #fff; display: block; }
     .best-week-val .lbl { font-size: 11px; color: rgba(255,255,255,0.3); }
 
-    /* Activity View Styles */
     .activity-view { display: flex; flex-direction: column; gap: 16px; }
     .heatmap-card .sub { font-size: 12px; color: rgba(255,255,255,0.3); }
     .heatmap-container { margin-top: 20px; }
@@ -1011,10 +1054,9 @@
     .rarity-badge.small { font-size: 9px; padding: 1px 4px; }
 
     .recent-item .game { font-size: 12px; color: var(--accent, #c8a96e); font-weight: 500; margin-bottom: 4px; }
-    .recent-item .desc { font-size: 13px; color: rgba(255,255,255,0.4); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .recent-item .desc { font-size: 13px; color: rgba(255,255,255,0.4); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .recent-item .time { font-size: 11px; color: rgba(255,255,255,0.2); white-space: nowrap; margin-top: 4px; }
 
-    /* Custom Tooltip */
     .custom-tooltip {
         position: fixed;
         background: #1e2329;

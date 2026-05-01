@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/routes/(app)/+page.svelte
     import MainContent from '$lib/MainContent.svelte';
     import StatsPanel from '$lib/StatsPanel.svelte';
 </script>

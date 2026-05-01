@@ -1,3 +1,4 @@
+// src/lib/stores/user.ts
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { settings } from './settings';

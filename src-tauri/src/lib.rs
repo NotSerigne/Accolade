@@ -1,3 +1,4 @@
+// src-tauri/src/lib.rs
 use crate::achievements::models::{Achievement, Game};
 use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata_with_client};
 use crate::emulators::{codex, empress, game_scanner, goldberg, onlinefix, rune, EmulatorParser};
@@ -63,7 +64,6 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
         })
         .collect();
 
-    // Conserve les achievements locaux absents du schéma Steam pour éviter les pertes (ex: 78 -> 77).
     for ach in local {
         let key = ach.key.trim().to_lowercase();
         if !seen_schema_keys.contains(&key) {
@@ -148,7 +148,6 @@ pub(crate) async fn enrich_games_with_steam(games: &mut Vec<Game>, api_key: &str
 
         let mut merged_achievements = merge_schema_with_local(metadata.achievements, &local_state);
 
-        // Appliquer les achievements du joueur si disponibles
         if let Some(Ok(pa)) = player_achievements_res {
             for ach in &mut merged_achievements {
                 if let Some((unlocked, time)) = pa.get(&ach.key) {

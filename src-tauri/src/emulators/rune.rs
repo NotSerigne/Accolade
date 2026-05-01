@@ -1,5 +1,4 @@
-// rune: parse le format INI de Rune
-
+// src-tauri/src/emulators/rune.rs
 use std::path::PathBuf;
 use ini::Ini;
 use serde::{Deserialize};

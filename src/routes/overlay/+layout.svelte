@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/routes/overlay/+layout.svelte
     let { children } = $props();
 </script>
 

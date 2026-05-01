@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/routes/overlay/+page.svelte
     import { onMount } from 'svelte';
     import { listen } from '@tauri-apps/api/event';
     import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
@@ -117,10 +118,10 @@
         let timer: ReturnType<typeof setTimeout> | null = null;
         let unlisten: (() => void) | undefined;
 
-        listen('achievement-notif', async ({ payload }: any) => {
+        listen<Achievement>('achievement-notif', async (event) => {
+            const payload = event.payload;
             if (timer) clearTimeout(timer);
 
-            // Cacher + réinitialiser pendant qu'on repositionne
             visible     = false;
             achievement = null;
 
@@ -129,10 +130,9 @@
 
             playNotificationSound(notificationSound);
 
-            // Tout dans le même frame : position connue, élément créé, animation démarre
             requestAnimationFrame(() => {
                 position    = resolvedPosition;
-                achievement = payload as Achievement;
+                achievement = payload;
                 visible     = true;
                 win.show();
 

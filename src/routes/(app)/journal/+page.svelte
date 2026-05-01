@@ -1,15 +1,30 @@
 <script lang="ts">
+    // src/routes/(app)/journal/+page.svelte
     import { games, type Game, type Achievement } from '$lib/stores/Games.js';
 
-    let selectedFilter = $state('all'); // 'all' | steamId
+    let selectedFilter = $state('all');
 
-    let allEvents = $derived.by(() => {
-        const events: any[] = [];
+    type AchievementEvent = {
+        type: 'achievement';
+        date: Date;
+        achievement: Achievement;
+        game: Game;
+    };
+
+    type CompletionEvent = {
+        type: 'completion';
+        date: Date;
+        game: Game;
+    };
+
+    type JournalEvent = AchievementEvent | CompletionEvent;
+
+    let allEvents = $derived.by((): JournalEvent[] => {
+        const events: JournalEvent[] = [];
 
         $games.forEach(g => {
             if (selectedFilter !== 'all' && String(g.steam_id) !== selectedFilter) return;
 
-            // Achievement events
             (g.achievements ?? []).filter(a => a.unlocked).forEach(a => {
                 events.push({
                     type: 'achievement',
@@ -19,7 +34,6 @@
                 });
             });
 
-            // 100% Completion events
             const total = g.achievements_total || g.achievements?.length || 0;
             const unlocked = g.achievements?.filter(a => a.unlocked) ?? [];
             if (total > 0 && unlocked.length === total) {
@@ -35,8 +49,10 @@
         return events.sort((a, b) => b.date.getTime() - a.date.getTime());
     });
 
-    let groupedEvents = $derived.by(() => {
-        const groups: { dateLabel: string, events: any[] }[] = [];
+    type EventGroup = { dateLabel: string; events: JournalEvent[] };
+
+    let groupedEvents = $derived.by((): EventGroup[] => {
+        const groups: EventGroup[] = [];
         allEvents.forEach(e => {
             const label = e.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase();
             let group = groups.find(g => g.dateLabel === label);
@@ -54,20 +70,17 @@
     }
 
     function getGameIcon(game: Game): string {
-        // Priority 1: Steam Grid DB icon (SGDB)
+
         if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
             return game.steamgrid_icon_url;
         }
 
-        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
         if (game.game_icon && game.game_icon.startsWith('http')) {
             return game.game_icon;
         }
 
-        // Priority 3: header image
         if (game.header_image_url) return game.header_image_url;
 
-        // Final Fallback: Steam API header image (Cloudflare)
         return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
@@ -85,7 +98,7 @@
         <div class="header-right">
             <select bind:value={selectedFilter} class="game-select">
                 <option value="all">Tous les jeux</option>
-                {#each $games as game}
+                {#each $games as game (game.steam_id)}
                     <option value={String(game.steam_id)}>{game.name}</option>
                 {/each}
             </select>
@@ -93,14 +106,14 @@
     </header>
 
     <div class="content scrollable">
-        {#each groupedEvents as group}
+        {#each groupedEvents as group (group.dateLabel)}
             <div class="day-group">
                 <div class="day-header">
                     <span class="date-label">{group.dateLabel}</span>
                     <span class="count">{group.events.length} succès</span>
                 </div>
                 <div class="events-list">
-                    {#each group.events as event}
+                    {#each group.events as event (event.game.steam_id + ':' + (event.type === 'achievement' ? event.achievement.key : 'completion'))}
                         <div class="event-card" class:completion={event.type === 'completion'}>
                             <img
                                 src={getGameIcon(event.game)}

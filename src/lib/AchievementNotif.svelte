@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/lib/AchievementNotif.svelte
     interface Achievement {
         name?: string;
         desc?: string;
@@ -8,7 +9,7 @@
         completionpercentage?: number;
         unlocked?: number;
         total?: number;
-        unlocked_time?: number; // Timestamp en secondes
+        unlocked_time?: number;
     }
 
     type Position = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
@@ -19,7 +20,6 @@
         position?: Position
     }>();
 
-    // Palette identique à GamePage.svelte / MainContent.svelte
     const RARITY_COLORS: Record<string, { accent: string; glow: string }> = {
         'Mythique':     { accent: '#ff3b5c', glow: 'rgba(255, 59, 92, 0.55)'   },
         'Légendaire': { accent: '#ffd85a', glow: 'rgba(255, 216, 90, 0.55)'  },
@@ -195,7 +195,7 @@
         display: flex;
         align-items: center;
         gap: 14px;
-        padding: 22px 16px 16px; /* 22px top pour laisser place au badge */
+        padding: 22px 16px 16px;
     }
 
     .icon, .icon-placeholder {
@@ -288,8 +288,6 @@
     .ring-bg   { fill: none; stroke: #2a2d33; stroke-width: 3.5; }
     .ring-fill { fill: none; stroke-width: 3.5; stroke-linecap: round; }
 
-    /* ── Animations style Apple (slide + léger fade in) ── */
-
     .slide-right {
         animation: slideRight 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
     }
@@ -303,22 +301,21 @@
         animation: slideUp    0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
     }
 
-    /* Haut Gauche / Bas Gauche → entre par la gauche, glisse vers la droite */
     @keyframes slideRight {
         from { transform: translateX(-24px); opacity: 0; }
         to   { transform: translateX(0);     opacity: 1; }
     }
-    /* Haut Droit / Bas Droit → entre par la droite, glisse vers la gauche */
+
     @keyframes slideLeft {
         from { transform: translateX(24px);  opacity: 0; }
         to   { transform: translateX(0);     opacity: 1; }
     }
-    /* Haut Centre → entre par le haut, glisse vers le bas */
+
     @keyframes slideDown {
         from { transform: translateY(-24px); opacity: 0; }
         to   { transform: translateY(0);     opacity: 1; }
     }
-    /* Bas Centre → entre par le bas, glisse vers le haut */
+
     @keyframes slideUp {
         from { transform: translateY(24px);  opacity: 0; }
         to   { transform: translateY(0);     opacity: 1; }

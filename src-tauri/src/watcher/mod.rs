@@ -1,4 +1,4 @@
-// watcher: surveille les fichiers des émulateurs en temps réel
+// src-tauri/src/watcher/mod.rs
 use crate::achievements::match_emulator;
 use crate::achievements::models::{Achievement, Game};
 use crate::achievements::steam::fetch_app_name_by_appid;
@@ -60,7 +60,7 @@ fn merge_live_achievements(
             seen_schema_keys.insert(key.clone());
 
             if let Some(live_ach) = live_map.get(&key) {
-                // On fait confiance à l'état du fichier de l'émulateur.
+
                 s.unlocked = live_ach.unlocked;
                 if live_ach.unlocked {
                     if let Some(t) = live_ach.unlocked_time {
@@ -76,7 +76,6 @@ fn merge_live_achievements(
                     s.unlocked_time = None;
                 }
 
-                // Mise à jour des métadonnées si elles manquent
                 if s.name.is_empty() && !live_ach.name.is_empty() {
                     s.name = live_ach.name.clone();
                 }
@@ -87,12 +86,10 @@ fn merge_live_achievements(
                     s.icon = live_ach.icon.clone();
                 }
             } else if previous_live_keys.contains(&key) && !current_live_keys.contains(&key) {
-                // Le succès a été physiquement retiré du fichier local, on le verrouille.
+
                 s.unlocked = false;
                 s.unlocked_time = None;
             }
-            // S'il n'est pas dans le fichier local et n'y était pas avant, on ne touche à rien
-            // (il peut avoir été débloqué via Steam).
 
             s
         })
@@ -222,17 +219,14 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
 
         let _ = app_handle.emit("watcher-status", true);
 
-        // Boucle avec Debounce robuste (accumulation d'événements)
         while let Ok(Ok(first_event)) = rx.recv() {
             let mut paths_changed = HashSet::new();
             for p in first_event.paths {
                 paths_changed.insert(p);
             }
 
-            // On attend 200ms pour laisser le temps aux éditeurs de texte de finir leur écriture (truncate + write)
             std::thread::sleep(Duration::from_millis(200));
 
-            // On draine tous les autres événements arrivés entre temps
             while let Ok(Ok(evt)) = rx.try_recv() {
                 for p in evt.paths {
                     paths_changed.insert(p);
@@ -282,7 +276,6 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                             })
                     };
 
-                    // On détermine l'état "unlocked" final calculé pour UI
                     let mut true_current_unlocked = HashSet::new();
                     for a in &ui_achievements {
                         if a.unlocked || a.unlocked_time.is_some() {
@@ -292,7 +285,6 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
 
                     let unlocked_count = true_current_unlocked.len() as u32;
 
-                    // Les succès nouvellement débloqués sont ceux présents dans true_current_unlocked mais pas dans previous_unlocked
                     let newly_unlocked: Vec<Achievement> = ui_achievements
                         .iter()
                         .filter(|a| {
@@ -318,7 +310,6 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                                 display_name, game.steam_id, ach.key
                             );
 
-                            // Cherche les métadonnées enrichies Steam dans AppState
                             let enriched = enriched_game_achievements.iter().find(|a| {
                                 a.key.trim().to_lowercase() == ach.key.trim().to_lowercase()
                             });
@@ -370,7 +361,6 @@ pub fn start(games: Vec<Game>, app_handle: tauri::AppHandle) {
                         }
                     }
 
-                    // Mise à jour de l'état interne pour la prochaine itération
                     *previous_unlocked = true_current_unlocked;
                     live_keys_by_game.insert(game.steam_id, current_live_keys);
 
@@ -397,7 +387,7 @@ pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
         total: 50,
         test: true,
         is_platinum: false,
-        unlocked_time: Some(1714470000), // Example timestamp
+        unlocked_time: Some(1714470000),
     };
 
     let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);

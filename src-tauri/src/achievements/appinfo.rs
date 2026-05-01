@@ -1,4 +1,4 @@
-// src/achievements/appinfo.rs
+// src-tauri/src/achievements/appinfo.rs
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -58,7 +58,6 @@ fn read_string_table(data: &[u8], offset: usize) -> Vec<String> {
     }
     println!("DEBUG string table: {} strings loaded", strings.len());
 
-    // Diagnostic : premiers index de la string table
     for i in 0..10.min(strings.len()) {
         println!("DEBUG string_table[{}] = {:?}", i, strings[i]);
     }
@@ -202,8 +201,6 @@ pub fn read_client_icons() -> HashMap<u32, String> {
                 &block[..40.min(block.len())]
             );
 
-            // Diagnostic : type byte + key_index pour les premières entrées
-            // En v41 : [type: u8] [key_index: u32] [value...]
             println!("DEBUG block 2 - premières entrées interprétées comme v41:");
             let mut p = 0usize;
             for i in 0..8 {
@@ -217,19 +214,19 @@ pub fn read_client_icons() -> HashMap<u32, String> {
                     "DEBUG   entry[{}] pos={} type={:#04x} key_idx={} key={:?}",
                     i, p, type_byte, key_idx, key_name
                 );
-                // Avancer selon le type
+
                 let value_size = match type_byte {
-                    0x00 => 0, // début sous-objet, pas de valeur
-                    0x01 => 4, // string table index (u32)
-                    0x02 => 4, // u32
-                    0x03 => 4, // float
-                    0x07 => 8, // u64
-                    0x08 => 0, // fin sous-objet, pas de valeur
+                    0x00 => 0,
+                    0x01 => 4,
+                    0x02 => 4,
+                    0x03 => 4,
+                    0x07 => 8,
+                    0x08 => 0,
                     _ => break,
                 };
                 p += 1 + 4 + value_size;
                 if type_byte == 0x08 {
-                    // fin de bloc
+
                     break;
                 }
             }
@@ -252,7 +249,7 @@ pub fn read_client_icons() -> HashMap<u32, String> {
 
 fn find_clienticon(block: &[u8], string_table: &[String]) -> Option<String> {
     if string_table.is_empty() {
-        // ancien format, inchangé
+
         let needle = b"clienticon\x00";
         if let Some(pos) = block.windows(needle.len()).position(|w| w == needle) {
             let value_start = pos + needle.len();
@@ -283,11 +280,11 @@ fn find_clienticon(block: &[u8], string_table: &[String]) -> Option<String> {
 
         match type_byte {
             0x00 => {
-                // début sous-objet, pas de valeur
+
                 pos += 5;
             }
             0x01 => {
-                // string null-terminée inline
+
                 let end = match block[value_start..].iter().position(|&b| b == 0) {
                     Some(e) => e,
                     None => break,
@@ -300,9 +297,9 @@ fn find_clienticon(block: &[u8], string_table: &[String]) -> Option<String> {
                 }
                 pos += 5 + end + 1;
             }
-            0x02 => { pos += 5 + 4; }  // u32
-            0x03 => { pos += 5 + 4; }  // float
-            0x07 => { pos += 5 + 8; }  // u64
+            0x02 => { pos += 5 + 4; }
+            0x03 => { pos += 5 + 4; }
+            0x07 => { pos += 5 + 8; }
             _ => break,
         }
     }

@@ -1,4 +1,5 @@
 <script lang="ts">
+    // src/lib/Settings.svelte
     import { get } from 'svelte/store';
     import { open } from '@tauri-apps/plugin-dialog';
     import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
@@ -15,7 +16,6 @@
     let previewAudio = $state<HTMLAudioElement | null>(null);
     let previewingSound = $state('');
 
-    // Preset accent colors
     const accentPresets = [
         { label: 'Or',       value: '#c8a96e' },
         { label: 'Bleu',     value: '#4ac8ff' },
@@ -47,7 +47,6 @@
         { value: 'bottom-center', label: 'Bas centre',  style: 'grid-area: 3 / 2 / 4 / 3;' },
         { value: 'bottom-right', label: 'Bas droite',   style: 'grid-area: 3 / 3 / 4 / 4;' },
     ] as const;
-
 
     $effect(() => {
         applyTheme({ ...draft });
@@ -87,7 +86,7 @@
 
     async function testNotification(): Promise<void> {
         try {
-            // Ecriture immediate des settings de notif dans le store pour le test en temps reel
+
             const { Store } = await import('@tauri-apps/plugin-store');
             const store = await Store.load('settings.json');
             await store.set('windowPosition', draft.windowPosition);
@@ -140,7 +139,6 @@
 
 <div class="settings-page">
 
-    <!-- Header -->
     <div class="settings-header">
         <h1 id="settings-title" class="settings-title">Paramètres</h1>
         <div class="header-actions">
@@ -162,7 +160,6 @@
 
     <div class="settings-body">
 
-        <!-- ── Section Steam ── -->
         <section class="settings-section">
             <div class="section-label">Steam</div>
 
@@ -248,7 +245,6 @@
 
         <div class="separator"></div>
 
-        <!-- ── Section Chemins ── -->
         <section class="settings-section">
             <div class="section-label">Chemins de recherche</div>
             <div class="setting-desc-top">Dossiers supplémentaires où Accolade cherche les fichiers de succès</div>
@@ -283,7 +279,6 @@
 
         <div class="separator"></div>
 
-        <!-- ── Section Position et Test ── -->
         <section class="settings-section">
             <div class="section-label">Position de la fenêtre</div>
             <div class="setting-desc-top">Où apparaît la notification HUD lors d'un succès</div>
@@ -292,7 +287,7 @@
                 <div class="position-grid">
                     <div class="grid-guide vertical"></div>
                     <div class="grid-guide horizontal"></div>
-                    {#each positionOptions as pos}
+                    {#each positionOptions as pos (pos.value)}
                         <button
                                 class="pos-btn"
                                 style={pos.style}
@@ -308,7 +303,7 @@
                     <p class="position-side-label">Son</p>
                     <div class="sound-row">
                         <select class="sound-select" bind:value={draft.notificationSound}>
-                            {#each soundOptions as opt}
+                            {#each soundOptions as opt (opt.value)}
                                 <option value={opt.value}>{opt.label}</option>
                             {/each}
                         </select>
@@ -391,7 +386,7 @@
                 </div>
                 <div class="accent-controls">
                     <div class="accent-presets">
-                        {#each accentPresets as preset}
+                        {#each accentPresets as preset (preset.value)}
                             <button
                                     class="accent-swatch"
                                     class:active={draft.accentColor === preset.value}
@@ -736,7 +731,6 @@
         font-weight: 600;
     }
 
-
     /* ── Thème ── */
     .theme-toggle {
         display: flex;
@@ -937,7 +931,7 @@
         outline: none;
         appearance: none;
         -webkit-appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236a7080' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%236a7080' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 10px center;
         padding-right: 28px;

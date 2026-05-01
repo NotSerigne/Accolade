@@ -1,5 +1,4 @@
-// emulators: parsers pour chaque format d'émulateur
-
+// src-tauri/src/emulators/mod.rs
 use std::path::PathBuf;
 use crate::achievements::models::Achievement;
 use crate::achievements::models::Game;
@@ -31,7 +30,6 @@ pub fn game_scanner(parsers: Vec<Box<dyn EmulatorParser>>) -> Vec<Game> {
     games
 }
 
-// Fonction récursive simple
 fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Game> {
     let mut games = Vec::new();
 
@@ -39,7 +37,6 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
         for entry in entries.flatten() {
             let entry_path = entry.path();
 
-            // Si c'est un fichier achievements, parse-le
             if is_achievements_file(&entry_path) {
                 let achievements = parser.parse(entry_path.to_str().unwrap_or(""));
                 let steam_id = extract_steam_id_from_path(&entry_path.to_string_lossy());
@@ -59,7 +56,7 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                     emulator: parser.emulator(),
                 });
             }
-            // Si c'est un dossier, descend dedans
+
             else if entry_path.is_dir() {
                 games.extend(find_achievements(&entry_path, parser));
             }
@@ -69,7 +66,6 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
     games
 }
 
-// Helper : vérifie si c'est un fichier achievements
 fn is_achievements_file(path: &PathBuf) -> bool {
     if !path.is_file() {
         return false;

@@ -1,9 +1,11 @@
 <script lang="ts">
+    // src/lib/Sidebar.svelte
     import { games, selectedGameId, loadGames, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
     import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
     import { steamUser } from '$lib/stores/user.js';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
+    import { resolve } from '$app/paths';
     import { page } from '$app/state';
 
     onMount(() => loadGames());
@@ -11,31 +13,31 @@
     function selectGame(id: number): void {
         selectedGameId.set(id);
         settingsOpen.set(false);
-        goto(`/games/${id}`);
+        void goto(resolve('/(app)/games/[id]', { id: String(id) }));
     }
 
     function goHome(): void {
         selectedGameId.set(null);
         settingsOpen.set(false);
-        goto('/');
+        void goto(resolve('/'));
     }
 
     function goStats(): void {
         selectedGameId.set(null);
         settingsOpen.set(false);
-        goto('/stats');
+        void goto(resolve('/stats/'));
     }
 
     function goObjectives(): void {
         selectedGameId.set(null);
         settingsOpen.set(false);
-        goto('/objectives');
+        void goto(resolve('/objectives/'));
     }
 
     function goJournal(): void {
         selectedGameId.set(null);
         settingsOpen.set(false);
-        goto('/journal');
+        void goto(resolve('/journal/'));
     }
 
     function goSettings(): void {
@@ -59,25 +61,21 @@
     }
 
     function iconUrl(game: Game): string {
-        // Priority 1: Steam Grid DB icon (SGDB)
+
         if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
             return game.steamgrid_icon_url;
         }
 
-        // Priority 2: game_icon if it's an HTTP URL (SGDB fallback)
         if (game.game_icon && game.game_icon.startsWith('http')) {
             return game.game_icon;
         }
 
-        // Priority 3: game_icon if it's a valid hash (Steam client icon)
         if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
             return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
         }
 
-        // Priority 4: header image as fallback
         if (game.header_image_url) return game.header_image_url;
 
-        // Final Fallback: Steam API header image (Cloudflare)
         return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
     }
 
@@ -86,12 +84,11 @@
             const t = e.target as HTMLImageElement;
             const currentSrc = t.src;
 
-            // Si on a déjà essayé le header et que ça a échoué, on passe aux initiales
             if (currentSrc.includes('header.jpg')) {
                 t.onerror = null;
                 t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(steamId))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
             } else {
-                // Sinon on tente le header
+
                 t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamId}/header.jpg`;
             }
         };
@@ -117,7 +114,7 @@
 </script>
 
 <aside class="sidebar">
-    <!-- Home -->
+
     <div class="nav-wrap">
         <div class="pill" class:visible={isHomeActive}></div>
         <button
@@ -182,7 +179,6 @@
 
     <div class="divider"></div>
 
-    <!-- Icônes des jeux détectés -->
     <div class="games-list">
 
         {#each sortedGames as game (game.steam_id)}
@@ -219,7 +215,6 @@
         {/if}
     </div>
 
-    <!-- User panel flottant style Discord -->
     <div class="user-panel">
         {#if $steamUser}
             <img class="avatar" src={$steamUser.avatarfull} alt={$steamUser.personaname} />
@@ -371,7 +366,6 @@
         line-height: 1.5;
     }
 
-    /* ── User panel flottant ── */
     .user-panel {
         position: absolute;
         bottom: 20px;

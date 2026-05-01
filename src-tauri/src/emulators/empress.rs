@@ -1,5 +1,4 @@
-// empress: parse le format JSON de Empress
-
+// src-tauri/src/emulators/empress.rs
 use std::path::PathBuf;
 use std::collections::HashMap;
 use serde::{Deserialize};

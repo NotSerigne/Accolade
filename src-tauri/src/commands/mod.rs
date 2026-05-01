@@ -1,5 +1,4 @@
-// commands: les commandes qui seront appelées depuis le frontend
-
+// src-tauri/src/commands/mod.rs
 use crate::achievements::match_emulator;
 use crate::achievements::models::{Achievement, Emulator, Game};
 use crate::achievements::steam::{fetch_owned_games, fetch_steam_user, OwnedGame, SteamUser};
@@ -94,7 +93,6 @@ pub(crate) async fn sync_steam_metadata(
         cloned_games.len()
     );
 
-    // 0. Rescanner les jeux locaux (crackés)
     let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
         Box::new(crate::emulators::goldberg::Parser),
         Box::new(crate::emulators::empress::Parser),
@@ -120,7 +118,6 @@ pub(crate) async fn sync_steam_metadata(
         );
     }
 
-    // 1. Ajouter les jeux possédés si steam_id est fourni
     let mut added_steam_games = false;
     if !steam_id.trim().is_empty() && !effective_api_key.is_empty() {
         println!(
@@ -170,14 +167,12 @@ pub(crate) async fn sync_steam_metadata(
         }
     }
 
-    // Si on a ajouté des jeux, on met à jour l'état global immédiatement pour qu'ils apparaissent au moins en "squelette"
     if added_steam_games || added_local > 0 {
         if let Ok(mut games) = state.games.lock() {
             *games = cloned_games.clone();
         }
     }
 
-    // 2. Enrichir avec les métadonnées Steam (achievements, images, progress)
     if !effective_api_key.is_empty() {
         println!(
             "[DEBUG][sync_steam_metadata] Enriching {} games with Steam metadata",
@@ -186,7 +181,6 @@ pub(crate) async fn sync_steam_metadata(
         enrich_games_with_steam(&mut cloned_games, &effective_api_key, &steam_id).await;
     }
 
-    // 3. Enrichir avec SteamGridDB si possible
     let sgdb_key = if !sgdb_api_key.trim().is_empty() {
         sgdb_api_key
     } else {
@@ -197,7 +191,6 @@ pub(crate) async fn sync_steam_metadata(
         apply_steamgriddb_icons(&mut cloned_games, &sgdb_key).await;
     }
 
-    // 4. Mettre à jour l'état global final
     {
         let mut games = state
             .games
