@@ -23,7 +23,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
         .lock()
         .map(|gs| {
             gs.iter()
-                .filter(|g| g.steam_id != 0)
+                .filter(|g| g.steam_id != 0 && g.achievements_total > 0)
                 .cloned()
                 .collect::<Vec<Game>>()
         })
@@ -217,25 +217,26 @@ pub(crate) async fn sync_steam_metadata(
         apply_steamgriddb_icons(&mut cloned_games, &sgdb_key).await;
     }
 
+    let filtered_games: Vec<Game> = cloned_games
+        .into_iter()
+        .filter(|g| g.steam_id != 0 && g.achievements_total > 0)
+        .collect();
+
     {
         let mut games = state
             .games
             .lock()
             .map_err(|_| String::from("Impossible d'acceder a la liste des jeux"))?;
-        *games = cloned_games.clone();
+        *games = filtered_games.clone();
         println!(
             "[DEBUG][sync_steam_metadata] State updated with {} games",
             games.len()
         );
     }
 
-    let result: Vec<Game> = cloned_games
-        .into_iter()
-        .filter(|g| g.steam_id != 0)
-        .collect();
     println!(
         "[DEBUG][sync_steam_metadata] Returning {} games",
-        result.len()
+        filtered_games.len()
     );
-    Ok(result)
+    Ok(filtered_games)
 }

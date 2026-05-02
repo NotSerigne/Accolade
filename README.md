@@ -1,90 +1,86 @@
-# Accolade
+<div align="center">
+  <img src="src-tauri/icons/128x128.png" alt="Accolade Logo" width="128" />
+  
+  # Accolade
+  
+  **Donnez une seconde vie à vos succès.**
+  
+  [![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri&logoColor=white)](https://tauri.app/)
+  [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev/)
+  [![Rust](https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+  [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Accolade is a desktop app (SvelteKit + Tauri) that detects local achievement files, enriches them with Steam metadata, and shows live unlock notifications in an overlay.
+  *Accolade est une application de bureau moderne qui synchronise et affiche vos succès issus de jeux "cracked" avec de l'élégance.*
 
-## Features
+  [Fonctionnalités](#-fonctionnalités) • [Émulateurs Supportés](#-émulateurs-supportés) • [Installation](#-installation) • [Captures](#-captures-décran)
 
-- Local achievement scan from emulator files
-- Real-time achievement updates with desktop overlay notifications
-- Steam sync (profile, owned games, metadata)
-- Optional SteamGridDB icon enrichment
-- In-app settings for scan paths, HUD position, sound, theme, and accent color
-- Setup page with language selection (FR/EN/ES/DE/IT)
+</div>
 
-## Supported emulators
+---
 
-- Goldberg
-- Empress
-- CODEX
-- OnlineFix
-- RUNE
+## ✨ Fonctionnalités
 
-## Prerequisites (Windows)
+Accolade comble le fossé entre vos jeux locaux et l'expérience sociale des succès :
 
-- Node.js 20+ and npm
-- Rust toolchain (stable)
-- Tauri v2 system requirements (MSVC Build Tools + WebView2)
-- Tauri CLI:
+- 🔍 **Scan Intelligent** : Détection automatique des fichiers de succès locaux.
+- 🖼️ **Métadonnées Steam** : Enrichissement automatique avec les noms, descriptions et icônes officiels.
+- 🔔 **Overlay Real-time** : Notifications de succès en plein jeu (style PS5/Steam).
+- 🎨 **Personnalisation Totale** : Thèmes (Clair/Sombre), couleurs d'accentuation, et sons de notification (PS4, PS5, Xbox, Steam).
+- 🌍 **Multilingue** : Support complet pour FR, EN, ES, DE, IT.
+- ⚡ **Performance Rust** : Coeur ultra-léger et rapide grâce à Tauri v2.
 
-```bash
-cargo install tauri-cli --version "^2"
-```
+## 🕹️ Émulateurs Supportés
 
-## Getting started
+Accolade supporte nativement les formats de succès les plus courants :
 
-1. Install JavaScript dependencies:
+| Émulateur | Emplacement par défaut |
+| :--- | :--- |
+| **Goldberg** | `%APPDATA%\Goldberg SteamEmu Saves` |
+| **Empress** | `%APPDATA%\Empress-Emulator` |
+| **CODEX** | `%APPDATA%\Steam\CODEX` |
+| **OnlineFix** | `%PUBLIC%\Documents\OnlineFix` |
+| **RUNE** | `%PUBLIC%\Documents\Steam\RUNE` |
 
-```bash
-npm install
-```
+## 🚀 Installation
 
-2. Start the desktop app in development:
+### Prérequis (Windows)
 
-```bash
-cargo tauri dev
-```
+- [Node.js](https://nodejs.org/) (v20+)
+- [Rust](https://www.rust-lang.org/tools/install)
+- [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (souvent déjà présent sur Windows 10/11)
 
-3. In the app settings, set:
-   - Steam ID (64-bit)
-   - Steam API key (required for Steam sync)
-   - SteamGridDB API key (optional)
-   - Extra search paths (optional)
+### Configuration rapide
 
-## Build
+1.  **Clonage et dépendances**
+    ```bash
+    git clone https://github.com/votre-repo/accolade.git
+    cd accolade
+    npm install
+    ```
 
-Frontend:
+2.  **Lancement en développement**
+    ```bash
+    npm run tauri dev
+    ```
 
-```bash
-npm run build
-```
+3.  **Compilation finale**
+    ```bash
+    npm run tauri build
+    ```
 
-Rust/Tauri check:
+## ⚙️ Configuration de l'App
 
-```bash
-cargo check --manifest-path .\src-tauri\Cargo.toml
-```
+Pour une expérience optimale, configurez les éléments suivants dans les paramètres :
 
-Desktop bundle:
+- **Steam ID** : Votre ID 64-bit pour synchroniser votre bibliothèque.
+- **Steam API Key** : Nécessaire pour récupérer les succès et métadonnées.
+- **SteamGridDB API Key** (Optionnel) : Pour des icônes de haute qualité.
 
-```bash
-cargo tauri build
-```
+## 🛠️ Stack Technique
 
-## Optional environment variables
+- **Frontend** : Svelte 5 + SvelteKit + Tailwind-ish CSS (Vanilla)
+- **Backend** : Rust + Tauri v2
+- **Store** : Tauri Plugin Store (Persistance locale)
+- **Watcher** : `notify` (Rust) pour le suivi des fichiers en temps réel
 
-You can also provide API keys through environment variables:
-
-- `STEAM_API_KEY`
-- `STEAMGRIDDB_API_KEY`
-
-These are used as fallback values when keys are not provided from settings.
-
-## Default scan locations
-
-| Emulator | Default location(s) |
-| --- | --- |
-| Goldberg | `%APPDATA%\Goldberg SteamEmu Saves` |
-| Empress | `%APPDATA%\Empress-Emulator` |
-| CODEX | `%APPDATA%\Steam\CODEX`, `%PUBLIC%\Documents\Steam\CODEX` |
-| OnlineFix | `%PUBLIC%\Documents\OnlineFix` |
-| RUNE | `%PUBLIC%\Documents\Steam\RUNE` |
+---

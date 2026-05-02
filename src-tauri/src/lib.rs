@@ -195,7 +195,7 @@ pub(crate) async fn enrich_games_with_steam(
         }
     }
 
-    games.retain(|g| !to_remove.contains(&g.steam_id));
+    games.retain(|g| g.achievements_total > 0 && !to_remove.contains(&g.steam_id));
 }
 
 async fn fetch_sgdb_icon(
