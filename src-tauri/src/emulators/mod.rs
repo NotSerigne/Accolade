@@ -1,14 +1,14 @@
 // src-tauri/src/emulators/mod.rs
-use std::path::PathBuf;
 use crate::achievements::models::Achievement;
-use crate::achievements::models::Game;
 use crate::achievements::models::Emulator;
+use crate::achievements::models::Game;
+use std::path::PathBuf;
 
-pub(crate) mod goldberg;
-pub(crate) mod rune;
-pub(crate) mod onlinefix;
-pub(crate) mod empress;
 pub(crate) mod codex;
+pub(crate) mod empress;
+pub(crate) mod goldberg;
+pub(crate) mod onlinefix;
+pub(crate) mod rune;
 
 pub trait EmulatorParser {
     fn parse(&self, path: &str) -> Vec<Achievement>;
@@ -55,9 +55,7 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                     path_buf: entry_path.to_string_lossy().to_string(),
                     emulator: parser.emulator(),
                 });
-            }
-
-            else if entry_path.is_dir() {
+            } else if entry_path.is_dir() {
                 games.extend(find_achievements(&entry_path, parser));
             }
         }
@@ -71,12 +69,11 @@ fn is_achievements_file(path: &PathBuf) -> bool {
         return false;
     }
 
-    let filename = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    filename == "achievements.json" || filename == "achievements.ini"
+    filename == "achievements.json"
+        || filename == "achievement.json"
+        || filename == "achievements.ini"
 }
 
 fn extract_steam_id_from_path(path: &str) -> u32 {

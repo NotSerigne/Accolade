@@ -1,10 +1,10 @@
 // src-tauri/src/emulators/goldberg.rs
-use std::path::PathBuf;
-use std::collections::HashMap;
-use serde::{Deserialize};
 use crate::achievements::models::Achievement;
-use crate::emulators::EmulatorParser;
 use crate::achievements::models::Emulator;
+use crate::emulators::EmulatorParser;
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct Parser;
 
@@ -24,8 +24,8 @@ impl EmulatorParser for Parser {
             Ok(data) => data,
             Err(_) => return Vec::new(),
         };
-        data.into_iter().map(|(key, value)| {
-            Achievement {
+        data.into_iter()
+            .map(|(key, value)| Achievement {
                 key: key.clone(),
                 name: key,
                 unlocked: value.earned,
@@ -36,13 +36,14 @@ impl EmulatorParser for Parser {
                 completionpercentage: String::new(),
                 desc: String::new(),
                 hidden: false,
-            }
-        }).collect()
+            })
+            .collect()
     }
     fn known_locations(&self) -> Vec<PathBuf> {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
         vec![
             PathBuf::from(&appdata).join("Goldberg SteamEmu Saves"),
+            PathBuf::from(&appdata).join("GSE Saves"),
         ]
     }
     fn emulator(&self) -> Emulator {

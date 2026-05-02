@@ -44,6 +44,7 @@
 	let filter = $state<'all' | 'unlocked' | 'locked'>('all');
 	let search = $state('');
 	let sort = $state<'date' | 'rarity' | 'name'>('date');
+	let sortOrder = $state<'asc' | 'desc'>('desc');
 	let revealed = $state(true);
 	let loading = $state(true);
 	let loadedGameId = $state<number | null>(null);
@@ -133,9 +134,13 @@
 
 		list = [...list];
 
+		const orderMultiplier = sortOrder === 'asc' ? 1 : -1;
+
 		if (sort === 'date') {
 			list.sort((a: Achievement, b: Achievement) => {
-				if (a.unlocked && b.unlocked) return (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0);
+				if (a.unlocked && b.unlocked) {
+					return ((a.unlocked_time ?? 0) - (b.unlocked_time ?? 0)) * orderMultiplier;
+				}
 				if (a.unlocked) return -1;
 				if (b.unlocked) return 1;
 				return 0;
@@ -143,10 +148,12 @@
 		} else if (sort === 'rarity') {
 			list.sort(
 				(a: Achievement, b: Achievement) =>
-					(parseFloat(a.completionpercentage) || 100) - (parseFloat(b.completionpercentage) || 100)
+					((parseFloat(a.completionpercentage) || 100) -
+						(parseFloat(b.completionpercentage) || 100)) *
+					orderMultiplier
 			);
 		} else if (sort === 'name') {
-			list.sort((a: Achievement, b: Achievement) => a.name.localeCompare(b.name));
+			list.sort((a: Achievement, b: Achievement) => a.name.localeCompare(b.name) * orderMultiplier);
 		}
 
 		return list;
@@ -451,6 +458,36 @@
 							<option value="rarity">Rareté</option>
 							<option value="name">Nom</option>
 						</select>
+
+						<button
+							class="order-btn"
+							onclick={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')}
+							title={sortOrder === 'asc' ? 'Croissant' : 'Décroissant'}
+						>
+							{#if sortOrder === 'asc'}
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2.5"
+								>
+									<path d="M12 19V5M5 12l7-7 7 7" />
+								</svg>
+							{:else}
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2.5"
+								>
+									<path d="M12 5v14M5 12l7 7 7-7" />
+								</svg>
+							{/if}
+						</button>
 
 						<button
 							class="reveal-btn"
@@ -986,6 +1023,24 @@
 	}
 	.sort-select option {
 		background: #1a1a1a;
+		color: #fff;
+	}
+
+	.order-btn {
+		height: 38px;
+		width: 38px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 10px;
+		color: #6a7080;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+	.order-btn:hover {
+		background: rgba(255, 255, 255, 0.08);
 		color: #fff;
 	}
 
