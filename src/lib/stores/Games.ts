@@ -56,6 +56,17 @@ export const totalUnlockedAchievements = derived(games, ($games) =>
 	$games.reduce((acc, g) => acc + (g.achievements?.filter((a) => a.unlocked).length ?? 0), 0)
 );
 
+export const totalCompletedGames = derived(
+	games,
+	($games) =>
+		$games.filter((g) => {
+			const total = g.achievements_total || g.achievements?.length || 0;
+			if (total === 0) return false;
+			const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
+			return unlocked === total;
+		}).length
+);
+
 export async function loadGames(): Promise<void> {
 	try {
 		const result = await invoke<Game[]>('get_all_games');

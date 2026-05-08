@@ -5,6 +5,7 @@
 		selectedGameId,
 		loadGames,
 		totalUnlockedAchievements,
+		totalCompletedGames,
 		type Game
 	} from '$lib/stores/Games.js';
 	import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
@@ -250,7 +251,10 @@
 			<div class="user-info">
 				<div class="user-name">{$steamUser.personaname}</div>
 				<div class="user-meta">
-					{$i18n.t('sidebar.user.achievements', { count: $totalUnlockedAchievements })}
+					{$i18n.t('sidebar.user.achievements', {
+						count: $totalUnlockedAchievements,
+						completed: $totalCompletedGames
+					})}
 				</div>
 			</div>
 		{:else}
