@@ -323,10 +323,17 @@ pub fn start(app_handle: tauri::AppHandle) {
                     let achievements = match_emulator(game.clone());
                     let current_live_keys = live_keys(&achievements);
                     let previous_live_keys = live_keys_by_game
-                        .get(&game.steam_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    let previous_unlocked = unlocked_by_game.entry(game.steam_id).or_default();
+                        .entry(game.steam_id)
+                        .or_insert_with(|| live_keys(&game.achievements));
+
+                    let previous_unlocked =
+                        unlocked_by_game.entry(game.steam_id).or_insert_with(|| {
+                            game.achievements
+                                .iter()
+                                .filter(|a| a.unlocked || a.unlocked_time.is_some())
+                                .map(|a| a.key.trim().to_lowercase())
+                                .collect()
+                        });
 
                     let (ui_achievements, ui_total) = {
                         let state = app_handle.state::<AppState>();
@@ -341,7 +348,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                                         let merged = merge_live_achievements(
                                             &stored.achievements,
                                             &achievements,
-                                            &previous_live_keys,
+                                            previous_live_keys,
                                             &current_live_keys,
                                         );
                                         let total = merged.len() as u32;
@@ -366,7 +373,7 @@ pub fn start(app_handle: tauri::AppHandle) {
 
                     let unlocked_count = true_current_unlocked.len() as u32;
 
-                    let newly_unlocked: Vec<Achievement> = ui_achievements
+                    let mut newly_unlocked: Vec<Achievement> = ui_achievements
                         .iter()
                         .filter(|a| {
                             let key = a.key.trim().to_lowercase();
@@ -377,6 +384,10 @@ pub fn start(app_handle: tauri::AppHandle) {
                         .collect();
 
                     if !newly_unlocked.is_empty() {
+                        let total = ui_total;
+                        let unlocked_count_total = true_current_unlocked.len() as u32;
+                        let is_game_completed = total > 0 && unlocked_count_total == total;
+
                         let language = {
                             let state = app_handle.state::<AppState>();
                             state
@@ -392,10 +403,10 @@ pub fn start(app_handle: tauri::AppHandle) {
                             &mut api_lookup_attempted,
                             &language,
                         );
-                        let total = ui_total;
                         let enriched_game_achievements: Vec<Achievement> = ui_achievements.clone();
 
-                        for ach in &newly_unlocked {
+                        let num_new = newly_unlocked.len();
+                        for (idx, ach) in newly_unlocked.iter().enumerate() {
                             println!(
                                 "[DEBUG][achievements] Nouveau succes debloque pour '{}' (AppID {}): {}",
                                 display_name, game.steam_id, ach.key
@@ -425,7 +436,14 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 .filter(|&p| p > 0.0);
 
                             let rarity = rarity_label(completion_pct, &language);
-                            let is_platinum = total > 0 && unlocked_count == total;
+
+                            // Only the very last achievement in the batch gets the platinum flag if the game is now 100%
+                            let is_platinum = is_game_completed && (idx == num_new - 1);
+
+                            // We need to calculate the intermediate unlocked count for the UI ring
+                            // If we unlock 3 at once and end at 50/50, the first should show 48/50, second 49/50, third 50/50
+                            let current_unlocked_display =
+                                (unlocked_count_total - (num_new as u32)) + (idx as u32) + 1;
 
                             let payload = AchievementNotifPayload {
                                 name: ach_name,
@@ -437,7 +455,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 },
                                 rarity,
                                 completionpercentage: completion_pct,
-                                unlocked: unlocked_count,
+                                unlocked: current_unlocked_display,
                                 total,
                                 test: false,
                                 is_platinum,

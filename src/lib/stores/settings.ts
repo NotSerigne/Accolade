@@ -17,6 +17,7 @@ export interface AppSettings {
 		| 'bottom-center'
 		| 'bottom-right';
 	notificationSound: string;
+	notificationVolume: number;
 	theme: 'dark' | 'light' | 'system';
 	accentColor: string;
 	launchOnStartup: boolean;
@@ -33,6 +34,7 @@ const DEFAULTS: AppSettings = {
 	setupCompleted: false,
 	windowPosition: 'bottom-right',
 	notificationSound: 'Steam.mp3',
+	notificationVolume: 0.7,
 	theme: 'system',
 	accentColor: '#c8a96e',
 	launchOnStartup: false,

@@ -5,6 +5,7 @@ use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use tauri::{window::Color, Manager};
+use tauri_plugin_autostart::MacosLauncher;
 
 pub struct AppState {
     pub(crate) games: Mutex<Vec<Game>>,
@@ -281,6 +282,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             dotenv::dotenv().ok();
@@ -293,7 +298,7 @@ pub fn run() {
                 "/overlay"
             };
 
-            tauri::WebviewWindowBuilder::new(
+            let overlay_win = tauri::WebviewWindowBuilder::new(
                 app,
                 "achievement-overlay",
                 tauri::WebviewUrl::App(overlay_url.into()),
@@ -309,6 +314,8 @@ pub fn run() {
             .skip_taskbar(true)
             .visible(false)
             .build()?;
+
+            overlay_win.set_ignore_cursor_events(true)?;
 
             let quit_i =
                 tauri::menu::MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;

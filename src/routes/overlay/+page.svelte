@@ -1,155 +1,185 @@
 <script lang="ts">
-    // src/routes/overlay/+page.svelte
-    import { onMount } from 'svelte';
-    import { listen } from '@tauri-apps/api/event';
-    import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
-    import { LogicalPosition } from '@tauri-apps/api/dpi';
-    import { Store } from '@tauri-apps/plugin-store';
-    import AchievementNotif from '$lib/AchievementNotif.svelte';
+	// src/routes/overlay/+page.svelte
+	import { onMount } from 'svelte';
+	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
+	import { LogicalPosition } from '@tauri-apps/api/dpi';
+	import { Store } from '@tauri-apps/plugin-store';
+	import AchievementNotif from '$lib/AchievementNotif.svelte';
 
-    type WindowPosition = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+	type WindowPosition =
+		| 'top-left'
+		| 'top-center'
+		| 'top-right'
+		| 'bottom-left'
+		| 'bottom-center'
+		| 'bottom-right';
 
-    interface Achievement {
-        name?: string;
-        desc?: string;
-        icon?: string;
-        rarity?: string;
-        completionpercentage?: number;
-        unlocked?: number;
-        total?: number;
-        is_platinum?: boolean;
-    }
+	interface Achievement {
+		name?: string;
+		desc?: string;
+		icon?: string;
+		rarity?: string;
+		completionpercentage?: number;
+		unlocked?: number;
+		total?: number;
+		is_platinum?: boolean;
+	}
 
-    const NOTIF_WIDTH  = 460;
-    const NOTIF_HEIGHT = 260;
-    const MARGIN       = 24;
-    const DEFAULT_POSITION: WindowPosition = 'top-right';
-    const DEFAULT_SOUND = 'Steam.mp3';
+	const NOTIF_WIDTH = 460;
+	const NOTIF_HEIGHT = 260;
+	const MARGIN = 24;
+	const DEFAULT_POSITION: WindowPosition = 'top-right';
+	const DEFAULT_SOUND = 'Steam.mp3';
+	const DEFAULT_VOLUME = 0.7;
 
-    let settingsStorePromise: Promise<Store> | null = null;
+	let settingsStorePromise: Promise<Store> | null = null;
 
-    async function getSettingsStore(): Promise<Store> {
-        if (!settingsStorePromise) {
-            settingsStorePromise = Store.load('settings.json');
-        }
-        return settingsStorePromise;
-    }
+	async function getSettingsStore(): Promise<Store> {
+		if (!settingsStorePromise) {
+			settingsStorePromise = Store.load('settings.json');
+		}
+		return settingsStorePromise;
+	}
 
-    async function getOverlayPreferences(): Promise<{ windowPosition: WindowPosition; notificationSound: string }> {
-        try {
-            const store = await getSettingsStore();
-            const [windowPosition, notificationSound] = await Promise.all([
-                store.get<WindowPosition>('windowPosition'),
-                store.get<string>('notificationSound'),
-            ]);
-            return {
-                windowPosition: windowPosition ?? DEFAULT_POSITION,
-                notificationSound: notificationSound ?? DEFAULT_SOUND,
-            };
-        } catch {
-            settingsStorePromise = null;
-            return {
-                windowPosition: DEFAULT_POSITION,
-                notificationSound: DEFAULT_SOUND,
-            };
-        }
-    }
+	async function getOverlayPreferences(): Promise<{
+		windowPosition: WindowPosition;
+		notificationSound: string;
+		notificationVolume: number;
+	}> {
+		try {
+			const store = await getSettingsStore();
+			const [windowPosition, notificationSound, notificationVolume] = await Promise.all([
+				store.get<WindowPosition>('windowPosition'),
+				store.get<string>('notificationSound'),
+				store.get<number>('notificationVolume')
+			]);
+			return {
+				windowPosition: windowPosition ?? DEFAULT_POSITION,
+				notificationSound: notificationSound ?? DEFAULT_SOUND,
+				notificationVolume: notificationVolume ?? DEFAULT_VOLUME
+			};
+		} catch {
+			settingsStorePromise = null;
+			return {
+				windowPosition: DEFAULT_POSITION,
+				notificationSound: DEFAULT_SOUND,
+				notificationVolume: DEFAULT_VOLUME
+			};
+		}
+	}
 
-    function playNotificationSound(filename: string): void {
-        if (!filename || filename === 'none') return;
-        const audio = new Audio(`/sounds/${encodeURIComponent(filename)}`);
-        audio.volume = 0.7;
-        audio.play().catch(() => {});
-    }
+	function playNotificationSound(filename: string, volume: number): void {
+		if (!filename || filename === 'none') return;
+		const audio = new Audio(`/sounds/${encodeURIComponent(filename)}`);
+		audio.volume = volume;
+		audio.play().catch(() => {});
+	}
 
-    async function positionOverlay(pos: WindowPosition): Promise<WindowPosition> {
-        const win = getCurrentWindow();
-        const monitor = await currentMonitor();
-        if (!monitor) return DEFAULT_POSITION;
+	async function positionOverlay(pos: WindowPosition): Promise<WindowPosition> {
+		const win = getCurrentWindow();
+		const monitor = await currentMonitor();
+		if (!monitor) return DEFAULT_POSITION;
 
-        const sw = monitor.size.width  / monitor.scaleFactor;
-        const sh = monitor.size.height / monitor.scaleFactor;
-        const ox = monitor.position.x  / monitor.scaleFactor;
-        const oy = monitor.position.y  / monitor.scaleFactor;
+		const sw = monitor.size.width / monitor.scaleFactor;
+		const sh = monitor.size.height / monitor.scaleFactor;
+		const ox = monitor.position.x / monitor.scaleFactor;
+		const oy = monitor.position.y / monitor.scaleFactor;
 
-        let x: number;
-        let y: number;
+		let x: number;
+		let y: number;
 
-        switch (pos) {
-            case 'top-left':
-                x = ox + MARGIN;
-                y = oy + MARGIN;
-                break;
-            case 'top-center':
-                x = ox + (sw - NOTIF_WIDTH) / 2;
-                y = oy + MARGIN;
-                break;
-            case 'top-right':
-                x = ox + sw - NOTIF_WIDTH - MARGIN;
-                y = oy + MARGIN;
-                break;
-            case 'bottom-left':
-                x = ox + MARGIN;
-                y = oy + sh - NOTIF_HEIGHT - MARGIN;
-                break;
-            case 'bottom-center':
-                x = ox + (sw - NOTIF_WIDTH) / 2;
-                y = oy + sh - NOTIF_HEIGHT - MARGIN;
-                break;
-            case 'bottom-right':
-                x = ox + sw - NOTIF_WIDTH - MARGIN;
-                y = oy + sh - NOTIF_HEIGHT - MARGIN;
-                break;
-            default:
-                x = ox + sw - NOTIF_WIDTH - MARGIN;
-                y = oy + MARGIN;
-        }
+		switch (pos) {
+			case 'top-left':
+				x = ox + MARGIN;
+				y = oy + MARGIN;
+				break;
+			case 'top-center':
+				x = ox + (sw - NOTIF_WIDTH) / 2;
+				y = oy + MARGIN;
+				break;
+			case 'top-right':
+				x = ox + sw - NOTIF_WIDTH - MARGIN;
+				y = oy + MARGIN;
+				break;
+			case 'bottom-left':
+				x = ox + MARGIN;
+				y = oy + sh - NOTIF_HEIGHT - MARGIN;
+				break;
+			case 'bottom-center':
+				x = ox + (sw - NOTIF_WIDTH) / 2;
+				y = oy + sh - NOTIF_HEIGHT - MARGIN;
+				break;
+			case 'bottom-right':
+				x = ox + sw - NOTIF_WIDTH - MARGIN;
+				y = oy + sh - NOTIF_HEIGHT - MARGIN;
+				break;
+			default:
+				x = ox + sw - NOTIF_WIDTH - MARGIN;
+				y = oy + MARGIN;
+		}
 
-        await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
-        return pos;
-    }
+		await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+		return pos;
+	}
 
-    let achievement = $state<Achievement | null>(null);
-    let visible     = $state(false);
-    let position    = $state<WindowPosition>('top-right');
+	let achievement = $state<Achievement | null>(null);
+	let visible = $state(false);
+	let position = $state<WindowPosition>('top-right');
 
-    onMount(() => {
-        const win = getCurrentWindow();
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        let unlisten: (() => void) | undefined;
+	let queue: Achievement[] = [];
+	let processingQueue = false;
 
-        listen<Achievement>('achievement-notif', async (event) => {
-            const payload = event.payload;
-            if (timer) clearTimeout(timer);
+	async function processQueue() {
+		if (processingQueue || queue.length === 0) return;
+		processingQueue = true;
 
-            visible     = false;
-            achievement = null;
+		const win = getCurrentWindow();
 
-            const { windowPosition, notificationSound } = await getOverlayPreferences();
-            const resolvedPosition = await positionOverlay(windowPosition);
+		while (queue.length > 0) {
+			const payload = queue.shift()!;
 
-            playNotificationSound(notificationSound);
+			visible = false;
+			achievement = null;
 
-            requestAnimationFrame(() => {
-                position    = resolvedPosition;
-                achievement = payload;
-                visible     = true;
-                win.show();
+			const { windowPosition, notificationSound, notificationVolume } =
+				await getOverlayPreferences();
+			const resolvedPosition = await positionOverlay(windowPosition);
 
-                timer = setTimeout(() => {
-                    visible = false;
-                    setTimeout(() => win.hide(), 600);
-                }, 5000);
-            });
-        }).then((cleanup) => {
-            unlisten = cleanup;
-        });
+			playNotificationSound(notificationSound, notificationVolume);
 
-        return () => {
-            if (timer) clearTimeout(timer);
-            unlisten?.();
-        };
-    });
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+
+			position = resolvedPosition;
+			achievement = payload;
+			visible = true;
+			await win.show();
+
+			// Wait for notification to be visible (5s) + fade out (0.6s)
+			await new Promise((resolve) => setTimeout(resolve, 5600));
+
+			visible = false;
+			await new Promise((resolve) => setTimeout(resolve, 600));
+			await win.hide();
+		}
+
+		processingQueue = false;
+	}
+
+	onMount(() => {
+		let unlisten: (() => void) | undefined;
+
+		listen<Achievement>('achievement-notif', (event) => {
+			queue.push(event.payload);
+			processQueue();
+		}).then((cleanup) => {
+			unlisten = cleanup;
+		});
+
+		return () => {
+			unlisten?.();
+		};
+	});
 </script>
 
 <AchievementNotif {achievement} {visible} {position} />

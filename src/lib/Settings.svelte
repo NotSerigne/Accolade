@@ -110,7 +110,7 @@
 			return;
 		}
 		const audio = new Audio(`/sounds/${encodeURIComponent(filename)}`);
-		audio.volume = 0.7;
+		audio.volume = draft.notificationVolume;
 		previewAudio = audio;
 		previewingSound = filename;
 		audio.play().catch(() => {});
@@ -126,6 +126,7 @@
 			const store = await Store.load('settings.json');
 			await store.set('windowPosition', draft.windowPosition);
 			await store.set('notificationSound', draft.notificationSound);
+			await store.set('notificationVolume', draft.notificationVolume);
 			await store.save();
 
 			const { invoke } = await import('@tauri-apps/api/core');
@@ -154,6 +155,7 @@
 				setupCompleted: draft.setupCompleted,
 				windowPosition: draft.windowPosition,
 				notificationSound: draft.notificationSound,
+				notificationVolume: draft.notificationVolume,
 				theme: draft.theme,
 				accentColor: draft.accentColor,
 				launchOnStartup: draft.launchOnStartup,
@@ -471,6 +473,31 @@
 								</svg>
 							{/if}
 						</button>
+					</div>
+
+					<p class="position-side-label" style="margin-top: 12px;">Volume</p>
+					<div class="volume-row">
+						<svg
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							class="volume-icon"
+						>
+							<path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07" />
+						</svg>
+						<input
+							type="range"
+							min="0"
+							max="1"
+							step="0.05"
+							bind:value={draft.notificationVolume}
+							class="volume-slider"
+							style="--volume-pct: {draft.notificationVolume * 100}%"
+						/>
+						<span class="volume-value">{Math.round(draft.notificationVolume * 100)}%</span>
 					</div>
 
 					<p class="position-side-label" style="margin-top: 12px;">{$i18n.t('settings.test')}</p>
@@ -1274,6 +1301,70 @@
 	.sound-preview-btn:disabled {
 		opacity: 0.3;
 		cursor: not-allowed;
+	}
+
+	/* ── Volume ── */
+	.volume-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		background: var(--surface-2);
+		padding: 8px 12px;
+		border-radius: 8px;
+		border: 1px solid var(--border-soft);
+	}
+
+	.volume-icon {
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+
+	.volume-slider {
+		flex: 1;
+		appearance: none;
+		height: 4px;
+		background: var(--border-soft);
+		border-radius: 2px;
+		outline: none;
+		cursor: pointer;
+		position: relative;
+	}
+
+	.volume-slider::-webkit-slider-runnable-track {
+		background: linear-gradient(
+			to right,
+			var(--accent) 0%,
+			var(--accent) var(--volume-pct),
+			var(--border-soft) var(--volume-pct),
+			var(--border-soft) 100%
+		);
+		height: 4px;
+		border-radius: 2px;
+	}
+
+	.volume-slider::-webkit-slider-thumb {
+		appearance: none;
+		width: 14px;
+		height: 14px;
+		background: #fff;
+		border: 2px solid var(--accent);
+		border-radius: 50%;
+		cursor: pointer;
+		margin-top: -5px;
+		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+		transition: transform 0.1s;
+	}
+
+	.volume-slider::-webkit-slider-thumb:hover {
+		transform: scale(1.15);
+	}
+
+	.volume-value {
+		font-size: 12px;
+		font-family: 'Courier New', monospace;
+		color: var(--text-primary);
+		min-width: 35px;
+		text-align: right;
 	}
 
 	/* ── Toggles ── */
