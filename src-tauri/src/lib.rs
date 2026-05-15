@@ -287,6 +287,15 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
+            let args: Vec<String> = std::env::args().collect();
+            let is_minimized = args.contains(&"--minimized".to_string());
+
+            if is_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+
             dotenv::dotenv().ok();
 
             let api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
@@ -352,8 +361,10 @@ pub fn run() {
 
             #[cfg(debug_assertions)]
             {
-                let overlay_win = app.get_webview_window("achievement-overlay").unwrap();
-                overlay_win.open_devtools();
+                if !is_minimized {
+                    let overlay_win = app.get_webview_window("achievement-overlay").unwrap();
+                    overlay_win.open_devtools();
+                }
             }
 
             app.manage(AppState {
@@ -367,7 +378,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             watcher::start(app_handle);
 
-            if cfg!(debug_assertions) {
+            if cfg!(debug_assertions) && !is_minimized {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
