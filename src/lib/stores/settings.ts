@@ -5,6 +5,8 @@ import { writable } from 'svelte/store';
 export interface AppSettings {
 	steamId: string;
 	steamApiKey: string;
+	raUsername: string;
+	raApiKey: string;
 	steamGridDbApiKey: string;
 	searchPaths: string[];
 	language: 'fr' | 'en' | 'es' | 'de' | 'it';
@@ -28,6 +30,8 @@ export interface AppSettings {
 const DEFAULTS: AppSettings = {
 	steamId: '',
 	steamApiKey: '',
+	raUsername: '',
+	raApiKey: '',
 	steamGridDbApiKey: '',
 	searchPaths: [],
 	language: 'fr',

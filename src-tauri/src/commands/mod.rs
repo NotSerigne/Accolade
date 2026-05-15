@@ -1,5 +1,4 @@
 // src-tauri/src/commands/mod.rs
-use crate::achievements::match_emulator;
 use crate::achievements::models::{Achievement, Emulator, Game};
 use crate::achievements::steam::{fetch_owned_games, fetch_steam_user, OwnedGame, SteamUser};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
@@ -12,8 +11,11 @@ pub fn test_achievement_notif(app_handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub fn get_achievements(game: Game) -> Vec<Achievement> {
-    match_emulator(game)
+pub async fn get_achievements(
+    game: Game,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Achievement>, String> {
+    Ok(crate::achievements::get_achievements_for_game(game, &state).await)
 }
 
 #[tauri::command]
@@ -23,7 +25,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
         .lock()
         .map(|gs| {
             gs.iter()
-                .filter(|g| g.steam_id != 0 && g.achievements_total > 0)
+                .filter(|g| !g.id.is_empty() && g.achievements_total > 0)
                 .cloned()
                 .collect::<Vec<Game>>()
         })
@@ -69,6 +71,8 @@ pub fn hide_app(app_handle: tauri::AppHandle) {
 pub(crate) async fn sync_steam_metadata(
     api_key: String,
     steam_id: String,
+    ra_username: String,
+    ra_api_key: String,
     sgdb_api_key: String,
     language: String,
     state: tauri::State<'_, AppState>,
@@ -95,6 +99,18 @@ pub(crate) async fn sync_steam_metadata(
             .lock()
             .map_err(|_| String::from("Impossible d'acceder a la cle API"))?;
         *key = effective_api_key.clone();
+
+        let mut ra_u = state
+            .ra_username
+            .lock()
+            .map_err(|_| String::from("Impossible d'acceder au pseudo RA"))?;
+        *ra_u = ra_username.clone();
+
+        let mut ra_k = state
+            .ra_api_key
+            .lock()
+            .map_err(|_| String::from("Impossible d'acceder a la cle API RA"))?;
+        *ra_k = ra_api_key.clone();
 
         let mut lang = state
             .language
@@ -127,13 +143,14 @@ pub(crate) async fn sync_steam_metadata(
     })
     .await
     .unwrap_or_default();
-    let mut existing_ids: HashSet<u32> = cloned_games.iter().map(|g| g.steam_id).collect();
+
+    let mut existing_ids: HashSet<String> = cloned_games.iter().map(|g| g.id.clone()).collect();
     let mut added_local = 0;
 
     for lg in local_games {
-        if !existing_ids.contains(&lg.steam_id) {
+        if !existing_ids.contains(&lg.id) {
             cloned_games.push(lg.clone());
-            existing_ids.insert(lg.steam_id);
+            existing_ids.insert(lg.id.clone());
             added_local += 1;
         }
     }
@@ -158,10 +175,12 @@ pub(crate) async fn sync_steam_metadata(
                 );
                 let mut added_count = 0;
                 for og in owned {
-                    if !existing_ids.contains(&og.appid) {
+                    let game_id = format!("steam_{}", og.appid);
+                    if !existing_ids.contains(&game_id) {
                         cloned_games.push(Game {
                             name: og.name.clone().unwrap_or_else(|| format!("AppID {}", og.appid)),
-                            steam_id: og.appid,
+                            id: game_id.clone(),
+                            steam_id: Some(og.appid),
                             game_icon: og.img_icon_url.clone().unwrap_or_default(),
                             steamgrid_icon_url: String::new(),
                             header_image_url: format!(
@@ -171,10 +190,10 @@ pub(crate) async fn sync_steam_metadata(
                             background_image_url: String::new(),
                             achievements_total: 0,
                             achievements: Vec::new(),
-                            path_buf: String::new(),
-                            emulator: Emulator::Steam,
+                            path_buf: None,
+                            source: crate::achievements::models::SourceType::Emulator(Emulator::Steam),
                         });
-                        existing_ids.insert(og.appid);
+                        existing_ids.insert(game_id);
                         added_count += 1;
                         added_steam_games = true;
                     }
@@ -199,6 +218,32 @@ pub(crate) async fn sync_steam_metadata(
         }
     }
 
+    // RetroAchievements Sync
+    if !ra_username.trim().is_empty() && !ra_api_key.trim().is_empty() {
+        println!("[DEBUG][sync_steam_metadata] Fetching RetroAchievements games");
+        let ra_provider =
+            crate::achievements::providers::retroachievements::RetroAchievementsProvider::new(
+                ra_username.clone(),
+                ra_api_key.clone(),
+            );
+        use crate::achievements::providers::AchievementProvider;
+        match ra_provider.fetch_games().await {
+            Ok(ra_games) => {
+                println!(
+                    "[DEBUG][sync_steam_metadata] Found {} RA games",
+                    ra_games.len()
+                );
+                for rg in ra_games {
+                    if !existing_ids.contains(&rg.id) {
+                        cloned_games.push(rg.clone());
+                        existing_ids.insert(rg.id);
+                    }
+                }
+            }
+            Err(e) => println!("[DEBUG][sync_steam_metadata] RA sync failed: {}", e),
+        }
+    }
+
     if !effective_api_key.is_empty() {
         println!(
             "[DEBUG][sync_steam_metadata] Enriching {} games with Steam metadata",
@@ -219,7 +264,11 @@ pub(crate) async fn sync_steam_metadata(
 
     let filtered_games: Vec<Game> = cloned_games
         .into_iter()
-        .filter(|g| g.steam_id != 0 && g.achievements_total > 0)
+        .filter(|g| {
+            let has_id = !g.id.is_empty();
+            let has_achievements = g.achievements_total > 0;
+            has_id && has_achievements
+        })
         .collect();
 
     {

@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { games } from '$lib/stores/Games.js';
 
-	let game = $derived($games.find((g) => String(g.steam_id) === page.params.id) ?? null);
+	let game = $derived($games.find((g) => g.id === page.params.id) ?? null);
 </script>
 
 <main class="game-main">

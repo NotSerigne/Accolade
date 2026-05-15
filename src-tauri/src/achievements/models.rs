@@ -23,16 +23,26 @@ pub enum Emulator {
     Rune,
     Steam,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", content = "value")]
+pub enum SourceType {
+    Emulator(Emulator),
+    RetroAchievements,
+    Custom,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Game {
     pub name: String,
-    pub steam_id: u32,
+    pub id: String,
+    pub steam_id: Option<u32>,
     pub game_icon: String,
     pub steamgrid_icon_url: String,
     pub header_image_url: String,
     pub background_image_url: String,
     pub achievements_total: u32,
     pub achievements: Vec<Achievement>,
-    pub path_buf: String,
-    pub emulator: Emulator,
+    pub path_buf: Option<String>,
+    pub source: SourceType,
 }

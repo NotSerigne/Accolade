@@ -18,10 +18,10 @@
 
 	onMount(() => loadGames());
 
-	function selectGame(id: number): void {
+	function selectGame(id: string): void {
 		selectedGameId.set(id);
 		settingsOpen.set(false);
-		void goto(resolve('/(app)/games/[id]', { id: String(id) }));
+		void goto(resolve('/(app)/games/[id]', { id }));
 	}
 
 	function goHome(): void {
@@ -77,25 +77,39 @@
 			return game.game_icon;
 		}
 
-		if (game.game_icon && !game.game_icon.includes('/') && !game.game_icon.includes('\\')) {
+		if (
+			game.game_icon &&
+			!game.game_icon.includes('/') &&
+			!game.game_icon.includes('\\') &&
+			game.steam_id
+		) {
 			return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
 		}
 
 		if (game.header_image_url) return game.header_image_url;
 
-		return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+		if (game.steam_id) {
+			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+		}
+
+		return '';
 	}
 
-	function onIconError(name: string, steamId: number) {
+	function onIconError(name: string, id: string, steamId: number | null) {
 		return (e: Event) => {
 			const t = e.target as HTMLImageElement;
 			const currentSrc = t.src;
 
-			if (currentSrc.includes('header.jpg')) {
-				t.onerror = null;
-				t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(steamId))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
+			if (steamId) {
+				if (currentSrc.includes('header.jpg')) {
+					t.onerror = null;
+					t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(id))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
+				} else {
+					t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamId}/header.jpg`;
+				}
 			} else {
-				t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamId}/header.jpg`;
+				t.onerror = null;
+				t.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || String(id))}&background=1e1e1e&color=c8a96e&size=52&bold=true&length=2`;
 			}
 		};
 	}
@@ -109,7 +123,7 @@
 	let isSettingsActive = $derived($settingsOpen);
 	let sortedGames = $derived.by(() => {
 		return [...$games].sort((a, b) =>
-			(a.name || String(a.steam_id)).localeCompare(b.name || String(b.steam_id), $i18n.locale, {
+			(a.name || a.id).localeCompare(b.name || b.id, $i18n.locale, {
 				sensitivity: 'base',
 				numeric: true
 			})
@@ -211,29 +225,29 @@
 	<div class="divider"></div>
 
 	<div class="games-list">
-		{#each sortedGames as game (game.steam_id)}
-			{@const isActive = $selectedGameId === game.steam_id}
+		{#each sortedGames as game (game.id)}
+			{@const isActive = $selectedGameId === game.id}
 			<div class="nav-wrap">
 				<div class="pill" class:visible={isActive}></div>
 				<button
 					class="game-slot"
 					class:active={isActive}
-					onclick={() => selectGame(game.steam_id)}
-					title="{game.name || game.steam_id}{progress(game) ? ' · ' + progress(game) : ''}"
+					onclick={() => selectGame(game.id)}
+					title="{game.name || game.id}{progress(game) ? ' · ' + progress(game) : ''}"
 				>
 					{#if iconUrl(game)}
 						<img
 							src={iconUrl(game)}
 							alt={game.name}
 							class="game-icon-img"
-							onerror={onIconError(game.name, game.steam_id)}
+							onerror={onIconError(game.name, game.id, game.steam_id)}
 						/>
 						<span class="game-icon-fallback" style="display:none">
-							{initials(game.name || String(game.steam_id))}
+							{initials(game.name || game.id)}
 						</span>
 					{:else}
 						<span class="game-icon-fallback">
-							{initials(game.name || String(game.steam_id))}
+							{initials(game.name || game.id)}
 						</span>
 					{/if}
 				</button>

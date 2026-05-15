@@ -24,7 +24,7 @@
 		const events: JournalEvent[] = [];
 
 		$games.forEach((g) => {
-			if (selectedFilter !== 'all' && String(g.steam_id) !== selectedFilter) return;
+			if (selectedFilter !== 'all' && g.id !== selectedFilter) return;
 
 			(g.achievements ?? [])
 				.filter((a) => a.unlocked)
@@ -90,7 +90,11 @@
 
 		if (game.header_image_url) return game.header_image_url;
 
-		return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+		if (game.steam_id) {
+			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+		}
+
+		return '';
 	}
 </script>
 
@@ -118,8 +122,8 @@
 		<div class="header-right">
 			<select bind:value={selectedFilter} class="game-select">
 				<option value="all">{$i18n.t('journal.allGames')}</option>
-				{#each $games as game (game.steam_id)}
-					<option value={String(game.steam_id)}>{game.name}</option>
+				{#each $games as game (game.id)}
+					<option value={game.id}>{game.name}</option>
 				{/each}
 			</select>
 		</div>
@@ -135,7 +139,7 @@
 					>
 				</div>
 				<div class="events-list">
-					{#each group.events as event (event.game.steam_id + ':' + (event.type === 'achievement' ? event.achievement.key : 'completion'))}
+					{#each group.events as event (event.game.id + ':' + (event.type === 'achievement' ? event.achievement.key : 'completion'))}
 						<div class="event-card" class:completion={event.type === 'completion'}>
 							<img
 								src={getGameIcon(event.game)}
@@ -143,7 +147,7 @@
 								class="game-icon"
 								onerror={(e) => {
 									const t = e.target as HTMLImageElement;
-									if (!t.src.includes('header.jpg')) {
+									if (event.game.steam_id && !t.src.includes('header.jpg')) {
 										t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${event.game.steam_id}/header.jpg`;
 									}
 								}}

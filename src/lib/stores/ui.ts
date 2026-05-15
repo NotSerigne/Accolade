@@ -7,7 +7,7 @@ export const searchQuery = writable('');
 export const searchDraft = writable('');
 
 export type AchievementJumpIntent = {
-	gameId: number;
+	gameId: string;
 	achievementKey: string;
 	token: number;
 };

@@ -2,6 +2,7 @@
 use crate::achievements::models::Achievement;
 use crate::achievements::models::Emulator;
 use crate::achievements::models::Game;
+use crate::achievements::models::SourceType;
 use std::path::PathBuf;
 
 pub(crate) mod codex;
@@ -45,15 +46,16 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                 }
                 games.push(Game {
                     name: String::new(),
-                    steam_id,
+                    id: format!("steam_{}", steam_id),
+                    steam_id: Some(steam_id),
                     game_icon: String::new(),
                     steamgrid_icon_url: String::new(),
                     header_image_url: String::new(),
                     background_image_url: String::new(),
                     achievements_total: 0,
                     achievements,
-                    path_buf: entry_path.to_string_lossy().to_string(),
-                    emulator: parser.emulator(),
+                    path_buf: Some(entry_path.to_string_lossy().to_string()),
+                    source: SourceType::Emulator(parser.emulator()),
                 });
             } else if entry_path.is_dir() {
                 games.extend(find_achievements(&entry_path, parser));

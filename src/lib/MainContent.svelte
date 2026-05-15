@@ -48,14 +48,14 @@
 		});
 	}
 
-	type RecentAchievement = Achievement & { gameName: string; gameId: number };
+	type RecentAchievement = Achievement & { gameName: string; gameId: string };
 
 	let recentActivity = $derived.by((): RecentAchievement[] => {
 		return $games
 			.flatMap((g) =>
 				(g.achievements ?? [])
 					.filter((a) => a.unlocked && a.unlocked_time)
-					.map((a) => ({ ...a, gameName: g.name, gameId: g.steam_id }))
+					.map((a) => ({ ...a, gameName: g.name, gameId: g.id }))
 			)
 			.sort((a, b) => (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0))
 			.slice(0, 6);
@@ -81,7 +81,7 @@
 				{@const palette = rarityPalette(item.completionpercentage)}
 				<button
 					class="activity-card"
-					onclick={() => void goto(resolve('/(app)/games/[id]', { id: String(item.gameId) }))}
+					onclick={() => void goto(resolve('/(app)/games/[id]', { id: item.gameId }))}
 				>
 					<div class="activity-icon-wrap">
 						{#if item.icon}
@@ -134,24 +134,15 @@
 	<section class="activity-section" style="margin-top: 32px;">
 		<h2 class="section-title">{$i18n.t('main.recentLibrary')}</h2>
 		<div class="game-grid">
-			{#each recentGames as game (game.steam_id)}
+			{#each recentGames as game (game.id)}
 				<button
 					class="game-card"
-					onclick={() => void goto(resolve('/(app)/games/[id]', { id: String(game.steam_id) }))}
+					onclick={() => void goto(resolve('/(app)/games/[id]', { id: game.id }))}
 				>
 					<div class="game-card-bg">
 						{#if game.header_image_url}
-							<img
-								src={game.header_image_url}
-								alt={game.name}
-								onerror={(e) => {
-									const t = e.target as HTMLImageElement;
-									if (!t.src.includes('header.jpg')) {
-										t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
-									}
-								}}
-							/>
-						{:else}
+							<img src={game.header_image_url} alt={game.name} />
+						{:else if game.steam_id}
 							<img
 								src="https://cdn.cloudflare.steamstatic.com/steam/apps/{game.steam_id}/header.jpg"
 								alt={game.name}
@@ -160,7 +151,7 @@
 					</div>
 					<div class="game-card-overlay"></div>
 					<div class="game-card-info">
-						<div class="game-card-title">{game.name || game.steam_id}</div>
+						<div class="game-card-title">{game.name || game.id}</div>
 						<div class="game-card-bar">
 							<div class="game-card-bar-fill" style="width: {progressPct(game)}%"></div>
 						</div>

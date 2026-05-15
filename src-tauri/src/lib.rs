@@ -1,5 +1,5 @@
 // src-tauri/src/lib.rs
-use crate::achievements::models::{Achievement, Game};
+use crate::achievements::models::{Achievement, Game, SourceType};
 use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata_with_client};
 use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
@@ -10,6 +10,8 @@ use tauri_plugin_autostart::MacosLauncher;
 pub struct AppState {
     pub(crate) games: Mutex<Vec<Game>>,
     pub(crate) steam_api_key: Mutex<String>,
+    pub(crate) ra_username: Mutex<String>,
+    pub(crate) ra_api_key: Mutex<String>,
     pub(crate) language: Mutex<String>,
 }
 
@@ -92,18 +94,15 @@ pub(crate) async fn enrich_games_with_steam(
     let steam_id_str = steam_id.to_string();
     let language_str = language.to_string();
 
-    let jobs: Vec<(u32, crate::achievements::models::Emulator, Vec<Achievement>)> = games
+    let jobs: Vec<(u32, SourceType, Vec<Achievement>)> = games
         .iter()
-        .map(|game| {
-            (
-                game.steam_id,
-                game.emulator.clone(),
-                game.achievements.clone(),
-            )
+        .filter_map(|game| {
+            game.steam_id
+                .map(|sid| (sid, game.source.clone(), game.achievements.clone()))
         })
         .collect();
 
-    let updates = stream::iter(jobs.into_iter().map(|(steam_id, emulator, local_state)| {
+    let updates = stream::iter(jobs.into_iter().map(|(steam_id, source, local_state)| {
         let client = client.clone();
         let api_key = api_key_str.clone();
         let steam_id_inner = steam_id_str.clone();
@@ -123,7 +122,7 @@ pub(crate) async fn enrich_games_with_steam(
 
             (
                 steam_id,
-                emulator,
+                source,
                 local_state,
                 metadata,
                 player_achievements_res,
@@ -135,11 +134,12 @@ pub(crate) async fn enrich_games_with_steam(
     .await;
 
     let results = updates;
-    let to_remove: HashSet<u32> = HashSet::new();
 
     for game in games.iter_mut() {
-        let steam_id = game.steam_id;
-        let emulator = game.emulator.clone();
+        let Some(steam_id) = game.steam_id else {
+            continue;
+        };
+        let source = game.source.clone();
 
         let Some(res) = results.iter().find(|r| r.0 == steam_id) else {
             continue;
@@ -148,7 +148,10 @@ pub(crate) async fn enrich_games_with_steam(
         let (_, _, local_state, metadata, player_achievements_res) = res;
 
         if let Some(Err(err)) = player_achievements_res {
-            if emulator == crate::achievements::models::Emulator::Steam {
+            if matches!(
+                source,
+                SourceType::Emulator(crate::achievements::models::Emulator::Steam)
+            ) {
                 println!(
                     "[DEBUG] Steam API error for AppID {}: {}. Keeping game but achievements might be missing.",
                     steam_id, err
@@ -196,7 +199,7 @@ pub(crate) async fn enrich_games_with_steam(
         }
     }
 
-    games.retain(|g| g.achievements_total > 0 && !to_remove.contains(&g.steam_id));
+    games.retain(|g| g.achievements_total > 0);
 }
 
 async fn fetch_sgdb_icon(
@@ -242,14 +245,14 @@ pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
 
     let client = reqwest::Client::new();
     let api_key = api_key.to_string();
-    let index_by_id: HashMap<u32, usize> = games
+
+    let steam_games: Vec<(u32, usize)> = games
         .iter()
         .enumerate()
-        .map(|(idx, game)| (game.steam_id, idx))
+        .filter_map(|(idx, game)| game.steam_id.map(|sid| (sid, idx)))
         .collect();
-    let game_ids: Vec<u32> = games.iter().map(|game| game.steam_id).collect();
 
-    let updates = stream::iter(game_ids.into_iter().map(|steam_id| {
+    let updates = stream::iter(steam_games.into_iter().map(|(steam_id, index)| {
         let client = client.clone();
         let api_key = api_key.clone();
         async move {
@@ -259,21 +262,17 @@ pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
             } else {
                 fetch_sgdb_icon(&client, steam_id, &api_key, "").await
             };
-            (steam_id, icon_url)
+            (index, icon_url)
         }
     }))
     .buffer_unordered(SGDB_CONCURRENCY)
     .collect::<Vec<_>>()
     .await;
 
-    for (steam_id, icon_url) in updates {
-        let Some(icon_url) = icon_url else {
-            continue;
-        };
-        let Some(index) = index_by_id.get(&steam_id).copied() else {
-            continue;
-        };
-        games[index].steamgrid_icon_url = icon_url;
+    for (index, icon_url) in updates {
+        if let Some(url) = icon_url {
+            games[index].steamgrid_icon_url = url;
+        }
     }
 }
 
@@ -360,6 +359,8 @@ pub fn run() {
             app.manage(AppState {
                 games: Mutex::new(Vec::new()),
                 steam_api_key: Mutex::new(api_key),
+                ra_username: Mutex::new(String::new()),
+                ra_api_key: Mutex::new(String::new()),
                 language: Mutex::new("fr".to_string()),
             });
 

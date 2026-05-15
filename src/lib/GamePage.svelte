@@ -12,12 +12,12 @@
 
 	let { game }: { game: Game | null } = $props();
 
-	let currentIndex = $derived($games.findIndex((g) => g.steam_id === game?.steam_id));
+	let currentIndex = $derived($games.findIndex((g) => g.id === game?.id));
 	let prevGame = $derived(currentIndex > 0 ? $games[currentIndex - 1] : null);
 	let nextGame = $derived(currentIndex < $games.length - 1 ? $games[currentIndex + 1] : null);
 
-	function goToGame(id: number) {
-		void goto(resolve('/(app)/games/[id]', { id: String(id) }));
+	function goToGame(id: string) {
+		void goto(resolve('/(app)/games/[id]', { id }));
 	}
 
 	let copiedKey = $state<string | null>(null);
@@ -36,7 +36,7 @@
 	}
 
 	type AchievementsUpdatedPayload = {
-		steam_id: number;
+		game_id: string;
 		achievements: Achievement[];
 	};
 
@@ -47,7 +47,7 @@
 	let sortOrder = $state<'asc' | 'desc'>('desc');
 	let revealed = $state(true);
 	let loading = $state(true);
-	let loadedGameId = $state<number | null>(null);
+	let loadedGameId = $state<string | null>(null);
 	let loadRequestToken = 0;
 
 	let jumpedToken = $state<number | null>(null);
@@ -65,9 +65,9 @@
 			return;
 		}
 
-		if (loadedGameId === game.steam_id) return;
+		if (loadedGameId === game.id) return;
 
-		loadedGameId = game.steam_id;
+		loadedGameId = game.id;
 		loading = true;
 		const requestToken = ++loadRequestToken;
 
@@ -83,7 +83,7 @@
 
 		listen<AchievementsUpdatedPayload>('achievements-updated', (event) => {
 			const payload = event.payload;
-			if (game && payload?.steam_id === game.steam_id && Array.isArray(payload.achievements)) {
+			if (game && payload?.game_id === game.id && Array.isArray(payload.achievements)) {
 				achievements = payload.achievements;
 			}
 		}).then((fn) => {
@@ -194,7 +194,7 @@
 	$effect(() => {
 		const intent = $achievementJumpIntent;
 		if (!intent || !game) return;
-		if (intent.gameId !== game.steam_id) return;
+		if (intent.gameId !== game.id) return;
 		if (jumpedToken === intent.token) return;
 
 		jumpedToken = intent.token;
@@ -328,11 +328,14 @@
 	}
 
 	function gameTitle(current: Game): string {
-		return current.name?.trim() || `AppID ${current.steam_id}`;
+		return current.name?.trim() || `ID ${current.id}`;
 	}
 
 	function heroBackground(current: Game): string {
-		return `https://cdn.cloudflare.steamstatic.com/steam/apps/${current.steam_id}/library_hero.jpg`;
+		if (current.steam_id) {
+			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${current.steam_id}/library_hero.jpg`;
+		}
+		return current.header_image_url || '';
 	}
 </script>
 
@@ -346,7 +349,7 @@
 			<button
 				class="nav-btn"
 				disabled={!prevGame}
-				onclick={() => prevGame && goToGame(prevGame.steam_id)}
+				onclick={() => prevGame && goToGame(prevGame.id)}
 			>
 				<svg
 					width="12"
@@ -358,7 +361,7 @@
 				>
 					<path d="M15 18l-6-6 6-6" />
 				</svg>
-				<span class="nav-label">{prevGame ? prevGame.name || prevGame.steam_id : ''}</span>
+				<span class="nav-label">{prevGame ? prevGame.name || prevGame.id : ''}</span>
 			</button>
 
 			<span class="nav-index">{currentIndex + 1} / {$games.length}</span>
@@ -366,9 +369,9 @@
 			<button
 				class="nav-btn"
 				disabled={!nextGame}
-				onclick={() => nextGame && goToGame(nextGame.steam_id)}
+				onclick={() => nextGame && goToGame(nextGame.id)}
 			>
-				<span class="nav-label">{nextGame ? nextGame.name || nextGame.steam_id : ''}</span>
+				<span class="nav-label">{nextGame ? nextGame.name || nextGame.id : ''}</span>
 				<svg
 					width="12"
 					height="12"
@@ -387,7 +390,11 @@
 				<div class="game-header">
 					<div class="game-title-row">
 						<h1 class="game-title">{gameTitle(game)}</h1>
-						<span class="emulator-badge">{game.emulator}</span>
+						<span class="emulator-badge"
+							>{typeof game.source === 'object' && game.source.type === 'Emulator'
+								? game.source.value
+								: game.source.type}</span
+						>
 					</div>
 
 					<div class="progress-card">

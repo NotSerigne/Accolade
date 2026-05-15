@@ -28,7 +28,7 @@ pub struct AchievementNotifPayload {
 
 #[derive(Serialize, Clone)]
 pub struct AchievementsUpdatedPayload {
-    pub steam_id: u32,
+    pub game_id: String,
     pub achievements: Vec<Achievement>,
     pub achievements_total: u32,
 }
@@ -119,7 +119,8 @@ fn is_technical_name(name: &str) -> bool {
 }
 
 fn fallback_game_name_from_path(game: &Game) -> Option<String> {
-    let mut cursor = Path::new(&game.path_buf);
+    let path_str = game.path_buf.as_ref()?;
+    let mut cursor = Path::new(path_str);
     for _ in 0..6 {
         let Some(parent) = cursor.parent() else { break };
         if let Some(segment) = parent.file_name().and_then(|value| value.to_str()) {
@@ -139,7 +140,7 @@ fn fallback_game_name_from_path(game: &Game) -> Option<String> {
 
 fn display_game_name(
     game: &Game,
-    name_cache: &mut HashMap<u32, String>,
+    name_cache: &mut HashMap<String, String>,
     api_lookup_attempted: &mut HashSet<u32>,
     language: &str,
 ) -> String {
@@ -148,23 +149,25 @@ fn display_game_name(
         return direct_name.to_string();
     }
 
-    if let Some(cached) = name_cache.get(&game.steam_id) {
+    if let Some(cached) = name_cache.get(&game.id) {
         return cached.clone();
     }
 
-    if game.steam_id > 0 && api_lookup_attempted.insert(game.steam_id) {
-        if let Ok(Some(api_name)) =
-            tauri::async_runtime::block_on(fetch_app_name_by_appid(game.steam_id, language))
-        {
-            if !is_technical_name(&api_name) {
-                name_cache.insert(game.steam_id, api_name.clone());
-                return api_name;
+    if let Some(steam_id) = game.steam_id {
+        if steam_id > 0 && api_lookup_attempted.insert(steam_id) {
+            if let Ok(Some(api_name)) =
+                tauri::async_runtime::block_on(fetch_app_name_by_appid(steam_id, language))
+            {
+                if !is_technical_name(&api_name) {
+                    name_cache.insert(game.id.clone(), api_name.clone());
+                    return api_name;
+                }
             }
         }
     }
 
     if let Some(path_name) = fallback_game_name_from_path(game) {
-        name_cache.insert(game.steam_id, path_name.clone());
+        name_cache.insert(game.id.clone(), path_name.clone());
         return path_name;
     }
 
@@ -177,7 +180,11 @@ fn display_game_name(
         _ => "Unknown Game",
     };
 
-    format!("{} (AppID {})", unknown, game.steam_id)
+    if let Some(sid) = game.steam_id {
+        format!("{} (AppID {})", unknown, sid)
+    } else {
+        format!("{} (ID {})", unknown, game.id)
+    }
 }
 
 fn rarity_label(percentage: Option<f32>, language: &str) -> String {
@@ -272,9 +279,9 @@ pub fn start(app_handle: tauri::AppHandle) {
             let _ = watcher.watch(&path, RecursiveMode::Recursive);
         }
 
-        let mut unlocked_by_game: HashMap<u32, HashSet<String>> = HashMap::new();
-        let mut live_keys_by_game: HashMap<u32, HashSet<String>> = HashMap::new();
-        let mut game_name_cache: HashMap<u32, String> = HashMap::new();
+        let mut unlocked_by_game: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut live_keys_by_game: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut game_name_cache: HashMap<String, String> = HashMap::new();
         let mut api_lookup_attempted: HashSet<u32> = HashSet::new();
 
         // Initialize state from AppState if any
@@ -287,8 +294,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                         .filter(|a| a.unlocked || a.unlocked_time.is_some())
                         .map(|a| a.key.trim().to_lowercase())
                         .collect();
-                    unlocked_by_game.insert(game.steam_id, unlocked);
-                    live_keys_by_game.insert(game.steam_id, live_keys(&game.achievements));
+                    unlocked_by_game.insert(game.id.clone(), unlocked);
+                    live_keys_by_game.insert(game.id.clone(), live_keys(&game.achievements));
                 }
             }
         }
@@ -315,19 +322,20 @@ pub fn start(app_handle: tauri::AppHandle) {
             };
 
             for game in &games {
-                let game_path = std::path::Path::new(&game.path_buf);
+                let Some(ref path_buf) = game.path_buf else {
+                    continue;
+                };
+                let game_path = std::path::Path::new(path_buf);
 
-                if !game.path_buf.is_empty()
-                    && paths_changed.iter().any(|p| p.starts_with(game_path))
-                {
+                if !path_buf.is_empty() && paths_changed.iter().any(|p| p.starts_with(game_path)) {
                     let achievements = match_emulator(game.clone());
                     let current_live_keys = live_keys(&achievements);
                     let previous_live_keys = live_keys_by_game
-                        .entry(game.steam_id)
+                        .entry(game.id.clone())
                         .or_insert_with(|| live_keys(&game.achievements));
 
                     let previous_unlocked =
-                        unlocked_by_game.entry(game.steam_id).or_insert_with(|| {
+                        unlocked_by_game.entry(game.id.clone()).or_insert_with(|| {
                             game.achievements
                                 .iter()
                                 .filter(|a| a.unlocked || a.unlocked_time.is_some())
@@ -342,20 +350,18 @@ pub fn start(app_handle: tauri::AppHandle) {
                             .lock()
                             .ok()
                             .and_then(|mut gs| {
-                                gs.iter_mut()
-                                    .find(|g| g.steam_id == game.steam_id)
-                                    .map(|stored| {
-                                        let merged = merge_live_achievements(
-                                            &stored.achievements,
-                                            &achievements,
-                                            previous_live_keys,
-                                            &current_live_keys,
-                                        );
-                                        let total = merged.len() as u32;
-                                        stored.achievements = merged.clone();
-                                        stored.achievements_total = total;
-                                        (merged, total)
-                                    })
+                                gs.iter_mut().find(|g| g.id == game.id).map(|stored| {
+                                    let merged = merge_live_achievements(
+                                        &stored.achievements,
+                                        &achievements,
+                                        previous_live_keys,
+                                        &current_live_keys,
+                                    );
+                                    let total = merged.len() as u32;
+                                    stored.achievements = merged.clone();
+                                    stored.achievements_total = total;
+                                    (merged, total)
+                                })
                             })
                             .unwrap_or_else(|| {
                                 let fallback = achievements.clone();
@@ -371,9 +377,9 @@ pub fn start(app_handle: tauri::AppHandle) {
                         }
                     }
 
-                    let unlocked_count = true_current_unlocked.len() as u32;
+                    let _unlocked_count = true_current_unlocked.len() as u32;
 
-                    let mut newly_unlocked: Vec<Achievement> = ui_achievements
+                    let newly_unlocked: Vec<Achievement> = ui_achievements
                         .iter()
                         .filter(|a| {
                             let key = a.key.trim().to_lowercase();
@@ -408,8 +414,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                         let num_new = newly_unlocked.len();
                         for (idx, ach) in newly_unlocked.iter().enumerate() {
                             println!(
-                                "[DEBUG][achievements] Nouveau succes debloque pour '{}' (AppID {}): {}",
-                                display_name, game.steam_id, ach.key
+                                "[DEBUG][achievements] Nouveau succes debloque pour '{}' (ID {}): {}",
+                                display_name, game.id, ach.key
                             );
 
                             let enriched = enriched_game_achievements.iter().find(|a| {
@@ -471,10 +477,10 @@ pub fn start(app_handle: tauri::AppHandle) {
                     }
 
                     *previous_unlocked = true_current_unlocked;
-                    live_keys_by_game.insert(game.steam_id, current_live_keys);
+                    live_keys_by_game.insert(game.id.clone(), current_live_keys);
 
                     let updated_payload = AchievementsUpdatedPayload {
-                        steam_id: game.steam_id,
+                        game_id: game.id.clone(),
                         achievements: ui_achievements,
                         achievements_total: ui_total,
                     };

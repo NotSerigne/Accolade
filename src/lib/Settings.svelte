@@ -149,6 +149,8 @@
 			const next: AppSettings = {
 				steamId: draft.steamId,
 				steamApiKey: draft.steamApiKey,
+				raUsername: draft.raUsername,
+				raApiKey: draft.raApiKey,
 				steamGridDbApiKey: draft.steamGridDbApiKey,
 				searchPaths: [...draft.searchPaths],
 				language: draft.language,
@@ -337,6 +339,35 @@
 							</svg>
 						{/if}
 					</button>
+				</div>
+			</div>
+		</section>
+
+		<div class="separator"></div>
+
+		<section class="settings-section">
+			<div class="section-label">RetroAchievements</div>
+
+			<div class="setting-row">
+				<div class="setting-info">
+					<div class="setting-name">Pseudo</div>
+					<div class="setting-desc">Votre nom d'utilisateur RetroAchievements</div>
+				</div>
+				<input class="text-input" type="text" placeholder="Pseudo" bind:value={draft.raUsername} />
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">Clé API (Web API Key)</div>
+					<div class="setting-desc">Disponible dans vos paramètres sur le site</div>
+				</div>
+				<div class="api-key-wrap">
+					<input
+						class="text-input"
+						type={apiKeyVisible ? 'text' : 'password'}
+						placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+						bind:value={draft.raApiKey}
+					/>
 				</div>
 			</div>
 		</section>

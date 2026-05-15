@@ -49,7 +49,11 @@
 
 		if (game.header_image_url) return game.header_image_url;
 
-		return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+		if (game.steam_id) {
+			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
+		}
+
+		return '';
 	}
 </script>
 
@@ -105,7 +109,7 @@
 
 		<section class="games-section">
 			<div class="games-list">
-				{#each sortedGames as game, i (game.steam_id)}
+				{#each sortedGames as game, i (game.id)}
 					<div class="game-objective-card">
 						<span class="rank">{i + 1}</span>
 						<img
@@ -114,7 +118,7 @@
 							class="game-thumb"
 							onerror={(e) => {
 								const t = e.target as HTMLImageElement;
-								if (!t.src.includes('header.jpg')) {
+								if (game.steam_id && !t.src.includes('header.jpg')) {
 									t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
 								}
 							}}

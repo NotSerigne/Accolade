@@ -18,17 +18,23 @@ export interface Achievement {
 	hidden?: boolean;
 }
 
+export type SourceType =
+	| { type: 'Emulator'; value: string }
+	| { type: 'RetroAchievements' }
+	| { type: 'Custom' };
+
 export interface Game {
 	name: string;
-	steam_id: number;
+	id: string;
+	steam_id: number | null;
 	game_icon: string;
 	steamgrid_icon_url: string;
 	header_image_url: string;
 	background_image_url: string;
 	achievements_total: number;
 	achievements: Achievement[];
-	path_buf: string;
-	emulator: string;
+	path_buf: string | null;
+	source: SourceType;
 }
 
 export interface OwnedGame {
@@ -38,18 +44,18 @@ export interface OwnedGame {
 }
 
 type AchievementsUpdatedPayload = {
-	steam_id: number;
+	game_id: string; // Mis à jour pour utiliser game_id au lieu de steam_id
 	achievements: Achievement[];
 	achievements_total?: number;
 };
 
 export const games = writable<Game[]>([]);
-export const selectedGameId = writable<number | null>(null);
+export const selectedGameId = writable<string | null>(null); // Changé en string | null
 let achievementsSyncInitialized = false;
 
 export const selectedGame = derived(
 	[games, selectedGameId],
-	([$games, $id]) => $games.find((g: Game) => g.steam_id === $id) ?? null
+	([$games, $id]) => $games.find((g: Game) => g.id === $id) ?? null
 );
 
 export const totalUnlockedAchievements = derived(games, ($games) =>
@@ -97,6 +103,8 @@ export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): P
 		const result = await invoke<Game[]>('sync_steam_metadata', {
 			apiKey: effectiveApiKey,
 			steamId: s.steamId,
+			raUsername: s.raUsername,
+			raApiKey: s.raApiKey,
 			sgdbApiKey: effectiveSgdbApiKey,
 			language: s.language
 		});
@@ -129,7 +137,7 @@ export function setupAchievementsRealtimeSync(): void {
 
 		games.update((currentGames) =>
 			currentGames.map((game) => {
-				if (game.steam_id !== payload.steam_id) return game;
+				if (game.id !== payload.game_id) return game;
 
 				const total = payload.achievements_total ?? payload.achievements.length;
 				return {
