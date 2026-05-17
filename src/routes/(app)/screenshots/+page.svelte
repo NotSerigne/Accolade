@@ -238,7 +238,11 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="lightbox-content" onclick={(e) => e.stopPropagation()}>
-			<img src={convertFileSrc(selectedScreenshot.path)} alt={selectedScreenshot.filename} />
+			<img
+				class="lightbox-main-img"
+				src={convertFileSrc(selectedScreenshot.path)}
+				alt={selectedScreenshot.filename}
+			/>
 			<div class="lightbox-footer">
 				<div class="lightbox-info">
 					{#if selectedScreenshot.game_id}
@@ -562,7 +566,7 @@
 		border: 1px solid var(--border-soft);
 	}
 
-	.lightbox-content img {
+	.lightbox-main-img {
 		max-width: 100%;
 		min-height: 0;
 		flex: 1 1 auto;
