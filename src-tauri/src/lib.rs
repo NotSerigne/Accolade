@@ -395,7 +395,10 @@ pub fn run() {
             commands::get_steam_user,
             commands::get_steam_owned_games,
             commands::exit_app,
-            commands::hide_app
+            commands::hide_app,
+            commands::toggle_game_favorite,
+            commands::add_game_tag,
+            commands::remove_game_tag
         ])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application")
@@ -404,4 +407,5 @@ pub fn run() {
 pub mod achievements;
 pub mod commands;
 pub mod emulators;
+pub mod user_data;
 pub mod watcher;

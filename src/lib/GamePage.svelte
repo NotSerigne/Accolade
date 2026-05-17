@@ -7,10 +7,27 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { open } from '@tauri-apps/plugin-shell';
-	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 
+	import { toggleGameFavorite, addGameTag, removeGameTag } from '$lib/stores/selectedGame.js';
+
 	let { game }: { game: Game | null } = $props();
+
+	let newTag = $state('');
+
+	let allTags = $derived.by(() => {
+		const tags = new SvelteSet<string>();
+		$games.forEach((g) => g.tags?.forEach((t) => tags.add(t)));
+		return Array.from(tags).sort();
+	});
+
+	function handleAddTag() {
+		if (game && newTag.trim()) {
+			addGameTag(game.id, newTag.trim());
+			newTag = '';
+		}
+	}
 
 	let currentIndex = $derived($games.findIndex((g) => g.id === game?.id));
 	let prevGame = $derived(currentIndex > 0 ? $games[currentIndex - 1] : null);
@@ -389,7 +406,17 @@
 			<div class="content-wrapper">
 				<div class="game-header">
 					<div class="game-title-row">
-						<h1 class="game-title">{gameTitle(game)}</h1>
+						<div class="title-with-fav">
+							<h1 class="game-title">{gameTitle(game)}</h1>
+							<button
+								class="big-fav-btn"
+								class:favorited={game.is_favorite}
+								onclick={() => toggleGameFavorite(game.id)}
+								title={game.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+							>
+								{game.is_favorite ? '♥️' : '♡'}
+							</button>
+						</div>
 						<span class="emulator-badge"
 							>{typeof game.source === 'object' && game.source.type === 'Emulator'
 								? game.source.value
@@ -397,26 +424,56 @@
 						>
 					</div>
 
-					<div class="progress-card">
-						<div class="progress-left">
-							<div class="progress-stats">
-								<span class="main-count"
-									><strong>{unlockedCount}</strong> <span class="slash">/ {totalCount}</span></span
-								>
-								<span class="main-pct">{progressPct}%</span>
+					<div class="progress-card-container">
+						<div class="progress-card">
+							<div class="progress-left">
+								<div class="progress-stats">
+									<span class="main-count"
+										><strong>{unlockedCount}</strong>
+										<span class="slash">/ {totalCount}</span></span
+									>
+									<span class="main-pct">{progressPct}%</span>
+								</div>
+								<div class="progress-bar-track">
+									<div class="progress-bar-fill" style="width: {progressPct}%"></div>
+								</div>
 							</div>
-							<div class="progress-bar-track">
-								<div class="progress-bar-fill" style="width: {progressPct}%"></div>
+							<div class="progress-right">
+								<div class="stat-item">
+									<span class="stat-label">TOTAL</span>
+									<span class="stat-value">{totalCount}</span>
+								</div>
+								<div class="stat-item">
+									<span class="stat-label">DÉBLOQUÉS</span>
+									<span class="stat-value highlight">{unlockedCount}</span>
+								</div>
 							</div>
 						</div>
-						<div class="progress-right">
-							<div class="stat-item">
-								<span class="stat-label">TOTAL</span>
-								<span class="stat-value">{totalCount}</span>
-							</div>
-							<div class="stat-item">
-								<span class="stat-label">DÉBLOQUÉS</span>
-								<span class="stat-value highlight">{unlockedCount}</span>
+
+						<div class="tags-section">
+							<div class="tags-list">
+								{#each game.tags || [] as tag (tag)}
+									<span class="tag">
+										{tag}
+										<button class="remove-tag" onclick={() => removeGameTag(game.id, tag)}>×</button
+										>
+									</span>
+								{/each}
+								<div class="add-tag-form">
+									<input
+										type="text"
+										placeholder="Ajouter un tag..."
+										bind:value={newTag}
+										list="existing-tags"
+										onkeydown={(e) => e.key === 'Enter' && handleAddTag()}
+									/>
+									<datalist id="existing-tags">
+										{#each allTags as tag (tag)}
+											<option value={tag}></option>
+										{/each}
+									</datalist>
+									<button onclick={handleAddTag}>+</button>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -836,6 +893,31 @@
 		color: #fff;
 		letter-spacing: -1px;
 	}
+	.title-with-fav {
+		display: flex;
+		align-items: center;
+		gap: 20px;
+	}
+	.big-fav-btn {
+		background: transparent;
+		border: none;
+		font-size: 32px;
+		cursor: pointer;
+		color: rgba(255, 255, 255, 0.2);
+		transition: all 0.2s;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+	}
+	.big-fav-btn:hover {
+		transform: scale(1.1);
+		color: rgba(255, 255, 255, 0.5);
+	}
+	.big-fav-btn.favorited {
+		color: #ff4d4d;
+		filter: drop-shadow(0 0 10px rgba(255, 77, 77, 0.3));
+	}
 	.emulator-badge {
 		font-size: 10px;
 		font-weight: 700;
@@ -848,6 +930,12 @@
 		letter-spacing: 1.2px;
 	}
 
+	.progress-card-container {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
 	.progress-card {
 		background: rgba(13, 20, 28, 0.85);
 		border: 1px solid rgba(255, 255, 255, 0.04);
@@ -857,6 +945,80 @@
 		gap: 48px;
 		backdrop-filter: blur(12px);
 		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+	}
+
+	.tags-section {
+		display: flex;
+		align-items: center;
+		padding: 0 4px;
+	}
+
+	.tags-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.tag {
+		background: rgba(200, 169, 110, 0.1);
+		border: 1px solid rgba(200, 169, 110, 0.2);
+		color: var(--accent);
+		padding: 4px 10px;
+		border-radius: 6px;
+		font-size: 11px;
+		font-weight: 600;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.remove-tag {
+		background: transparent;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		font-size: 14px;
+		padding: 0;
+		line-height: 1;
+		opacity: 0.6;
+	}
+
+	.remove-tag:hover {
+		opacity: 1;
+	}
+
+	.add-tag-form {
+		display: flex;
+		align-items: center;
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 6px;
+		padding: 2px;
+	}
+
+	.add-tag-form input {
+		background: transparent;
+		border: none;
+		color: #fff;
+		font-size: 11px;
+		padding: 2px 8px;
+		outline: none;
+		width: 100px;
+	}
+
+	.add-tag-form button {
+		background: var(--accent);
+		color: #1a1400;
+		border: none;
+		width: 18px;
+		height: 18px;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		font-weight: bold;
 	}
 	.progress-left {
 		flex: 1;

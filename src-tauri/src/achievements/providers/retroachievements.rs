@@ -65,6 +65,8 @@ impl AchievementProvider for RetroAchievementsProvider {
                 achievements: Vec::new(), // Chargés à la demande ou via un autre appel
                 path_buf: None,
                 source: SourceType::RetroAchievements,
+                is_favorite: false,
+                tags: Vec::new(),
             });
         }
 

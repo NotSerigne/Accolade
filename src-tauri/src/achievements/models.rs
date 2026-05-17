@@ -14,8 +14,9 @@ pub struct Achievement {
     pub hidden: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub enum Emulator {
+    #[default]
     Goldberg,
     Empress,
     Codex,
@@ -24,15 +25,16 @@ pub enum Emulator {
     Steam,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(tag = "type", content = "value")]
 pub enum SourceType {
     Emulator(Emulator),
     RetroAchievements,
+    #[default]
     Custom,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Game {
     pub name: String,
     pub id: String,
@@ -45,4 +47,8 @@ pub struct Game {
     pub achievements: Vec<Achievement>,
     pub path_buf: Option<String>,
     pub source: SourceType,
+    #[serde(default)]
+    pub is_favorite: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }

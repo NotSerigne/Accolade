@@ -114,11 +114,25 @@
 		};
 	}
 
+	function goFavorites(): void {
+		selectedGameId.set(null);
+		settingsOpen.set(false);
+		void goto('/favorites/');
+	}
+
+	function goCollections(): void {
+		selectedGameId.set(null);
+		settingsOpen.set(false);
+		void goto('/collections/');
+	}
+
 	let pathname = $derived(String(page.url.pathname));
 	let isHomeActive = $derived(pathname === '/');
 	let isStatsActive = $derived(pathname.startsWith('/stats'));
 	let isObjectivesActive = $derived(pathname.startsWith('/objectives'));
 	let isJournalActive = $derived(pathname.startsWith('/journal'));
+	let isFavoritesActive = $derived(pathname.startsWith('/favorites'));
+	let isCollectionsActive = $derived(pathname.startsWith('/collections'));
 
 	let isSettingsActive = $derived($settingsOpen);
 	let sortedGames = $derived.by(() => {
@@ -150,6 +164,52 @@
 			>
 				<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
 				<polyline points="9 22 9 12 15 12 15 22" />
+			</svg>
+		</button>
+	</div>
+
+	<div class="divider"></div>
+
+	<div class="nav-wrap">
+		<div class="pill" class:visible={isFavoritesActive}></div>
+		<button
+			class="game-slot nav-btn"
+			class:active={isFavoritesActive}
+			onclick={goFavorites}
+			title={$i18n.t('sidebar.favorites') || 'Favoris'}
+		>
+			<svg
+				width="20"
+				height="20"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.2"
+			>
+				<path
+					d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l8.78-8.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+				/>
+			</svg>
+		</button>
+	</div>
+
+	<div class="nav-wrap">
+		<div class="pill" class:visible={isCollectionsActive}></div>
+		<button
+			class="game-slot nav-btn"
+			class:active={isCollectionsActive}
+			onclick={goCollections}
+			title={$i18n.t('sidebar.collections') || 'Collections'}
+		>
+			<svg
+				width="20"
+				height="20"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.2"
+			>
+				<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
 			</svg>
 		</button>
 	</div>

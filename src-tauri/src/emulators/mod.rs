@@ -56,6 +56,8 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                     achievements,
                     path_buf: Some(entry_path.to_string_lossy().to_string()),
                     source: SourceType::Emulator(parser.emulator()),
+                    is_favorite: false,
+                    tags: Vec::new(),
                 });
             } else if entry_path.is_dir() {
                 games.extend(find_achievements(&entry_path, parser));

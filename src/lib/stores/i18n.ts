@@ -166,7 +166,19 @@ const translations = {
 		'game.copied': 'Copié',
 		'game.copyName': 'Copier le nom',
 		'game.findGuide': 'Chercher un guide',
-		'game.noAchievementFound': 'Aucun succès trouvé.'
+		'game.noAchievementFound': 'Aucun succès trouvé.',
+
+		'sidebar.favorites': 'Favoris',
+		'sidebar.collections': 'Collections',
+		'favorites.title': 'Mes Favoris',
+		'favorites.count': 'jeux marqués comme favoris',
+		'favorites.emptyTitle': 'Aucun favori pour le moment',
+		'favorites.emptyText': 'Marquez vos jeux préférés pour les retrouver ici.',
+		'favorites.browseGames': 'Parcourir les jeux',
+		'collections.title': 'Mes Collections',
+		'collections.count': 'collections personnalisées',
+		'collections.autoGroup': '🪄 Tri Auto',
+		'collections.autoGroupTitle': 'Grouper automatiquement par type et nom'
 	},
 	en: {
 		'lang.fr': 'French',
@@ -308,7 +320,19 @@ const translations = {
 		'game.copied': 'Copied',
 		'game.copyName': 'Copy name',
 		'game.findGuide': 'Find guide',
-		'game.noAchievementFound': 'No achievement found.'
+		'game.noAchievementFound': 'No achievement found.',
+
+		'sidebar.favorites': 'Favorites',
+		'sidebar.collections': 'Collections',
+		'favorites.title': 'My Favorites',
+		'favorites.count': 'games marked as favorites',
+		'favorites.emptyTitle': 'No favorites yet',
+		'favorites.emptyText': 'Mark your favorite games to find them here.',
+		'favorites.browseGames': 'Browse games',
+		'collections.title': 'My Collections',
+		'collections.count': 'custom collections',
+		'collections.autoGroup': '🪄 Auto-group',
+		'collections.autoGroupTitle': 'Automatically group by type and name'
 	},
 	es: {
 		'lang.fr': 'Francés',

@@ -35,6 +35,8 @@ export interface Game {
 	achievements: Achievement[];
 	path_buf: string | null;
 	source: SourceType;
+	is_favorite: boolean;
+	tags: string[];
 }
 
 export interface OwnedGame {

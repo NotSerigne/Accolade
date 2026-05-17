@@ -18,9 +18,103 @@ pub async fn get_achievements(
     Ok(crate::achievements::get_achievements_for_game(game, &state).await)
 }
 
+use crate::user_data::{load_user_data, save_user_data, UserData};
+
+fn enrich_games_with_user_data(games: &mut [Game], user_data: &UserData) {
+    for game in games.iter_mut() {
+        game.is_favorite = user_data.favorites.contains(&game.id);
+        if let Some(tags) = user_data.tags.get(&game.id) {
+            game.tags = tags.clone();
+        }
+    }
+}
+
 #[tauri::command]
-pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
-    let games = state
+pub fn toggle_game_favorite(
+    game_id: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<bool, String> {
+    let mut games = state
+        .games
+        .lock()
+        .map_err(|_| "Impossible de verrouiller les jeux")?;
+    let mut user_data = load_user_data(&app_handle);
+
+    let mut is_favorite = false;
+    if user_data.favorites.contains(&game_id) {
+        user_data.favorites.remove(&game_id);
+    } else {
+        user_data.favorites.insert(game_id.clone());
+        is_favorite = true;
+    }
+
+    if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
+        game.is_favorite = is_favorite;
+    }
+
+    save_user_data(&app_handle, &user_data)?;
+    Ok(is_favorite)
+}
+
+#[tauri::command]
+pub fn add_game_tag(
+    game_id: String,
+    tag: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut games = state
+        .games
+        .lock()
+        .map_err(|_| "Impossible de verrouiller les jeux")?;
+    let mut user_data = load_user_data(&app_handle);
+
+    let tags = user_data
+        .tags
+        .entry(game_id.clone())
+        .or_insert_with(Vec::new);
+    if !tags.contains(&tag) {
+        tags.push(tag);
+    }
+
+    if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
+        game.tags = user_data.tags.get(&game_id).cloned().unwrap_or_default();
+    }
+
+    save_user_data(&app_handle, &user_data)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_game_tag(
+    game_id: String,
+    tag: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut games = state
+        .games
+        .lock()
+        .map_err(|_| "Impossible de verrouiller les jeux")?;
+    let mut user_data = load_user_data(&app_handle);
+
+    if let Some(tags) = user_data.tags.get_mut(&game_id) {
+        tags.retain(|t| t != &tag);
+    }
+
+    if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
+        game.tags = user_data.tags.get(&game_id).cloned().unwrap_or_default();
+    }
+
+    save_user_data(&app_handle, &user_data)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_all_games(state: tauri::State<'_, AppState>, app_handle: tauri::AppHandle) -> Vec<Game> {
+    let user_data = load_user_data(&app_handle);
+    let mut games = state
         .games
         .lock()
         .map(|gs| {
@@ -30,6 +124,9 @@ pub fn get_all_games(state: tauri::State<'_, AppState>) -> Vec<Game> {
                 .collect::<Vec<Game>>()
         })
         .unwrap_or_default();
+
+    enrich_games_with_user_data(&mut games, &user_data);
+
     println!("[DEBUG][get_all_games] Returning {} games", games.len());
     games
 }
@@ -76,6 +173,7 @@ pub(crate) async fn sync_steam_metadata(
     sgdb_api_key: String,
     language: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<Vec<Game>, String> {
     dotenv::dotenv().ok();
     let effective_api_key = if !api_key.trim().is_empty() {
@@ -192,6 +290,8 @@ pub(crate) async fn sync_steam_metadata(
                             achievements: Vec::new(),
                             path_buf: None,
                             source: crate::achievements::models::SourceType::Emulator(Emulator::Steam),
+                            is_favorite: false,
+                            tags: Vec::new(),
                         });
                         existing_ids.insert(game_id);
                         added_count += 1;
@@ -262,7 +362,7 @@ pub(crate) async fn sync_steam_metadata(
         apply_steamgriddb_icons(&mut cloned_games, &sgdb_key).await;
     }
 
-    let filtered_games: Vec<Game> = cloned_games
+    let mut filtered_games: Vec<Game> = cloned_games
         .into_iter()
         .filter(|g| {
             let has_id = !g.id.is_empty();
@@ -270,6 +370,9 @@ pub(crate) async fn sync_steam_metadata(
             has_id && has_achievements
         })
         .collect();
+
+    let user_data = load_user_data(&app_handle);
+    enrich_games_with_user_data(&mut filtered_games, &user_data);
 
     {
         let mut games = state
