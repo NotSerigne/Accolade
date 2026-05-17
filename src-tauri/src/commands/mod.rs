@@ -207,16 +207,9 @@ pub fn open_profiles_dir(app_handle: tauri::AppHandle) -> Result<(), String> {
         std::fs::create_dir_all(&profiles_dir).map_err(|e| e.to_string())?;
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        Command::new("explorer")
-            .arg(profiles_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
+    tauri_plugin_opener::OpenerExt::opener(&app_handle)
+        .open_path(profiles_dir.to_string_lossy().to_string(), None::<String>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -536,4 +529,67 @@ pub(crate) async fn sync_steam_metadata(
         filtered_games.len()
     );
     Ok(filtered_games)
+}
+
+#[tauri::command]
+pub fn capture_automatic_screenshot(
+    app_handle: tauri::AppHandle,
+    game_id: String,
+    ach_key: String,
+) -> Result<String, String> {
+    log::info!(
+        "[Command] Automatic screenshot requested from overlay for game: {}, ach: {}",
+        game_id,
+        ach_key
+    );
+    match crate::screenshots::capture_screenshot(&app_handle, Some(&game_id), Some(&ach_key)) {
+        Ok(filename) => {
+            log::info!("[Command] Automatic screenshot captured: {}", filename);
+            let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
+            Ok(filename)
+        }
+        Err(e) => {
+            log::error!("[Command] Automatic screenshot failed: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn capture_manual_screenshot(app_handle: tauri::AppHandle) -> Result<String, String> {
+    log::info!("[Command] Manual screenshot requested via button");
+    match crate::screenshots::capture_screenshot(&app_handle, None, None) {
+        Ok(filename) => {
+            log::info!("[Command] Manual screenshot captured: {}", filename);
+            let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
+            Ok(filename)
+        }
+        Err(e) => {
+            log::error!("[Command] Manual screenshot failed: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_screenshots(app_handle: tauri::AppHandle) -> Vec<crate::screenshots::ScreenshotInfo> {
+    crate::screenshots::list_screenshots(&app_handle)
+}
+
+#[tauri::command]
+pub fn delete_screenshot(app_handle: tauri::AppHandle, filename: String) -> Result<(), String> {
+    let mut path = crate::screenshots::get_screenshots_dir(&app_handle);
+    path.push(filename);
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_screenshots_dir(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let path = crate::screenshots::get_screenshots_dir(&app_handle);
+    tauri_plugin_opener::OpenerExt::opener(&app_handle)
+        .open_path(path.to_string_lossy().to_string(), None::<String>)
+        .map_err(|e| e.to_string())
 }

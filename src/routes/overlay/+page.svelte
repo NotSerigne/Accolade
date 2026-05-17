@@ -5,6 +5,7 @@
 	import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
 	import { LogicalPosition } from '@tauri-apps/api/dpi';
 	import { Store } from '@tauri-apps/plugin-store';
+	import { invoke } from '@tauri-apps/api/core';
 	import AchievementNotif from '$lib/AchievementNotif.svelte';
 
 	type WindowPosition =
@@ -24,6 +25,9 @@
 		unlocked?: number;
 		total?: number;
 		is_platinum?: boolean;
+		test?: boolean;
+		game_id?: string;
+		ach_key?: string;
 	}
 
 	const NOTIF_WIDTH = 460;
@@ -155,8 +159,22 @@
 			visible = true;
 			await win.show();
 
-			// Wait for notification to be visible (5s) + fade out (0.6s)
-			await new Promise((resolve) => setTimeout(resolve, 5600));
+			// Wait for animation to finish before taking screenshot
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			if (!achievement.test && achievement.game_id && achievement.ach_key) {
+				try {
+					await invoke('capture_automatic_screenshot', {
+						gameId: achievement.game_id,
+						achKey: achievement.ach_key
+					});
+				} catch (e) {
+					console.error('Failed to take automatic screenshot:', e);
+				}
+			}
+
+			// Wait for notification to be visible (5s total, 500ms already passed) + fade out (0.6s)
+			await new Promise((resolve) => setTimeout(resolve, 5100));
 
 			visible = false;
 			await new Promise((resolve) => setTimeout(resolve, 600));

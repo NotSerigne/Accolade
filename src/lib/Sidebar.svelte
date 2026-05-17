@@ -48,6 +48,12 @@
 		void goto(resolve('/journal/'));
 	}
 
+	function goScreenshots(): void {
+		selectedGameId.set(null);
+		settingsOpen.set(false);
+		void goto(resolve('/screenshots/'));
+	}
+
 	function goSettings(): void {
 		settingsOpen.set(true);
 	}
@@ -137,6 +143,7 @@
 	let isStatsActive = $derived(pathname.startsWith('/stats'));
 	let isObjectivesActive = $derived(pathname.startsWith('/objectives'));
 	let isJournalActive = $derived(pathname.startsWith('/journal'));
+	let isScreenshotsActive = $derived(pathname.startsWith('/screenshots'));
 	let isFavoritesActive = $derived(pathname.startsWith('/favorites'));
 	let isCollectionsActive = $derived(pathname.startsWith('/collections'));
 	let isCompareActive = $derived(pathname.startsWith('/compare'));
@@ -285,6 +292,29 @@
 			>
 				<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
 				<path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+			</svg>
+		</button>
+	</div>
+
+	<div class="nav-wrap">
+		<div class="pill" class:visible={isScreenshotsActive}></div>
+		<button
+			class="game-slot nav-btn"
+			class:active={isScreenshotsActive}
+			onclick={goScreenshots}
+			title={$i18n.t('sidebar.screenshots')}
+		>
+			<svg
+				width="20"
+				height="20"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.2"
+			>
+				<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+				<circle cx="8.5" cy="8.5" r="1.5" />
+				<polyline points="21 15 16 10 5 21" />
 			</svg>
 		</button>
 	</div>

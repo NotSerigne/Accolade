@@ -4,7 +4,7 @@ use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata
 use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use tauri::{window::Color, Manager};
+use tauri::{window::Color, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 pub struct AppState {
@@ -284,15 +284,59 @@ pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
     }
 }
 
+#[tauri::command]
+fn update_screenshot_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    log::info!("[Shortcut] Manual registration request: {}", shortcut_str);
+
+    let shortcut: Shortcut = shortcut_str.parse().map_err(|e| {
+        let err = format!("Invalid shortcut format '{}': {}", shortcut_str, e);
+        log::error!("{}", err);
+        err
+    })?;
+
+    // Unregister all first to be clean
+    let _ = app.global_shortcut().unregister_all();
+
+    // Register new shortcut
+    log::info!("[Shortcut] Registering: {:?}", shortcut);
+    app.global_shortcut().register(shortcut).map_err(|e| {
+        let err = format!("Failed to register shortcut: {}", e);
+        log::error!("{}", err);
+        err
+    })?;
+
+    log::info!("[Shortcut] Successfully updated to {}", shortcut_str);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        log::info!("[Shortcut] Native Triggered!");
+                        match screenshots::capture_screenshot(app, None, None) {
+                            Ok(filename) => {
+                                log::info!("[Shortcut] Manual screenshot captured: {}", filename);
+                                let _ = app.emit("screenshot-taken", filename);
+                            }
+                            Err(e) => log::error!("[Shortcut] Manual screenshot failed: {}", e),
+                        }
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
@@ -411,7 +455,13 @@ pub fn run() {
             commands::hide_app,
             commands::toggle_game_favorite,
             commands::add_game_tag,
-            commands::remove_game_tag
+            commands::remove_game_tag,
+            commands::capture_automatic_screenshot,
+            commands::capture_manual_screenshot,
+            commands::get_screenshots,
+            commands::delete_screenshot,
+            commands::open_screenshots_dir,
+            update_screenshot_shortcut
         ])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application")
@@ -421,5 +471,6 @@ pub mod achievements;
 pub mod color;
 pub mod commands;
 pub mod emulators;
+pub mod screenshots;
 pub mod user_data;
 pub mod watcher;

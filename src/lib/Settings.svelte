@@ -1,15 +1,11 @@
 <script lang="ts">
 	// src/lib/Settings.svelte
 	import { get } from 'svelte/store';
+	import { invoke } from '@tauri-apps/api/core';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
 	import { settingsOpen } from '$lib/stores/ui.js';
-	import {
-		syncSteamMetadata,
-		games,
-		totalUnlockedAchievements,
-		totalCompletedGames
-	} from '$lib/stores/Games.js';
+	import { syncSteamMetadata, games, totalCompletedGames } from '$lib/stores/Games.js';
 	import { refreshSteamUser, steamUser } from '$lib/stores/user.js';
 	import {
 		exportProfile,
@@ -32,6 +28,36 @@
 	let sgdbKeyVisible = $state(false);
 	let previewAudio = $state<HTMLAudioElement | null>(null);
 	let previewingSound = $state('');
+	let isRecordingShortcut = $state(false);
+
+	function handleShortcutKeydown(e: KeyboardEvent) {
+		if (!isRecordingShortcut) return;
+		e.preventDefault();
+		e.stopPropagation();
+
+		const modifiers = [];
+		if (e.ctrlKey) modifiers.push('Ctrl');
+		if (e.shiftKey) modifiers.push('Shift');
+		if (e.altKey) modifiers.push('Alt');
+		if (e.metaKey) modifiers.push('Super');
+
+		let key = e.key;
+		// Handle special keys
+		if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') {
+			key = '';
+		} else if (key === ' ') {
+			key = 'Space';
+		} else if (key.length === 1) {
+			key = key.toUpperCase();
+		}
+
+		const parts = [...modifiers];
+		if (key) parts.push(key);
+
+		if (parts.length > 0) {
+			draft.screenshotShortcut = parts.join('+');
+		}
+	}
 
 	const accentPresets = [
 		{ labelKey: 'settings.accent.gold', value: '#c8a96e' },
@@ -220,9 +246,16 @@
 				dynamicTheme: draft.dynamicTheme,
 				launchOnStartup: draft.launchOnStartup,
 				startMinimized: draft.startMinimized,
-				minimizeToTray: draft.minimizeToTray
+				minimizeToTray: draft.minimizeToTray,
+				screenshotShortcut: draft.screenshotShortcut
 			};
 			await saveSettings(next);
+
+			try {
+				await invoke('update_screenshot_shortcut', { shortcutStr: next.screenshotShortcut });
+			} catch (err) {
+				console.error('Failed to update screenshot shortcut:', err);
+			}
 
 			try {
 				const { enable, disable } = await import('@tauri-apps/plugin-autostart');
@@ -252,6 +285,8 @@
 		settingsOpen.set(false);
 	}
 </script>
+
+<svelte:window onkeydown={handleShortcutKeydown} />
 
 <div class="settings-page">
 	<div class="settings-header">
@@ -649,6 +684,82 @@
 					<input type="checkbox" bind:checked={draft.minimizeToTray} />
 					<span class="slider"></span>
 				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">
+						{$i18n.t('settings.screenshotShortcut') || 'Raccourci de capture'}
+					</div>
+					<div class="setting-desc">
+						{$i18n.t('settings.screenshotShortcutDesc') ||
+							'Touche pour prendre une capture manuelle'}
+					</div>
+				</div>
+				<div class="shortcut-record-wrap">
+					<div class="shortcut-display" class:recording={isRecordingShortcut}>
+						{draft.screenshotShortcut}
+					</div>
+					<button
+						class="record-btn"
+						class:is-recording={isRecordingShortcut}
+						onclick={() => (isRecordingShortcut = !isRecordingShortcut)}
+						title={isRecordingShortcut ? 'Enregistrer' : 'Modifier'}
+					>
+						{#if isRecordingShortcut}
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+								<rect x="6" y="6" width="12" height="12" />
+							</svg>
+						{:else}
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+							</svg>
+						{/if}
+					</button>
+				</div>
+			</div>
+
+			<div class="setting-row" style="margin-top: 20px;">
+				<div class="setting-info">
+					<div class="setting-name">Test de capture</div>
+					<div class="setting-desc">
+						Vérifier que la capture d'écran fonctionne sur votre système
+					</div>
+				</div>
+				<button
+					class="test-btn"
+					style="border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);"
+					onclick={async () => {
+						try {
+							await invoke('capture_manual_screenshot');
+						} catch (e) {
+							console.error('Test screenshot failed:', e);
+						}
+					}}
+				>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+					>
+						<path
+							d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+						/>
+						<circle cx="12" cy="13" r="4" />
+					</svg>
+					Prendre une capture
+				</button>
 			</div>
 		</section>
 
@@ -1576,9 +1687,81 @@
 		background-color: color-mix(in srgb, var(--accent, #c8a96e) 20%, var(--surface-2));
 		border-color: var(--accent, #c8a96e);
 	}
-	input:checked + .slider:before {
+	.toggle-switch input:checked + .slider:before {
 		transform: translateX(18px);
 		background-color: var(--accent, #c8a96e);
+	}
+
+	/* ── Shortcut Recorder ── */
+	.shortcut-record-wrap {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.shortcut-display {
+		min-width: 100px;
+		height: 34px;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		border-radius: 8px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-family: 'Courier New', monospace;
+		font-weight: bold;
+		font-size: 13px;
+		color: var(--text-primary);
+		padding: 0 12px;
+		transition: all 0.2s;
+	}
+
+	.shortcut-display.recording {
+		border-color: #ef4444;
+		color: #ef4444;
+		box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+		animation: pulse-border 1.5s infinite;
+	}
+
+	@keyframes pulse-border {
+		0% {
+			border-color: rgba(239, 68, 68, 1);
+		}
+		50% {
+			border-color: rgba(239, 68, 68, 0.3);
+		}
+		100% {
+			border-color: rgba(239, 68, 68, 1);
+		}
+	}
+
+	.record-btn {
+		width: 34px;
+		height: 34px;
+		border-radius: 8px;
+		border: 1px solid var(--border-soft);
+		background: var(--surface-2);
+		color: var(--text-muted);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.record-btn:hover {
+		background: var(--surface-hover);
+		color: var(--text-primary);
+	}
+
+	.record-btn.is-recording {
+		background: #ef4444;
+		color: white;
+		border-color: #ef4444;
+	}
+
+	.record-btn.is-recording:hover {
+		background: #dc2626;
 	}
 
 	/* ── Profiles ── */

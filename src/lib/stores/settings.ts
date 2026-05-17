@@ -26,6 +26,7 @@ export interface AppSettings {
 	launchOnStartup: boolean;
 	startMinimized: boolean;
 	minimizeToTray: boolean;
+	screenshotShortcut: string;
 }
 
 const DEFAULTS: AppSettings = {
@@ -45,7 +46,8 @@ const DEFAULTS: AppSettings = {
 	dynamicTheme: true,
 	launchOnStartup: false,
 	startMinimized: false,
-	minimizeToTray: false
+	minimizeToTray: false,
+	screenshotShortcut: 'F12'
 };
 
 const THEME_CACHE_KEY = 'accolade:theme:v1';

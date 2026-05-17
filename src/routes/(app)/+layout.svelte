@@ -86,6 +86,14 @@
 			await loadSettings();
 			const s = get(settings);
 
+			try {
+				await invoke('update_screenshot_shortcut', {
+					shortcutStr: s.screenshotShortcut || 'F12'
+				});
+			} catch (err) {
+				console.error('Failed to register screenshot shortcut:', err);
+			}
+
 			if (s.startMinimized) {
 				await invoke('hide_app');
 			}
@@ -200,8 +208,7 @@
 	}
 
 	.sidebar-slot,
-	.topbar-slot,
-	.content-slot {
+	.topbar-slot {
 		position: relative;
 		z-index: 1;
 	}
@@ -209,13 +216,14 @@
 	.sidebar-slot {
 		grid-column: 1 / 2;
 		grid-row: 1 / 3;
-		z-index: 20;
+		z-index: 5;
 	}
 
 	.topbar-slot {
 		grid-column: 2 / 3;
 		grid-row: 1 / 2;
 		padding: 8px 8px 4px 0;
+		z-index: 10;
 	}
 
 	.content-slot {

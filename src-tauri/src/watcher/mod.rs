@@ -24,6 +24,8 @@ pub struct AchievementNotifPayload {
     pub test: bool,
     pub is_platinum: bool,
     pub unlocked_time: Option<u64>,
+    pub game_id: Option<String>,
+    pub ach_key: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -466,6 +468,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 test: false,
                                 is_platinum,
                                 unlocked_time: ach.unlocked_time,
+                                game_id: Some(game.id.clone()),
+                                ach_key: Some(ach.key.clone()),
                             };
 
                             let _ = app_handle.emit_to(
@@ -512,6 +516,8 @@ pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
         test: true,
         is_platinum: false,
         unlocked_time: Some(1714470000),
+        game_id: None,
+        ach_key: None,
     };
 
     let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);

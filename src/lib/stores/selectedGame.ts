@@ -171,7 +171,6 @@ export async function removeGameTag(gameId: string, tag: string) {
 
 export function calculateAdvancedStats(gamesList: Game[]) {
 	const allUnlocked = gamesList.flatMap((g) => g.achievements?.filter((a) => a.unlocked) || []);
-	const allAchievements = gamesList.flatMap((g) => g.achievements || []);
 
 	// Rarest achievement
 	const rarest = allUnlocked
