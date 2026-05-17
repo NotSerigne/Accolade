@@ -16,10 +16,42 @@
 	import { page } from '$app/state';
 	import Sidebar from '$lib/Sidebar.svelte';
 	import Topbar from '$lib/Topbar.svelte';
+	import { selectedGame, extractGameThemeColor } from '$lib/stores/selectedGame.js';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 
 	let { children } = $props();
 	let isSetupRoute = $derived(page.url.pathname.startsWith('/setup'));
+	let activeThemeColor = $state<string | null>(null);
+	let activeThemeContrast = $state<string>('#111111');
+
+	$effect(() => {
+		const game = $selectedGame;
+		const s = $settings;
+
+		if (!s.dynamicTheme || !game) {
+			activeThemeColor = null;
+			activeThemeContrast = '#111111';
+			return;
+		}
+
+		const imageUrl = game.header_image_url || game.background_image_url || game.steamgrid_icon_url;
+		if (imageUrl) {
+			extractGameThemeColor(imageUrl).then((color) => {
+				activeThemeColor = color;
+				if (color) {
+					const rgb = color.match(/\d+/g);
+					if (rgb) {
+						const [r, g, b] = rgb.map(Number);
+						const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+						activeThemeContrast = luminance > 0.6 ? '#111111' : '#ffffff';
+					}
+				}
+			});
+		} else {
+			activeThemeColor = null;
+			activeThemeContrast = '#111111';
+		}
+	});
 
 	function hasEmptyApiKeys(): boolean {
 		const s = get(settings);
@@ -71,6 +103,10 @@
 			}
 
 			await refreshSteamUser();
+			console.log('[DEBUG][layout] Starting sync with keys:', {
+				steamKeyLen: s.steamApiKey?.length,
+				sgdbKeyLen: s.steamGridDbApiKey?.length
+			});
 			await syncSteamMetadata(s.steamApiKey, s.steamGridDbApiKey);
 		})();
 
@@ -89,7 +125,21 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<div class="app-container" class:setup={isSetupRoute}>
+<div
+	class="app-container"
+	class:setup={isSetupRoute}
+	style:--accent={$settings.dynamicTheme && activeThemeColor
+		? activeThemeColor
+		: 'var(--accent-default)'}
+	style:--accent-text={activeThemeContrast}
+>
+	{#if $settings.dynamicTheme && $selectedGame && !isSetupRoute}
+		<div
+			class="dynamic-bg"
+			style:background-image="url({$selectedGame.background_image_url ||
+				$selectedGame.header_image_url})"
+		></div>
+	{/if}
 	{#if !isSetupRoute}
 		<div class="sidebar-slot">
 			<Sidebar />
@@ -127,11 +177,39 @@
 		padding: 0;
 		overflow: hidden;
 		background: var(--bg-app);
+		position: relative;
+	}
+
+	.dynamic-bg {
+		position: absolute;
+		inset: 0;
+		background-size: cover;
+		background-position: center;
+		filter: blur(80px) saturate(1.8) brightness(0.4);
+		opacity: 0.45;
+		z-index: 0;
+		pointer-events: none;
+		transition:
+			background-image 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+			opacity 0.8s ease;
+	}
+
+	:global([data-theme='light']) .dynamic-bg {
+		filter: blur(80px) saturate(1.4) brightness(1.2);
+		opacity: 0.25;
+	}
+
+	.sidebar-slot,
+	.topbar-slot,
+	.content-slot {
+		position: relative;
+		z-index: 1;
 	}
 
 	.sidebar-slot {
 		grid-column: 1 / 2;
 		grid-row: 1 / 3;
+		z-index: 20;
 	}
 
 	.topbar-slot {

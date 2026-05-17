@@ -36,6 +36,7 @@ quick-xml = "0.39.2"
 futures = "0.3.31"
 tauri-plugin-autostart = "2.5.1"
 async-trait = "0.1.89"
+genpdf = "0.2.0"
 
 [profile.release]
 panic = "abort" # Strip expensive panic clean-up logic

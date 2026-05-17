@@ -155,9 +155,9 @@ fn display_game_name(
 
     if let Some(steam_id) = game.steam_id {
         if steam_id > 0 && api_lookup_attempted.insert(steam_id) {
-            if let Ok(Some(api_name)) =
-                tauri::async_runtime::block_on(fetch_app_name_by_appid(steam_id, language))
-            {
+            let api_res =
+                tauri::async_runtime::block_on(fetch_app_name_by_appid(steam_id, language));
+            if let Ok(Some(api_name)) = api_res {
                 if !is_technical_name(&api_name) {
                     name_cache.insert(game.id.clone(), api_name.clone());
                     return api_name;

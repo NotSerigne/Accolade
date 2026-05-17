@@ -4,8 +4,19 @@
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
 	import { settingsOpen } from '$lib/stores/ui.js';
-	import { syncSteamMetadata } from '$lib/stores/Games.js';
-	import { refreshSteamUser } from '$lib/stores/user.js';
+	import {
+		syncSteamMetadata,
+		games,
+		totalUnlockedAchievements,
+		totalCompletedGames
+	} from '$lib/stores/Games.js';
+	import { refreshSteamUser, steamUser } from '$lib/stores/user.js';
+	import {
+		exportProfile,
+		openProfilesFolder,
+		exportSummaryPdf,
+		calculateAdvancedStats
+	} from '$lib/stores/selectedGame.js';
 	import {
 		i18n,
 		languageOptions,
@@ -139,6 +150,52 @@
 		}
 	}
 
+	async function handleExport() {
+		try {
+			const path = await exportProfile();
+			alert(`Profil exporté avec succès dans :\n${path}`);
+		} catch {
+			alert("Échec de l'exportation");
+		}
+	}
+
+	async function handleExportPdf() {
+		try {
+			const gamesList = get(games);
+			const user = get(steamUser);
+			const stats = calculateAdvancedStats(gamesList);
+
+			const title = `Profil Accolade de ${user?.personaname || 'Joueur'}`;
+			let content = `Date du rapport: ${new Date().toLocaleDateString()}\n`;
+			content += `Joueur: ${user?.personaname || 'Anonyme'} (SteamID: ${user?.steamid || 'N/A'})\n\n`;
+
+			content += `--- STATISTIQUES GLOBALES ---\n`;
+			content += `Total de jeux: ${gamesList.length}\n`;
+			content += `Succès débloqués: ${stats.totalUnlocked}\n`;
+			content += `Succès restants: ${stats.totalRemaining}\n`;
+			content += `Jeux complétés: ${get(totalCompletedGames)}\n\n`;
+
+			content += `--- RECORDS & CURIOSITÉS ---\n`;
+			content += `Succès le plus rare: ${stats.rarestAchievement ? `${stats.rarestAchievement.name} (${stats.rarestAchievement.pct}%)` : 'N/A'}\n`;
+			content += `Record en une journée: ${stats.maxAchievementsInDay} succès\n`;
+			content += `Record en une semaine: ${stats.maxAchievementsInWeek} succès\n\n`;
+
+			content += `--- DÉTAILS DES JEUX ---\n`;
+			content += `------------------\n`;
+			gamesList.forEach((g) => {
+				const unlocked = g.achievements?.filter((a) => a.unlocked).length || 0;
+				const total = g.achievements_total || 0;
+				content += `${g.name}: ${unlocked}/${total} (${total > 0 ? Math.round((unlocked / total) * 100) : 0}%)\n`;
+			});
+
+			const path = await exportSummaryPdf(title, content);
+			alert(`Résumé PDF exporté avec succès dans :\n${path}`);
+		} catch (err) {
+			console.error('PDF Export Error:', err);
+			alert(`Échec de l'exportation PDF : ${err}`);
+		}
+	}
+
 	async function save(): Promise<void> {
 		if (isSaving) return;
 
@@ -160,6 +217,7 @@
 				notificationVolume: draft.notificationVolume,
 				theme: draft.theme,
 				accentColor: draft.accentColor,
+				dynamicTheme: draft.dynamicTheme,
 				launchOnStartup: draft.launchOnStartup,
 				startMinimized: draft.startMinimized,
 				minimizeToTray: draft.minimizeToTray
@@ -707,6 +765,86 @@
 				</div>
 			</div>
 
+			<!-- Profiles Management -->
+			<div
+				class="setting-row"
+				style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-soft);"
+			>
+				<div class="setting-info">
+					<div class="setting-name">Gestion des Profils</div>
+					<div class="setting-desc">Exportez vos données ou ouvrez le dossier des exports</div>
+				</div>
+				<div class="profile-actions">
+					<button class="profile-btn secondary" onclick={handleExport}>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+								points="7 10 12 15 17 10"
+							/><line x1="12" y1="15" x2="12" y2="3" /></svg
+						>
+						JSON
+					</button>
+					<button class="profile-btn secondary" onclick={handleExportPdf}>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
+								points="14 2 14 8 20 8"
+							/><line x1="16" y1="13" x2="8" y2="13" /><line
+								x1="16"
+								y1="17"
+								x2="8"
+								y2="17"
+							/><polyline points="10 9 9 9 8 9" /></svg
+						>
+						PDF
+					</button>
+					<button class="profile-btn primary" onclick={openProfilesFolder}>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path
+								d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+							/></svg
+						>
+						Dossier exports
+					</button>
+				</div>
+			</div>
+
+			<!-- Dynamic Theme Toggle -->
+			<div class="setting-row" style="margin-top: 20px;">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('setup.dynamicTheme') || 'Thème dynamique'}</div>
+					<div class="setting-desc">
+						{$i18n.t('setup.dynamicThemeDesc') || 'Adapte la couleur et le fond au jeu sélectionné'}
+					</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.dynamicTheme} />
+					<span class="slider"></span>
+				</label>
+			</div>
+
 			<!-- Preview accent -->
 			<div class="accent-preview" style="--preview-accent: {draft.accentColor}">
 				<div class="preview-pill"></div>
@@ -757,7 +895,7 @@
 		border-radius: 8px;
 		border: none;
 		background: var(--accent, #c8a96e);
-		color: #111;
+		color: var(--accent-text);
 		font-size: 13px;
 		font-weight: 700;
 		cursor: pointer;
@@ -1441,5 +1579,59 @@
 	input:checked + .slider:before {
 		transform: translateX(18px);
 		background-color: var(--accent, #c8a96e);
+	}
+
+	/* ── Profiles ── */
+	.profile-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.profile-btn {
+		height: 34px;
+		padding: 0 14px;
+		border-radius: 8px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+		font-family: inherit;
+	}
+
+	.profile-btn svg {
+		opacity: 0.8;
+	}
+
+	.profile-btn.primary {
+		background: var(--accent);
+		color: var(--accent-text);
+		border: none;
+		box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent);
+	}
+
+	.profile-btn.primary:hover {
+		filter: brightness(1.1);
+		transform: translateY(-1px);
+		box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
+	}
+
+	.profile-btn.secondary {
+		background: var(--surface-2);
+		color: var(--text-primary);
+		border: 1px solid var(--border-soft);
+	}
+
+	.profile-btn.secondary:hover {
+		background: var(--surface-hover);
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+
+	.profile-btn:active {
+		transform: scale(0.97);
 	}
 </style>

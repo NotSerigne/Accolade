@@ -95,7 +95,13 @@
 					<div class="game-info">
 						<div class="name">{game.name}</div>
 						<div class="progress-mini">
-							<div class="bar" style:width={getCompletion(game) + '%'}></div>
+							<div
+								class="bar"
+								style:width={getCompletion(game) + '%'}
+								style:background={getCompletion(game) === 100
+									? 'var(--completed)'
+									: 'var(--accent)'}
+							></div>
 						</div>
 					</div>
 				</div>
@@ -270,7 +276,7 @@
 	.browse-btn {
 		padding: 10px 24px;
 		background: var(--accent);
-		color: #1a1400;
+		color: var(--accent-text);
 		border: none;
 		border-radius: 8px;
 		font-weight: 600;

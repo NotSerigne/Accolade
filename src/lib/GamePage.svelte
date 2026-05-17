@@ -10,7 +10,14 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 
-	import { toggleGameFavorite, addGameTag, removeGameTag } from '$lib/stores/selectedGame.js';
+	import {
+		toggleGameFavorite,
+		addGameTag,
+		removeGameTag,
+		exportGame,
+		openProfilesFolder,
+		exportSummaryPdf
+	} from '$lib/stores/selectedGame.js';
 
 	let { game }: { game: Game | null } = $props();
 
@@ -50,6 +57,45 @@
 	function searchGuide(gameName: string, achName: string) {
 		const query = `${gameName} ${achName} achievement guide`;
 		void open(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
+	}
+
+	async function handleExportGame() {
+		if (game) {
+			try {
+				const path = await exportGame(game);
+				alert(`Jeu exporté avec succès dans :\n${path}`);
+			} catch {
+				alert("Échec de l'exportation");
+			}
+		}
+	}
+
+	async function handleExportGamePdf() {
+		if (game) {
+			try {
+				const title = `Rapport de Succès: ${game.name}`;
+				const unlocked = achievements.filter((a) => a.unlocked).length;
+				const total = achievements.length;
+				let content = `Jeu: ${game.name}\n`;
+				content += `Identifiant: ${game.id}\n`;
+				content += `Source: ${typeof game.source === 'object' ? game.source.type : game.source}\n`;
+				content += `Progression: ${unlocked}/${total} (${total > 0 ? Math.round((unlocked / total) * 100) : 0}%)\n\n`;
+				content += `Liste des succès débloqués:\n`;
+				content += `--------------------------\n`;
+
+				achievements
+					.filter((a) => a.unlocked)
+					.forEach((a) => {
+						content += `[X] ${a.name}\n`;
+					});
+
+				const path = await exportSummaryPdf(title, content);
+				alert(`Rapport PDF exporté avec succès dans :\n${path}`);
+			} catch (err) {
+				console.error('PDF Export Error:', err);
+				alert(`Échec de l'exportation PDF : ${err}`);
+			}
+		}
 	}
 
 	type AchievementsUpdatedPayload = {
@@ -432,10 +478,19 @@
 										><strong>{unlockedCount}</strong>
 										<span class="slash">/ {totalCount}</span></span
 									>
-									<span class="main-pct">{progressPct}%</span>
+									<span
+										class="main-pct"
+										style:color={progressPct === 100 ? 'var(--completed)' : 'var(--accent)'}
+										>{progressPct}%</span
+									>
 								</div>
 								<div class="progress-bar-track">
-									<div class="progress-bar-fill" style="width: {progressPct}%"></div>
+									<div
+										class="progress-bar-fill"
+										style="width: {progressPct}%; background: {progressPct === 100
+											? 'var(--completed)'
+											: '#3ddc84'}"
+									></div>
 								</div>
 							</div>
 							<div class="progress-right">
@@ -590,6 +645,53 @@
 								</svg>
 								<span>Cachés</span>
 							{/if}
+						</button>
+
+						<button class="profile-btn-mini" onclick={handleExportGame} title="Exporter JSON">
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.5"
+								><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+									points="7 10 12 15 17 10"
+								/><line x1="12" y1="15" x2="12" y2="3" /></svg
+							>
+						</button>
+
+						<button class="profile-btn-mini" onclick={handleExportGamePdf} title="Exporter PDF">
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.5"
+								><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
+									points="14 2 14 8 20 8"
+								/><line x1="16" y1="13" x2="8" y2="13" /><line
+									x1="16"
+									y1="17"
+									x2="8"
+									y2="17"
+								/><polyline points="10 9 9 9 8 9" /></svg
+							>
+						</button>
+
+						<button class="profile-btn-mini" onclick={openProfilesFolder} title="Dossier exports">
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.5"
+								><path
+									d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+								/></svg
+							>
 						</button>
 					</div>
 
@@ -1009,7 +1111,7 @@
 
 	.add-tag-form button {
 		background: var(--accent);
-		color: #1a1400;
+		color: var(--accent-text);
 		border: none;
 		width: 18px;
 		height: 18px;
@@ -1132,12 +1234,37 @@
 	}
 	.tab.active {
 		background: var(--accent, #0066cc);
-		color: #fff;
+		color: var(--accent-text);
 		box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #0066cc) 40%, transparent);
 	}
 	.tab:hover:not(.active) {
 		color: #fff;
 		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.profile-btn-mini {
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 8px;
+		color: var(--text-secondary);
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 8px;
+		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+		flex-shrink: 0;
+	}
+
+	.profile-btn-mini:hover {
+		background: var(--surface-hover);
+		border-color: var(--accent);
+		color: var(--accent);
+		transform: translateY(-1px);
+	}
+
+	.profile-btn-mini:active {
+		transform: scale(0.95);
 	}
 
 	.search-wrap {

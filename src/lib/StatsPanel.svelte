@@ -359,7 +359,7 @@
 
 	.completed-sub {
 		font-size: 11px;
-		color: var(--accent, #4caf6e);
+		color: var(--completed, #4caf6e);
 	}
 
 	::-webkit-scrollbar {

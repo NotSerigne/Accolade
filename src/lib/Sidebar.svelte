@@ -2,12 +2,12 @@
 	// src/lib/Sidebar.svelte
 	import {
 		games,
-		selectedGameId,
 		loadGames,
 		totalUnlockedAchievements,
 		totalCompletedGames,
 		type Game
 	} from '$lib/stores/Games.js';
+	import { selectedGameId } from '$lib/stores/selectedGame.js';
 	import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
 	import { steamUser } from '$lib/stores/user.js';
 	import { i18n } from '$lib/stores/i18n.js';
@@ -117,13 +117,19 @@
 	function goFavorites(): void {
 		selectedGameId.set(null);
 		settingsOpen.set(false);
-		void goto('/favorites/');
+		void goto(resolve('/favorites/'));
 	}
 
 	function goCollections(): void {
 		selectedGameId.set(null);
 		settingsOpen.set(false);
-		void goto('/collections/');
+		void goto(resolve('/collections/'));
+	}
+
+	function goCompare(): void {
+		selectedGameId.set(null);
+		settingsOpen.set(false);
+		void goto(resolve('/compare/'));
 	}
 
 	let pathname = $derived(String(page.url.pathname));
@@ -133,6 +139,7 @@
 	let isJournalActive = $derived(pathname.startsWith('/journal'));
 	let isFavoritesActive = $derived(pathname.startsWith('/favorites'));
 	let isCollectionsActive = $derived(pathname.startsWith('/collections'));
+	let isCompareActive = $derived(pathname.startsWith('/compare'));
 
 	let isSettingsActive = $derived($settingsOpen);
 	let sortedGames = $derived.by(() => {
@@ -278,6 +285,29 @@
 			>
 				<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
 				<path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+			</svg>
+		</button>
+	</div>
+
+	<div class="nav-wrap">
+		<div class="pill" class:visible={isCompareActive}></div>
+		<button
+			class="game-slot nav-btn"
+			class:active={isCompareActive}
+			onclick={goCompare}
+			title="Comparer"
+		>
+			<svg
+				width="20"
+				height="20"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.2"
+			>
+				<circle cx="12" cy="12" r="10" />
+				<path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+				<path d="M2 12h20" />
 			</svg>
 		</button>
 	</div>
@@ -535,7 +565,7 @@
 		justify-content: center;
 		font-size: 16px;
 		font-weight: 700;
-		color: #1a1400;
+		color: var(--accent-text);
 		object-fit: cover;
 	}
 

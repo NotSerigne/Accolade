@@ -9,6 +9,9 @@
 
 :root {
 	--accent: #c8a96e;
+	--accent-text: #111111;
+	--completed: #e4b441;
+	--completed-text: #111111;
 	--text-primary: #ffffff;
 	--text-secondary: #b4bccf;
 	--text-muted: #6a7080;

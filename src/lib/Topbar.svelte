@@ -3,7 +3,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { games, selectedGameId, syncSteamMetadata, type Game } from '$lib/stores/Games.js';
+	import { games, syncSteamMetadata, type Game } from '$lib/stores/Games.js';
+	import { selectedGameId } from '$lib/stores/selectedGame.js';
 	import {
 		searchQuery,
 		searchDraft,

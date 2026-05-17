@@ -10,9 +10,9 @@
   [![Rust](https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-  *Accolade est une application de bureau moderne qui synchronise et affiche vos succès issus de jeux "cracked" avec de l'élégance.*
+_Accolade est une application de bureau moderne qui synchronise et affiche vos succès issus de jeux "cracked" avec de l'élégance._
 
-  [Fonctionnalités](#-fonctionnalités) • [Émulateurs Supportés](#-émulateurs-supportés) • [Installation](#-installation) • [Captures](#-captures-décran)
+[Fonctionnalités](#-fonctionnalités) • [Émulateurs Supportés](#-émulateurs-supportés) • [Installation](#-installation) • [Captures](#-captures-décran)
 
 </div>
 
@@ -33,13 +33,13 @@ Accolade comble le fossé entre vos jeux locaux et l'expérience sociale des suc
 
 Accolade supporte nativement les formats de succès les plus courants :
 
-| Émulateur | Emplacement par défaut |
-| :--- | :--- |
-| **Goldberg** | `%APPDATA%\Goldberg SteamEmu Saves` |
-| **Empress** | `%APPDATA%\Empress-Emulator` |
-| **CODEX** | `%APPDATA%\Steam\CODEX` |
-| **OnlineFix** | `%PUBLIC%\Documents\OnlineFix` |
-| **RUNE** | `%PUBLIC%\Documents\Steam\RUNE` |
+| Émulateur     | Emplacement par défaut              |
+| :------------ | :---------------------------------- |
+| **Goldberg**  | `%APPDATA%\Goldberg SteamEmu Saves` |
+| **Empress**   | `%APPDATA%\Empress-Emulator`        |
+| **CODEX**     | `%APPDATA%\Steam\CODEX`             |
+| **OnlineFix** | `%PUBLIC%\Documents\OnlineFix`      |
+| **RUNE**      | `%PUBLIC%\Documents\Steam\RUNE`     |
 
 ## 🚀 Installation
 
@@ -52,6 +52,7 @@ Accolade supporte nativement les formats de succès les plus courants :
 ### Configuration rapide
 
 1.  **Clonage et dépendances**
+
     ```bash
     git clone https://github.com/votre-repo/accolade.git
     cd accolade
@@ -59,6 +60,7 @@ Accolade supporte nativement les formats de succès les plus courants :
     ```
 
 2.  **Lancement en développement**
+
     ```bash
     npm run tauri dev
     ```

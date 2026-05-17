@@ -130,7 +130,6 @@ pub fn get_all_games(state: tauri::State<'_, AppState>, app_handle: tauri::AppHa
     println!("[DEBUG][get_all_games] Returning {} games", games.len());
     games
 }
-
 #[tauri::command]
 pub async fn get_steam_user(
     api_key: String,
@@ -150,6 +149,152 @@ pub async fn get_steam_owned_games(
     fetch_owned_games(&api_key, &steam_id, &language)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn extract_game_theme_color(image_url: String) -> Result<String, String> {
+    crate::color::extract_dominant_color(&image_url)
+        .await
+        .ok_or_else(|| "Failed to extract color".to_string())
+}
+
+#[tauri::command]
+pub async fn export_to_json(
+    app_handle: tauri::AppHandle,
+    data: String,
+    filename: String,
+) -> Result<String, String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let profiles_dir = app_dir.join("profiles");
+
+    if !profiles_dir.exists() {
+        std::fs::create_dir_all(&profiles_dir).map_err(|e| e.to_string())?;
+    }
+
+    let file_path = profiles_dir.join(filename);
+    std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn get_profiles_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let profiles_dir = app_dir.join("profiles");
+
+    if !profiles_dir.exists() {
+        std::fs::create_dir_all(&profiles_dir).map_err(|e| e.to_string())?;
+    }
+
+    Ok(profiles_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn open_profiles_dir(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let profiles_dir = app_dir.join("profiles");
+
+    if !profiles_dir.exists() {
+        std::fs::create_dir_all(&profiles_dir).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        Command::new("explorer")
+            .arg(profiles_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn export_to_pdf(
+    app_handle: tauri::AppHandle,
+    title: String,
+    content: String,
+    filename: String,
+) -> Result<String, String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let profiles_dir = app_dir.join("profiles");
+
+    if !profiles_dir.exists() {
+        std::fs::create_dir_all(&profiles_dir).map_err(|e| e.to_string())?;
+    }
+
+    let file_path = profiles_dir.join(filename);
+
+    // Load fonts - try multiple locations
+    let mut font_dir = std::path::PathBuf::from("assets/fonts");
+
+    if !font_dir.exists() {
+        font_dir = std::path::PathBuf::from("../assets/fonts");
+    }
+
+    if !font_dir.exists() {
+        font_dir = std::path::PathBuf::from("src/lib/assets/fonts");
+    }
+
+    if !font_dir.exists() {
+        font_dir = std::path::PathBuf::from("../src/lib/assets/fonts");
+    }
+
+    if !font_dir.exists() {
+        // Fallback for packaged app
+        if let Ok(res_dir) = app_handle.path().resource_dir() {
+            font_dir = res_dir.join("assets").join("fonts");
+        }
+    }
+
+    if !font_dir.exists() {
+        let current_dir = std::env::current_dir().unwrap_or_default();
+        return Err(format!(
+            "Dossier fonts introuvable. Dossier actuel: {:?}. Veuillez vous assurer que 'assets/fonts' existe à la racine du projet.",
+            current_dir
+        ));
+    }
+
+    let font_family = genpdf::fonts::from_files(&font_dir, "Roboto", None).map_err(|e| {
+        let abs_path = std::fs::canonicalize(&font_dir).unwrap_or(font_dir.clone());
+        format!(
+            "Erreur lors du chargement des polices dans {:?}: {}",
+            abs_path, e
+        )
+    })?;
+
+    let mut doc = genpdf::Document::new(font_family);
+    doc.set_title(title.clone());
+
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(10);
+    doc.set_page_decorator(decorator);
+
+    use genpdf::Element as _;
+    let title_style = genpdf::style::Style::new().with_font_size(18).bold();
+    doc.push(genpdf::elements::Text::new(title).styled(title_style));
+
+    doc.push(genpdf::elements::Break::new(1.5));
+
+    for line in content.lines() {
+        doc.push(genpdf::elements::Text::new(line));
+    }
+    doc.render_to_file(&file_path).map_err(|e| e.to_string())?;
+
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -176,11 +321,10 @@ pub(crate) async fn sync_steam_metadata(
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<Game>, String> {
     dotenv::dotenv().ok();
-    let effective_api_key = if !api_key.trim().is_empty() {
-        api_key
-    } else {
-        std::env::var("STEAM_API_KEY").unwrap_or_default()
-    };
+    let mut effective_api_key = api_key.trim().to_string();
+    if effective_api_key.is_empty() {
+        effective_api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
+    }
 
     println!(
         "[DEBUG][sync_steam_metadata] Start. steam_id='{}', language='{}', api_key_len={}, sgdb_key_len={}",
@@ -188,7 +332,9 @@ pub(crate) async fn sync_steam_metadata(
     );
 
     if effective_api_key.is_empty() {
-        println!("[DEBUG][sync_steam_metadata] No API key found.");
+        println!(
+            "[DEBUG][sync_steam_metadata] CRITICAL: No Steam API key found in parameters or env."
+        );
     }
 
     {
@@ -358,17 +504,16 @@ pub(crate) async fn sync_steam_metadata(
         std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default()
     };
     if !sgdb_key.is_empty() {
-        println!("[DEBUG][sync_steam_metadata] Enriching with SteamGridDB");
+        println!(
+            "[DEBUG][sync_steam_metadata] Enriching with SteamGridDB, key len: {}",
+            sgdb_key.len()
+        );
         apply_steamgriddb_icons(&mut cloned_games, &sgdb_key).await;
     }
 
     let mut filtered_games: Vec<Game> = cloned_games
         .into_iter()
-        .filter(|g| {
-            let has_id = !g.id.is_empty();
-            let has_achievements = g.achievements_total > 0;
-            has_id && has_achievements
-        })
+        .filter(|g| !g.id.is_empty() && g.achievements_total > 0)
         .collect();
 
     let user_data = load_user_data(&app_handle);

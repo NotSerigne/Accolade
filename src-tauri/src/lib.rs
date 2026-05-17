@@ -196,10 +196,18 @@ pub(crate) async fn enrich_games_with_steam(
         }
         if !metadata.background_image_url.is_empty() {
             game.background_image_url = metadata.background_image_url.clone();
+        } else {
+            game.background_image_url = format!(
+                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
+                steam_id
+            );
         }
-    }
 
-    games.retain(|g| g.achievements_total > 0);
+        println!(
+            "[DEBUG][enrich_games_with_steam] Successfully enriched {} (AppID: {}, {} achievements)",
+            game.name, steam_id, game.achievements_total
+        );
+    }
 }
 
 async fn fetch_sgdb_icon(
@@ -394,6 +402,11 @@ pub fn run() {
             commands::sync_steam_metadata,
             commands::get_steam_user,
             commands::get_steam_owned_games,
+            commands::extract_game_theme_color,
+            commands::export_to_json,
+            commands::export_to_pdf,
+            commands::get_profiles_dir,
+            commands::open_profiles_dir,
             commands::exit_app,
             commands::hide_app,
             commands::toggle_game_favorite,
@@ -405,6 +418,7 @@ pub fn run() {
 }
 
 pub mod achievements;
+pub mod color;
 pub mod commands;
 pub mod emulators;
 pub mod user_data;

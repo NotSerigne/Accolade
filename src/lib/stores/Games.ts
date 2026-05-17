@@ -46,19 +46,13 @@ export interface OwnedGame {
 }
 
 type AchievementsUpdatedPayload = {
-	game_id: string; // Mis à jour pour utiliser game_id au lieu de steam_id
+	game_id: string;
 	achievements: Achievement[];
 	achievements_total?: number;
 };
 
 export const games = writable<Game[]>([]);
-export const selectedGameId = writable<string | null>(null); // Changé en string | null
 let achievementsSyncInitialized = false;
-
-export const selectedGame = derived(
-	[games, selectedGameId],
-	([$games, $id]) => $games.find((g: Game) => g.id === $id) ?? null
-);
 
 export const totalUnlockedAchievements = derived(games, ($games) =>
 	$games.reduce((acc, g) => acc + (g.achievements?.filter((a) => a.unlocked).length ?? 0), 0)
@@ -90,8 +84,14 @@ export async function loadGames(): Promise<void> {
 
 export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): Promise<void> {
 	const s = get(settings);
-	const effectiveApiKey = apiKey ?? s.steamApiKey;
-	const effectiveSgdbApiKey = sgdbApiKey ?? s.steamGridDbApiKey;
+	const effectiveApiKey = apiKey || s.steamApiKey;
+	const effectiveSgdbApiKey = sgdbApiKey || s.steamGridDbApiKey;
+
+	console.log('[DEBUG][syncSteamMetadata] Keys:', {
+		effectiveApiKeyLen: effectiveApiKey?.length,
+		effectiveSgdbApiKeyLen: effectiveSgdbApiKey?.length,
+		raUsername: s.raUsername
+	});
 
 	if (!effectiveApiKey) {
 		console.warn('Cannot sync: No Steam API Key provided');
@@ -100,8 +100,6 @@ export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): P
 
 	isSyncing.set(true);
 	try {
-		console.log('Syncing Steam metadata for ID:', s.steamId, 'Language:', s.language);
-
 		const result = await invoke<Game[]>('sync_steam_metadata', {
 			apiKey: effectiveApiKey,
 			steamId: s.steamId,

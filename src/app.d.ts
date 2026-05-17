@@ -1,8 +1,6 @@
 // src/app.d.ts
 declare global {
-	namespace App {
-
-	}
+	namespace App {}
 }
 
 export {};

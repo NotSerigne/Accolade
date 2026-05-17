@@ -1,0 +1,18 @@
+        if !metadata.game_icon_url.is_empty() {
+            game.game_icon = metadata.game_icon_url.clone();
+        }
+        if !metadata.background_image_url.is_empty() {
+            game.background_image_url = metadata.background_image_url.clone();
+        } else {
+            game.background_image_url = format!(
+                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
+                steam_id
+            );
+        }
+
+        println!(
+            "[DEBUG][enrich_games_with_steam] Successfully enriched {} (AppID: {}, {} achievements)",
+            game.name, steam_id, game.achievements_total
+        );
+    }
+}

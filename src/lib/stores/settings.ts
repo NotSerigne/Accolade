@@ -22,6 +22,7 @@ export interface AppSettings {
 	notificationVolume: number;
 	theme: 'dark' | 'light' | 'system';
 	accentColor: string;
+	dynamicTheme: boolean;
 	launchOnStartup: boolean;
 	startMinimized: boolean;
 	minimizeToTray: boolean;
@@ -41,6 +42,7 @@ const DEFAULTS: AppSettings = {
 	notificationVolume: 0.7,
 	theme: 'system',
 	accentColor: '#c8a96e',
+	dynamicTheme: true,
 	launchOnStartup: false,
 	startMinimized: false,
 	minimizeToTray: false
@@ -147,6 +149,7 @@ export function applyTheme(s: AppSettings): void {
 	const resolvedTheme = s.theme === 'system' ? (prefersDark ? 'dark' : 'light') : s.theme;
 
 	root.setAttribute('data-theme', resolvedTheme);
+	root.style.setProperty('--accent-default', s.accentColor);
 	root.style.setProperty('--accent', s.accentColor);
 	root.style.colorScheme = resolvedTheme;
 

@@ -110,7 +110,13 @@
 							<div class="game-info">
 								<div class="name">{game.name}</div>
 								<div class="progress-mini">
-									<div class="bar" style:width={getCompletion(game) + '%'}></div>
+									<div
+										class="bar"
+										style:width={getCompletion(game) + '%'}
+										style:background={getCompletion(game) === 100
+											? 'var(--completed)'
+											: 'var(--accent)'}
+									></div>
 								</div>
 							</div>
 						</div>

@@ -153,9 +153,18 @@
 					<div class="game-card-info">
 						<div class="game-card-title">{game.name || game.id}</div>
 						<div class="game-card-bar">
-							<div class="game-card-bar-fill" style="width: {progressPct(game)}%"></div>
+							<div
+								class="game-card-bar-fill"
+								style="width: {progressPct(game)}%; background: {progressPct(game) === 100
+									? 'var(--completed)'
+									: 'var(--accent)'}"
+							></div>
 						</div>
-						<div class="game-card-pct" class:complete={progressPct(game) === 100}>
+						<div
+							class="game-card-pct"
+							class:complete={progressPct(game) === 100}
+							style:color={progressPct(game) === 100 ? 'var(--completed)' : 'inherit'}
+						>
 							{progressPct(game)}%
 						</div>
 					</div>

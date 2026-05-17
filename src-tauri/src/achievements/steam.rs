@@ -151,7 +151,7 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
                 ach.icon_gray = build_icon_url(steam_id, &hash);
             }
             if let Some(v) = extract_xml_value(trimmed, "hidden") {
-                ach.hidden = v == "true";
+                ach.hidden = v == "true" || v == "1";
             }
             if let Some(v) = extract_xml_value(trimmed, "player_percent_unlocked") {
                 ach.player_percent_unlocked = v.parse().unwrap_or(0.0);
@@ -330,32 +330,21 @@ pub async fn fetch_steam_metadata_with_client(
 
     let (lang_res, en_res, details_res) = futures::join!(lang_req, en_req, details_req);
 
-    let xml_lang = lang_res.ok().and_then(|r| {
-        if r.status().is_success() {
-            Some(r)
-        } else {
-            None
-        }
-    });
-    let xml_en = en_res.ok().and_then(|r| {
-        if r.status().is_success() {
-            Some(r)
-        } else {
-            None
-        }
-    });
-
     let mut achievements_lang = Vec::new();
-    if let Some(r) = xml_lang {
-        if let Ok(text) = r.text().await {
-            achievements_lang = parse_achievements_xml(&text, steam_id);
+    if let Ok(r) = lang_res {
+        if r.status().is_success() {
+            if let Ok(text) = r.text().await {
+                achievements_lang = parse_achievements_xml(&text, steam_id);
+            }
         }
     }
 
     let mut achievements_en = Vec::new();
-    if let Some(r) = xml_en {
-        if let Ok(text) = r.text().await {
-            achievements_en = parse_achievements_xml(&text, steam_id);
+    if let Ok(r) = en_res {
+        if r.status().is_success() {
+            if let Ok(text) = r.text().await {
+                achievements_en = parse_achievements_xml(&text, steam_id);
+            }
         }
     }
 
@@ -380,7 +369,8 @@ pub async fn fetch_steam_metadata_with_client(
             let en = en_map.get(&a.internal_name.to_lowercase());
 
             let name = if a.localized_name.trim().is_empty() {
-                en.map(|e| e.localized_name.clone()).unwrap_or_default()
+                en.map(|e| e.localized_name.clone())
+                    .unwrap_or_else(|| a.internal_name.clone())
             } else {
                 a.localized_name.clone()
             };
@@ -443,7 +433,7 @@ pub async fn fetch_steam_metadata_with_client(
     let game_name = details.map(|d| d.name.clone()).filter(|s| !s.is_empty());
 
     Ok(SteamMetadata {
-        name: game_name.unwrap_or_default(),
+        name: game_name.unwrap_or_else(|| format!("steam_{}", steam_id)),
         game_icon_url,
         header_image_url,
         background_image_url,
