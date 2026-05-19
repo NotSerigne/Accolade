@@ -1,7 +1,6 @@
 <script lang="ts">
 	// src/routes/(app)/+layout.svelte
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
 	import Settings from '$lib/Settings.svelte';
 	import { loadSettings, settings } from '$lib/stores/settings.js';
 	import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
@@ -130,7 +129,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" href="/favicon.svg" />
 </svelte:head>
 
 <div
