@@ -341,20 +341,20 @@ pub async fn export_to_pdf(
     let file_path = profiles_dir.join(filename);
 
     // Load fonts - try multiple locations
-    let mut font_dir = std::path::PathBuf::from("assets/fonts");
+    let mut font_dir = std::path::PathBuf::from("static/fonts");
 
     if !font_dir.exists() {
-        font_dir = std::path::PathBuf::from("../assets/fonts");
+        font_dir = std::path::PathBuf::from("../static/fonts");
     }
 
     if !font_dir.exists() {
         // Fallback for packaged app
         if let Ok(res_dir) = app_handle.path().resource_dir() {
-            // Try different possible resource structures
+            // Try different possible resource structures in the bundle
             let possible_paths = [
-                res_dir.join("assets").join("fonts"),
+                res_dir.join("static").join("fonts"),
                 res_dir.join("fonts"),
-                res_dir.join("_up_").join("assets").join("fonts"),
+                res_dir.join("_up_").join("static").join("fonts"),
             ];
 
             for path in possible_paths {
@@ -375,7 +375,7 @@ pub async fn export_to_pdf(
             .unwrap_or_else(|_| "Unknown".to_string());
 
         return Err(format!(
-            "Dossier fonts introuvable. \nExploration : \n- Dossier actuel : {:?}\n- Dossier ressources : {}\n\nVeuillez vous assurer que 'assets/fonts' est inclus dans le bundle.",
+            "Dossier fonts introuvable (recherche dans static/fonts). \nExploration : \n- Dossier actuel : {:?}\n- Dossier ressources : {}\n\nVeuillez vous assurer que 'static/fonts' est inclus dans le bundle.",
             current_dir, res_dir_path
         ));
     }
