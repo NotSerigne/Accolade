@@ -1,6 +1,9 @@
 // src-tauri/src/commands/mod.rs
 use crate::achievements::models::{Achievement, Emulator, Game};
-use crate::achievements::steam::{fetch_owned_games, fetch_steam_user, OwnedGame, SteamUser};
+use crate::achievements::steam::{
+    fetch_owned_games, fetch_recently_played_games, fetch_steam_user, get_local_steam_appids,
+    OwnedGame, SteamUser,
+};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
 use std::collections::HashSet;
 use tauri::Manager;
@@ -156,6 +159,112 @@ pub async fn extract_game_theme_color(image_url: String) -> Result<String, Strin
     crate::color::extract_dominant_color(&image_url)
         .await
         .ok_or_else(|| "Failed to extract color".to_string())
+}
+
+#[tauri::command]
+pub fn auto_group_games(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut games_lock = state
+        .games
+        .lock()
+        .map_err(|_| "Impossible de verrouiller les jeux")?;
+    let mut user_data = load_user_data(&app_handle);
+
+    let mut series_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    // 1. Group by Series (Name similarity)
+    for game in games_lock.iter() {
+        let name = game.name.to_lowercase();
+        // Extract base name by removing suffixes and numbers
+        let base_name = if let Some(idx) = name.find(':') {
+            name[..idx].trim().to_string()
+        } else if let Some(idx) = name.find(" - ") {
+            name[..idx].trim().to_string()
+        } else {
+            let mut n = name.clone();
+            // Remove common suffixes
+            for suffix in &[
+                " remastered",
+                " goty",
+                " deluxe",
+                " edition",
+                " anthology",
+                " bundle",
+                " collection",
+            ] {
+                if n.ends_with(suffix) {
+                    n = n[..n.len() - suffix.len()].to_string();
+                }
+            }
+            // Remove trailing numbers and whitespace
+            while n
+                .chars()
+                .last()
+                .map(|c| c.is_numeric() || c.is_whitespace())
+                .unwrap_or(false)
+            {
+                n.pop();
+            }
+            n.trim().to_string()
+        };
+
+        if base_name.len() > 3 {
+            series_map
+                .entry(base_name)
+                .or_default()
+                .push(game.id.clone());
+        }
+    }
+
+    for (series, ids) in series_map {
+        if ids.len() > 1 {
+            // Title case the series name for the tag
+            let tag = series
+                .split_whitespace()
+                .map(|w| {
+                    let mut c = w.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            for id in ids {
+                let tags = user_data.tags.entry(id).or_insert_with(Vec::new);
+                if !tags.contains(&tag) {
+                    tags.push(tag.clone());
+                }
+            }
+        }
+    }
+
+    // 2. Group by Genre
+    for game in games_lock.iter() {
+        for genre in &game.genres {
+            let tags = user_data
+                .tags
+                .entry(game.id.clone())
+                .or_insert_with(Vec::new);
+            if !tags.contains(genre) {
+                tags.push(genre.clone());
+            }
+        }
+    }
+
+    // Update current games in memory
+    for game in games_lock.iter_mut() {
+        if let Some(tags) = user_data.tags.get(&game.id) {
+            game.tags = tags.clone();
+        }
+    }
+
+    save_user_data(&app_handle, &user_data)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -400,54 +509,80 @@ pub(crate) async fn sync_steam_metadata(
 
     let mut added_steam_games = false;
     if !steam_id.trim().is_empty() && !effective_api_key.is_empty() {
-        println!(
-            "[DEBUG][sync_steam_metadata] Fetching owned games for {}",
-            steam_id
-        );
-        match fetch_owned_games(&effective_api_key, &steam_id, &language).await {
-            Ok(owned) => {
-                println!(
-                    "[DEBUG][sync_steam_metadata] Found {} owned games",
-                    owned.len()
-                );
-                let mut added_count = 0;
-                for og in owned {
-                    let game_id = format!("steam_{}", og.appid);
-                    if !existing_ids.contains(&game_id) {
-                        cloned_games.push(Game {
-                            name: og.name.clone().unwrap_or_else(|| format!("AppID {}", og.appid)),
-                            id: game_id.clone(),
-                            steam_id: Some(og.appid),
-                            game_icon: og.img_icon_url.clone().unwrap_or_default(),
-                            steamgrid_icon_url: String::new(),
-                            header_image_url: format!(
-                                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/header.jpg",
-                                og.appid
-                            ),
-                            background_image_url: String::new(),
-                            achievements_total: 0,
-                            achievements: Vec::new(),
-                            path_buf: None,
-                            source: crate::achievements::models::SourceType::Emulator(Emulator::Steam),
-                            is_favorite: false,
-                            tags: Vec::new(),
-                        });
-                        existing_ids.insert(game_id);
-                        added_count += 1;
-                        added_steam_games = true;
+        let steam_ids: Vec<&str> = steam_id
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        for s_id in steam_ids {
+            println!("[DEBUG][sync_steam_metadata] Fetching games for {}", s_id);
+
+            let mut all_owned = Vec::new();
+
+            // 1. Owned games
+            if let Ok(owned) = fetch_owned_games(&effective_api_key, s_id, &language).await {
+                all_owned.extend(owned);
+            }
+
+            // 2. Recently played (covers some shared/free games)
+            if let Ok(recent) = fetch_recently_played_games(&effective_api_key, s_id).await {
+                for rg in recent {
+                    if !all_owned.iter().any(|og| og.appid == rg.appid) {
+                        all_owned.push(rg);
                     }
                 }
-                println!(
-                    "[DEBUG][sync_steam_metadata] Added {} new Steam games",
-                    added_count
-                );
             }
-            Err(e) => {
-                println!(
-                    "[DEBUG][sync_steam_metadata] Failed to fetch owned games: {}",
-                    e
-                );
+
+            // 3. Local userdata scan (covers all family shared games played on this machine)
+            let local_appids = get_local_steam_appids(s_id);
+            for appid in local_appids {
+                if !all_owned.iter().any(|og| og.appid == appid) {
+                    all_owned.push(OwnedGame {
+                        appid,
+                        name: None,
+                        img_icon_url: None,
+                    });
+                }
             }
+
+            println!(
+                "[DEBUG][sync_steam_metadata] Found {} potential games for {}",
+                all_owned.len(),
+                s_id
+            );
+
+            let mut added_count = 0;
+            for og in all_owned {
+                let game_id = format!("steam_{}", og.appid);
+                if !existing_ids.contains(&game_id) {
+                    cloned_games.push(Game {
+                        name: og.name.clone().unwrap_or_else(|| format!("AppID {}", og.appid)),
+                        id: game_id.clone(),
+                        steam_id: Some(og.appid),
+                        game_icon: og.img_icon_url.clone().unwrap_or_default(),
+                        steamgrid_icon_url: String::new(),
+                        header_image_url: format!(
+                            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/header.jpg",
+                            og.appid
+                        ),
+                        background_image_url: String::new(),
+                        achievements_total: 0,
+                        achievements: Vec::new(),
+                        path_buf: None,
+                        source: crate::achievements::models::SourceType::Emulator(Emulator::Steam),
+                        genres: Vec::new(),
+                        is_favorite: false,
+                        tags: Vec::new(),
+                        });
+                    existing_ids.insert(game_id);
+                    added_count += 1;
+                    added_steam_games = true;
+                }
+            }
+            println!(
+                "[DEBUG][sync_steam_metadata] Added {} new Steam games for {}",
+                added_count, s_id
+            );
         }
     }
 
@@ -488,7 +623,14 @@ pub(crate) async fn sync_steam_metadata(
             "[DEBUG][sync_steam_metadata] Enriching {} games with Steam metadata",
             cloned_games.len()
         );
-        enrich_games_with_steam(&mut cloned_games, &effective_api_key, &steam_id, &language).await;
+        let main_steam_id = steam_id.split(',').next().unwrap_or("").trim();
+        enrich_games_with_steam(
+            &mut cloned_games,
+            &effective_api_key,
+            main_steam_id,
+            &language,
+        )
+        .await;
     }
 
     let sgdb_key = if !sgdb_api_key.trim().is_empty() {

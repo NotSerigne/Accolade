@@ -10,6 +10,7 @@ pub struct SteamMetadata {
     pub header_image_url: String,
     pub background_image_url: String,
     pub achievements: Vec<Achievement>,
+    pub genres: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -63,17 +64,17 @@ struct PlayerAchievement {
     apiname: String,
     achieved: u32,
     unlocktime: u64,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
 }
 
-#[derive(Default)]
-struct RawAchievement {
-    internal_name: String,
-    localized_name: String,
-    localized_desc: String,
-    icon: String,
-    icon_gray: String,
-    hidden: bool,
-    player_percent_unlocked: f64,
+pub struct PlayerAchievementInfo {
+    pub unlocked: bool,
+    pub unlock_time: u64,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +95,24 @@ struct AppDetailsData {
     background: String,
     #[serde(default)]
     background_raw: String,
+    #[serde(default)]
+    genres: Vec<SteamGenre>,
+}
+
+#[derive(Deserialize)]
+struct SteamGenre {
+    description: String,
+}
+
+#[derive(Default)]
+struct RawAchievement {
+    internal_name: String,
+    localized_name: String,
+    localized_desc: String,
+    icon: String,
+    icon_gray: String,
+    hidden: bool,
+    player_percent_unlocked: f64,
 }
 
 fn build_icon_url(steam_id: u32, hash: &str) -> String {
@@ -202,7 +221,7 @@ pub async fn fetch_owned_games(
         _ => "english",
     };
     let url = format!(
-        "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={steam_id}&include_appinfo=1&l={steam_language}&format=json"
+        "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={steam_id}&include_appinfo=1&include_played_free_games=1&l={steam_language}&format=json"
     );
     let resp = client
         .get(url)
@@ -213,12 +232,68 @@ pub async fn fetch_owned_games(
     Ok(resp.response.games.unwrap_or_default())
 }
 
+pub async fn fetch_recently_played_games(
+    api_key: &str,
+    steam_id: &str,
+) -> Result<Vec<OwnedGame>, reqwest::Error> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key={api_key}&steamid={steam_id}&format=json"
+    );
+    let resp = client
+        .get(url)
+        .send()
+        .await?
+        .json::<OwnedGamesResponse>()
+        .await?;
+    Ok(resp.response.games.unwrap_or_default())
+}
+
+pub fn get_local_steam_appids(steam_id64: &str) -> Vec<u32> {
+    let mut appids = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(steam_key) = hkcu.open_subkey("Software\\Valve\\Steam") {
+            if let Ok(steam_path) = steam_key.get_value::<String, _>("SteamPath") {
+                let steam_id64_num: u64 = steam_id64.parse().unwrap_or(0);
+                if steam_id64_num > 76561197960265728 {
+                    let account_id = steam_id64_num - 76561197960265728;
+                    let userdata_path = std::path::Path::new(&steam_path)
+                        .join("userdata")
+                        .join(account_id.to_string());
+
+                    if let Ok(entries) = std::fs::read_dir(userdata_path) {
+                        for entry in entries.flatten() {
+                            if entry.path().is_dir() {
+                                if let Some(name) = entry.file_name().to_str() {
+                                    if let Ok(appid) = name.parse::<u32>() {
+                                        if appid > 10 {
+                                            // Filter out Steam internal appids
+                                            appids.push(appid);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    appids
+}
+
 pub async fn fetch_player_achievements(
     api_key: &str,
     steam_id: &str,
     app_id: u32,
     language: &str,
-) -> Result<HashMap<String, (bool, u64)>, String> {
+) -> Result<HashMap<String, PlayerAchievementInfo>, String> {
     let client = reqwest::Client::new();
     let steam_language = match language {
         "fr" => "french",
@@ -245,7 +320,15 @@ pub async fn fetch_player_achievements(
     if resp.playerstats.success {
         if let Some(achievements) = resp.playerstats.achievements {
             for ach in achievements {
-                map.insert(ach.apiname, (ach.achieved == 1, ach.unlocktime));
+                map.insert(
+                    ach.apiname,
+                    PlayerAchievementInfo {
+                        unlocked: ach.achieved == 1,
+                        unlock_time: ach.unlocktime,
+                        name: ach.name,
+                        description: ach.description,
+                    },
+                );
             }
         }
     } else if let Some(err) = resp.playerstats.error {
@@ -398,7 +481,7 @@ pub async fn fetch_steam_metadata_with_client(
                 icon_gray,
                 unlocked_time: None,
                 rarity: String::new(),
-                completionpercentage: a.player_percent_unlocked.to_string(),
+                completionpercentage: format!("{:.1}", a.player_percent_unlocked),
                 desc,
                 hidden: a.hidden,
             }
@@ -433,10 +516,13 @@ pub async fn fetch_steam_metadata_with_client(
     let game_name = details.map(|d| d.name.clone()).filter(|s| !s.is_empty());
 
     Ok(SteamMetadata {
-        name: game_name.unwrap_or_else(|| format!("steam_{}", steam_id)),
+        name: game_name.unwrap_or_else(|| format!("AppID {}", steam_id)),
         game_icon_url,
         header_image_url,
         background_image_url,
         achievements,
+        genres: details
+            .map(|d| d.genres.iter().map(|g| g.description.clone()).collect())
+            .unwrap_or_default(),
     })
 }

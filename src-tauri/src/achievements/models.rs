@@ -48,6 +48,8 @@ pub struct Game {
     pub path_buf: Option<String>,
     pub source: SourceType,
     #[serde(default)]
+    pub genres: Vec<String>,
+    #[serde(default)]
     pub is_favorite: bool,
     #[serde(default)]
     pub tags: Vec<String>,

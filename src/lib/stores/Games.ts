@@ -35,6 +35,7 @@ export interface Game {
 	achievements: Achievement[];
 	path_buf: string | null;
 	source: SourceType;
+	genres: string[];
 	is_favorite: boolean;
 	tags: string[];
 }

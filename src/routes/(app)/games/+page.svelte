@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { games } from '$lib/stores/Games.js';
-	import { selectedGameId, toggleGameFavorite, addGameTag } from '$lib/stores/selectedGame.js';
+	import { invoke } from '@tauri-apps/api/core';
+	import { games, loadGames } from '$lib/stores/Games.js';
+	import { selectedGameId, toggleGameFavorite } from '$lib/stores/selectedGame.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { gameFilters } from '$lib/stores/uiPreferences.js';
 	import { goto } from '$app/navigation';
@@ -8,24 +9,13 @@
 	import type { Game } from '$lib/stores/Games.js';
 	import { SvelteSet } from 'svelte/reactivity';
 
-	function autoGroup() {
-		$games.forEach((game) => {
-			const type =
-				typeof game.source === 'object' && game.source.type === 'Emulator'
-					? game.source.value
-					: game.source.type;
-
-			if (!game.tags?.includes(type)) {
-				addGameTag(game.id, type);
-			}
-
-			// Similar name grouping (e.g. "God of War")
-			const mainName = game.name.split(':')[0].split('-')[0].trim();
-			const similarGames = $games.filter((g) => g.name.startsWith(mainName) && g.id !== game.id);
-			if (similarGames.length > 0 && !game.tags?.includes(mainName)) {
-				addGameTag(game.id, mainName);
-			}
-		});
+	async function autoGroup() {
+		try {
+			await invoke('auto_group_games');
+			await loadGames();
+		} catch (e) {
+			console.error('Auto group failed:', e);
+		}
 	}
 
 	let collections = $derived.by(() => {

@@ -159,20 +159,39 @@ pub(crate) async fn enrich_games_with_steam(
             }
         }
 
-        let Some(metadata) = metadata else {
-            continue;
+        let mut merged_achievements = if let Some(meta) = metadata {
+            merge_schema_with_local(meta.achievements.clone(), local_state)
+        } else {
+            local_state.clone()
         };
 
-        let mut merged_achievements =
-            merge_schema_with_local(metadata.achievements.clone(), local_state);
-
         if let Some(Ok(pa)) = player_achievements_res {
-            for ach in &mut merged_achievements {
-                if let Some((unlocked, time)) = pa.get(&ach.key) {
-                    if *unlocked {
+            for (key, info) in pa {
+                if let Some(ach) = merged_achievements.iter_mut().find(|a| &a.key == key) {
+                    if info.unlocked {
                         ach.unlocked = true;
-                        ach.unlocked_time = Some(*time);
+                        ach.unlocked_time = Some(info.unlock_time);
                     }
+                    if !info.name.is_empty() {
+                        ach.name = info.name.clone();
+                    }
+                    if !info.description.is_empty() {
+                        ach.desc = info.description.clone();
+                    }
+                } else {
+                    // Achievement exists in player stats but not in metadata
+                    merged_achievements.push(Achievement {
+                        key: key.clone(),
+                        name: if info.name.is_empty() {
+                            key.clone()
+                        } else {
+                            info.name.clone()
+                        },
+                        unlocked: info.unlocked,
+                        unlocked_time: Some(info.unlock_time),
+                        desc: info.description.clone(),
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -180,25 +199,33 @@ pub(crate) async fn enrich_games_with_steam(
         game.achievements = merged_achievements;
         game.achievements_total = game.achievements.len() as u32;
 
-        if !metadata.name.is_empty() {
-            game.name = metadata.name.clone();
-        }
-        if !metadata.header_image_url.is_empty() {
-            game.header_image_url = metadata.header_image_url.clone();
-        } else {
+        if let Some(meta) = metadata {
+            game.genres = meta.genres.clone();
+            if !meta.name.is_empty() {
+                game.name = meta.name.clone();
+            }
+            if !meta.header_image_url.is_empty() {
+                game.header_image_url = meta.header_image_url.clone();
+            } else {
+                game.header_image_url = format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
+                    steam_id
+                );
+            }
+            if !meta.game_icon_url.is_empty() {
+                game.game_icon = meta.game_icon_url.clone();
+            }
+            if !meta.background_image_url.is_empty() {
+                game.background_image_url = meta.background_image_url.clone();
+            } else {
+                game.background_image_url = format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
+                    steam_id
+                );
+            }
+        } else if game.header_image_url.is_empty() {
             game.header_image_url = format!(
                 "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
-                steam_id
-            );
-        }
-        if !metadata.game_icon_url.is_empty() {
-            game.game_icon = metadata.game_icon_url.clone();
-        }
-        if !metadata.background_image_url.is_empty() {
-            game.background_image_url = metadata.background_image_url.clone();
-        } else {
-            game.background_image_url = format!(
-                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
                 steam_id
             );
         }
@@ -314,6 +341,12 @@ fn update_screenshot_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Re
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -461,6 +494,7 @@ pub fn run() {
             commands::get_screenshots,
             commands::delete_screenshot,
             commands::open_screenshots_dir,
+            commands::auto_group_games,
             update_screenshot_shortcut
         ])
         .run(tauri::generate_context!("tauri.conf.json"))

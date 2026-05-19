@@ -125,7 +125,8 @@ const translations = {
 		'settings.searchPathsEmpty':
 			'Aucun chemin ajouté — seuls les emplacements par défaut sont scannés',
 		'settings.addFolder': 'Ajouter un dossier',
-		'settings.profile': 'Pour afficher votre profil et vos jeux possédés',
+		'settings.profile':
+			'Pour afficher votre profil et vos jeux possédés (séparez par des virgules pour le partage familial)',
 		'settings.apiKeyNeeded': 'Nécessaire pour récupérer les succès et les infos profil',
 		'settings.apiKeyOptional': 'Optionnel — pour les icones de jeux manquantes',
 		'settings.position': 'Position de la fenêtre',
@@ -316,7 +317,8 @@ const translations = {
 		'settings.searchPathsDesc': 'Additional folders where Accolade searches for achievement files',
 		'settings.searchPathsEmpty': 'No paths added — only default locations are scanned',
 		'settings.addFolder': 'Add folder',
-		'settings.profile': 'To display your profile and owned games',
+		'settings.profile':
+			'To display your profile and owned games (separate with commas for Family Sharing)',
 		'settings.apiKeyNeeded': 'Required to retrieve achievements and profile info',
 		'settings.apiKeyOptional': 'Optional — for missing game icons',
 		'settings.position': 'Window position',

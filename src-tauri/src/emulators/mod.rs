@@ -56,6 +56,7 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                     achievements,
                     path_buf: Some(entry_path.to_string_lossy().to_string()),
                     source: SourceType::Emulator(parser.emulator()),
+                    genres: Vec::new(),
                     is_favorite: false,
                     tags: Vec::new(),
                 });
