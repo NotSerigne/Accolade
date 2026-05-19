@@ -348,25 +348,35 @@ pub async fn export_to_pdf(
     }
 
     if !font_dir.exists() {
-        font_dir = std::path::PathBuf::from("src/lib/assets/fonts");
-    }
-
-    if !font_dir.exists() {
-        font_dir = std::path::PathBuf::from("../src/lib/assets/fonts");
-    }
-
-    if !font_dir.exists() {
         // Fallback for packaged app
         if let Ok(res_dir) = app_handle.path().resource_dir() {
-            font_dir = res_dir.join("assets").join("fonts");
+            // Try different possible resource structures
+            let possible_paths = [
+                res_dir.join("assets").join("fonts"),
+                res_dir.join("fonts"),
+                res_dir.join("_up_").join("assets").join("fonts"),
+            ];
+
+            for path in possible_paths {
+                if path.exists() {
+                    font_dir = path;
+                    break;
+                }
+            }
         }
     }
 
     if !font_dir.exists() {
         let current_dir = std::env::current_dir().unwrap_or_default();
+        let res_dir_path = app_handle
+            .path()
+            .resource_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "Unknown".to_string());
+
         return Err(format!(
-            "Dossier fonts introuvable. Dossier actuel: {:?}. Veuillez vous assurer que 'assets/fonts' existe à la racine du projet.",
-            current_dir
+            "Dossier fonts introuvable. \nExploration : \n- Dossier actuel : {:?}\n- Dossier ressources : {}\n\nVeuillez vous assurer que 'assets/fonts' est inclus dans le bundle.",
+            current_dir, res_dir_path
         ));
     }
 

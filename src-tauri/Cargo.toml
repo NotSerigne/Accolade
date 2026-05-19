@@ -1,6 +1,6 @@
 [package]
 name = "Accolade"
-version = "0.1.0"
+version = "1.0.0"
 description = "Accolade is a desktop app that brings achievements back to life in cracked games."
 authors = ["you"]
 license = ""
