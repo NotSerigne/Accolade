@@ -359,7 +359,7 @@ pub fn run() {
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
                         log::info!("[Shortcut] Native Triggered!");
-                        match screenshots::capture_screenshot(app, None, None) {
+                        match screenshots::capture_screenshot(app, None, None, true) {
                             Ok(filename) => {
                                 log::info!("[Shortcut] Manual screenshot captured: {}", filename);
                                 let _ = app.emit("screenshot-taken", filename);

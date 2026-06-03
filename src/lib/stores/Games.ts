@@ -74,6 +74,7 @@ export async function loadGames(): Promise<void> {
 	try {
 		const result = await invoke<Game[]>('get_all_games');
 		if (result) {
+			result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 			games.set(result);
 		} else {
 			console.log('No games returned from backend');
@@ -111,6 +112,7 @@ export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): P
 		});
 
 		if (result) {
+			result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 			games.set(result);
 		}
 	} catch (e) {

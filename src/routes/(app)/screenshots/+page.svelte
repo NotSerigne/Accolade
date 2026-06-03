@@ -38,10 +38,41 @@
 			loadScreenshots();
 		});
 
+		const handleKeydown = (e: KeyboardEvent) => {
+			if (!selectedScreenshot) return;
+			if (e.key === 'ArrowLeft') {
+				navigateScreenshot('prev');
+			} else if (e.key === 'ArrowRight') {
+				navigateScreenshot('next');
+			} else if (e.key === 'Escape') {
+				closeLightbox();
+			}
+		};
+		window.addEventListener('keydown', handleKeydown);
+
 		return () => {
 			unlisten.then((f) => f());
+			window.removeEventListener('keydown', handleKeydown);
 		};
 	});
+
+	let currentIndex = $derived(
+		selectedScreenshot
+			? screenshots.findIndex((s) => s.filename === selectedScreenshot!.filename)
+			: -1
+	);
+
+	function navigateScreenshot(direction: 'prev' | 'next') {
+		if (!selectedScreenshot) return;
+		const index = screenshots.findIndex((s) => s.filename === selectedScreenshot!.filename);
+		if (index === -1) return;
+
+		if (direction === 'prev' && index > 0) {
+			selectedScreenshot = screenshots[index - 1];
+		} else if (direction === 'next' && index < screenshots.length - 1) {
+			selectedScreenshot = screenshots[index + 1];
+		}
+	}
 
 	function getGameData(id: string | null) {
 		if (!id) return null;
@@ -67,17 +98,36 @@
 		return index >= 0 ? index + 1 : null;
 	}
 
-	function getRarityClass(rarity: string | null) {
-		if (!rarity) return '';
+	function getRarityClass(rarity: string | null, pct: string | number | null) {
+		const n = pct != null ? (typeof pct === 'string' ? parseFloat(pct) : pct) : null;
+
+		if (n !== null && !isNaN(n)) {
+			if (n <= 0.1) return 'mythique';
+			if (n <= 1.0) return 'legendaire';
+			if (n <= 3.0) return 'epique';
+			if (n <= 7.0) return 'rare';
+			if (n <= 15.0) return 'tres-rare';
+			if (n <= 35.0) return 'peu-commune';
+			return 'commune';
+		}
+
+		if (!rarity) return 'commune';
 		const normalized = rarity.toLowerCase().trim();
-		if (normalized.includes('commun')) return 'commune';
-		if (normalized.includes('peu') || normalized.includes('uncommon')) return 'peu-commune';
+		if (normalized.includes('mythique') || normalized.includes('mythic')) return 'mythique';
+		if (normalized.includes('légendaire') || normalized.includes('legendary')) return 'legendaire';
+		if (normalized.includes('épique') || normalized.includes('epic')) return 'epique';
 		if (normalized.includes('très rare') || normalized.includes('very rare')) return 'tres-rare';
 		if (normalized.includes('rare')) return 'rare';
-		if (normalized.includes('épique') || normalized.includes('epic')) return 'epique';
-		if (normalized.includes('légendaire') || normalized.includes('legendary')) return 'legendaire';
-		if (normalized.includes('mythique') || normalized.includes('mythic')) return 'mythique';
+		if (normalized.includes('peu') || normalized.includes('uncommon')) return 'peu-commune';
 		return 'commune';
+	}
+
+	function getGameProgress(gameId: string | null) {
+		const game = getGameData(gameId);
+		if (!game) return { unlocked: 0, total: 0 };
+		const unlocked = game.achievements.filter((a) => a.unlocked).length;
+		const total = game.achievements_total || game.achievements.length;
+		return { unlocked, total };
 	}
 
 	async function deleteScreenshot(screenshot: Screenshot, event: Event) {
@@ -244,80 +294,142 @@
 				alt={selectedScreenshot.filename}
 			/>
 			<div class="lightbox-footer">
-				<div class="lightbox-info">
-					{#if selectedScreenshot.game_id}
-						{@const game = getGameData(selectedScreenshot.game_id)}
-						{@const ach = getAchData(
-							selectedScreenshot.game_id,
-							selectedScreenshot.achievement_key
-						)}
-						{@const achIndex = getAchIndex(
-							selectedScreenshot.game_id,
-							selectedScreenshot.achievement_key
-						)}
+				<div class="lightbox-navigation">
+					<button
+						class="nav-btn-mini"
+						disabled={currentIndex <= 0}
+						onclick={() => navigateScreenshot('prev')}
+						aria-label="Précédent"
+					>
+						<svg
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="3"
+						>
+							<path d="M15 18l-6-6 6-6" />
+						</svg>
+					</button>
+					<span class="nav-count">{currentIndex + 1} / {screenshots.length}</span>
+					<button
+						class="nav-btn-mini"
+						disabled={currentIndex >= screenshots.length - 1}
+						onclick={() => navigateScreenshot('next')}
+						aria-label="Suivant"
+					>
+						<svg
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="3"
+						>
+							<path d="M9 18l6-6-6-6" />
+						</svg>
+					</button>
+				</div>
+				<div class="lightbox-info-container">
+					<div class="lightbox-info">
+						{#if selectedScreenshot.game_id}
+							{@const game = getGameData(selectedScreenshot.game_id)}
+							{@const ach = getAchData(
+								selectedScreenshot.game_id,
+								selectedScreenshot.achievement_key
+							)}
+							{@const achIndex = getAchIndex(
+								selectedScreenshot.game_id,
+								selectedScreenshot.achievement_key
+							)}
 
-						<div class="rich-info-container">
-							<div class="game-brand">
-								{#if game?.steamgrid_icon_url || game?.game_icon}
-									<img
-										class="game-icon"
-										src={game.steamgrid_icon_url || game.game_icon}
-										alt="Game icon"
-									/>
-								{/if}
-								<div class="brand-text">
-									<h3>{game?.name || selectedScreenshot.game_id}</h3>
-									<p class="date-text">
-										{formatDate(ach?.unlocked_time || selectedScreenshot.timestamp)}
-									</p>
-								</div>
-							</div>
-
-							{#if ach}
-								<div class="ach-brand">
-									<img class="ach-icon" src={ach.icon} alt="Achievement icon" />
-									<div class="ach-details">
-										<div class="ach-header">
-											<h4>{ach.name || ach.key}</h4>
-											{#if achIndex}
-												<span class="ach-badge">Succès n°{achIndex}</span>
-											{/if}
-											{#if ach.rarity}
-												<span class="ach-rarity {getRarityClass(ach.rarity)}">{ach.rarity}</span>
-											{/if}
-											{#if ach.completionpercentage}
-												<span class="ach-pct"
-													>{parseFloat(ach.completionpercentage).toFixed(1)}%</span
-												>
-											{/if}
-										</div>
-										{#if ach.desc}
-											<p class="ach-desc">{ach.desc}</p>
-										{/if}
+							{@const progress = getGameProgress(selectedScreenshot.game_id)}
+							{@const ringDash = progress.total ? (progress.unlocked / progress.total) * 94.25 : 0}
+							<div class="rich-info-container">
+								<div class="game-brand">
+									{#if game?.steamgrid_icon_url || game?.game_icon}
+										<img
+											class="game-icon"
+											src={game.steamgrid_icon_url || game.game_icon}
+											alt="Game icon"
+										/>
+									{/if}
+									<div class="brand-text">
+										<h3>{game?.name || selectedScreenshot.game_id}</h3>
+										<p class="date-text">
+											{formatDate(ach?.unlocked_time || selectedScreenshot.timestamp)}
+										</p>
 									</div>
 								</div>
-							{:else if selectedScreenshot.achievement_key}
-								<div class="ach-key">
-									Succès : <code>{selectedScreenshot.achievement_key}</code>
-								</div>
-							{/if}
-						</div>
-					{:else}
-						<div class="brand-text">
-							<h3>Manuel</h3>
-							<p class="date-text">{formatDate(selectedScreenshot.timestamp)}</p>
-						</div>
-					{/if}
-				</div>
-				<div class="lightbox-actions">
-					<button class="secondary-btn" onclick={closeLightbox}>Fermer</button>
-					<button
-						class="danger-btn"
-						onclick={(e) => {
-							deleteScreenshot(selectedScreenshot!, e);
-							closeLightbox();
-						}}>Supprimer</button
-					>
+
+								{#if ach}
+									<div class="ach-brand {getRarityClass(ach.rarity, ach.completionpercentage)}">
+										<img class="ach-icon" src={ach.icon} alt="Achievement icon" />
+										<div class="ach-details">
+											<div class="ach-header">
+												<h4>{ach.name || ach.key}</h4>
+												{#if achIndex}
+													<span class="ach-badge">Succès n°{achIndex}</span>
+												{/if}
+												{#if ach.rarity}
+													<span
+														class="ach-rarity {getRarityClass(
+															ach.rarity,
+															ach.completionpercentage
+														)}">{ach.rarity}</span
+													>
+												{/if}
+												{#if ach.completionpercentage}
+													<span class="ach-pct"
+														>{parseFloat(ach.completionpercentage).toFixed(1)}%</span
+													>
+												{/if}
+											</div>
+											{#if ach.desc}
+												<p class="ach-desc">{ach.desc}</p>
+											{/if}
+										</div>
+
+										{#if progress.total > 0}
+											<div class="ach-progress-circle">
+												<div class="progress-fraction">{progress.unlocked}/{progress.total}</div>
+												<svg class="progress-ring" viewBox="0 0 36 36">
+													<circle class="ring-bg" cx="18" cy="18" r="15" />
+													<circle
+														class="ring-fill"
+														cx="18"
+														cy="18"
+														r="15"
+														stroke-dasharray="{ringDash} 94.25"
+													/>
+												</svg>
+											</div>
+										{/if}
+									</div>
+								{:else if selectedScreenshot.achievement_key}
+									<div class="ach-key">
+										Succès : <code>{selectedScreenshot.achievement_key}</code>
+									</div>
+								{/if}
+							</div>
+						{:else}
+							<div class="brand-text">
+								<h3>Manuel</h3>
+								<p class="date-text">{formatDate(selectedScreenshot.timestamp)}</p>
+							</div>
+						{/if}
+					</div>
+					<div class="lightbox-actions">
+						<button class="secondary-btn" onclick={closeLightbox}>Fermer</button>
+						<button
+							class="danger-btn"
+							onclick={(e) => {
+								deleteScreenshot(selectedScreenshot!, e);
+								closeLightbox();
+							}}>Supprimer</button
+						>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -545,206 +657,377 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: rgba(0, 0, 0, 0.9);
+		background: rgba(0, 0, 0, 0.96);
 		z-index: 2000;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 40px;
-		backdrop-filter: blur(8px);
+		padding: 10px;
+		backdrop-filter: blur(12px);
 	}
 
 	.lightbox-content {
-		max-width: 100%;
-		max-height: 100%;
+		max-width: 98vw;
+		max-height: 98vh;
 		background: var(--bg-main);
-		border-radius: 16px;
+		border-radius: 10px;
 		overflow: hidden;
-		box-shadow: 0 30px 60px rgba(0, 0, 0, 0.8);
+		box-shadow: 0 40px 100px rgba(0, 0, 0, 0.9);
 		display: flex;
 		flex-direction: column;
 		border: 1px solid var(--border-soft);
+		width: fit-content;
+		min-width: 400px;
 	}
 
 	.lightbox-main-img {
+		display: block;
+		margin: 0 auto;
+		width: auto;
+		height: auto;
 		max-width: 100%;
-		min-height: 0;
-		flex: 1 1 auto;
+		max-height: calc(100vh - 160px);
 		object-fit: contain;
+		background: #000;
 	}
 
 	.lightbox-footer {
-		padding: 24px 32px;
+		padding: 8px 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		background: var(--surface-1);
+		flex-shrink: 0;
+		border-top: 1px solid var(--border-soft);
+	}
+
+	.lightbox-navigation {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid var(--border-soft);
+	}
+
+	.nav-btn-mini {
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-primary);
+		width: 28px;
+		height: 28px;
+		border-radius: 6px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.nav-btn-mini:hover:not(:disabled) {
+		background: var(--accent);
+		color: var(--accent-text);
+		border-color: var(--accent);
+	}
+
+	.nav-btn-mini:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+
+	.nav-count {
+		font-size: 12px;
+		font-weight: 700;
+		color: var(--text-secondary);
+		min-width: 45px;
+		text-align: center;
+	}
+
+	.lightbox-info-container {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		background: var(--surface-1);
-		flex-shrink: 0;
+		gap: 20px;
+	}
+
+	.lightbox-info {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.rich-info-container {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 6px;
 	}
 
 	.game-brand {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.game-icon {
-		width: 40px;
-		height: 40px;
-		border-radius: 8px;
+		width: 24px;
+		height: 24px;
+		border-radius: 4px;
 		object-fit: cover;
 		background: var(--surface-2);
 	}
 
+	.brand-text {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+	}
+
 	.brand-text h3 {
-		font-size: 18px;
+		font-size: 14px;
 		font-weight: 800;
 		color: var(--text-primary);
-		margin-bottom: 2px;
 	}
 
 	.date-text {
 		color: var(--text-muted);
-		font-size: 13px;
+		font-size: 11px;
 	}
 
 	.ach-brand {
 		display: flex;
-		align-items: flex-start;
-		gap: 16px;
+		align-items: center;
+		gap: 12px;
 		background: var(--surface-2);
-		padding: 16px;
-		border-radius: 12px;
+		padding: 6px 12px;
+		border-radius: 8px;
 		border: 1px solid var(--border-soft);
+		position: relative;
+		min-height: 48px;
+		width: fit-content;
+		max-width: 100%;
 	}
 
 	.ach-icon {
-		width: 64px;
-		height: 64px;
-		border-radius: 12px;
+		width: 36px;
+		height: 36px;
+		border-radius: 6px;
 		object-fit: cover;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+		box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+		flex-shrink: 0;
 	}
 
 	.ach-details {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 2px;
+		flex: 1;
+		min-width: 0;
+		padding-right: 8px;
 	}
 
 	.ach-header {
 		display: flex;
 		align-items: center;
-		flex-wrap: wrap;
-		gap: 8px;
+		flex-wrap: nowrap;
+		gap: 6px;
+		min-width: 0;
 	}
 
 	.ach-header h4 {
-		font-size: 16px;
+		font-size: 13px;
 		font-weight: 700;
 		color: var(--text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.ach-badge {
 		background: var(--accent);
 		color: var(--accent-text);
-		padding: 2px 8px;
-		border-radius: 12px;
-		font-size: 11px;
+		padding: 0px 5px;
+		border-radius: 8px;
+		font-size: 9px;
 		font-weight: 800;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.ach-rarity {
-		font-size: 11px;
-		font-weight: 700;
-		padding: 2px 8px;
-		border-radius: 12px;
+		font-size: 9px;
+		font-weight: 800;
+		padding: 0px 5px;
+		border-radius: 8px;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	/* Rarity Colors for Brand Cards and Badges */
+	.ach-brand.commune {
+		border-color: rgba(156, 163, 175, 0.2);
+		background: rgba(156, 163, 175, 0.03);
+	}
+	.ach-brand.peu-commune {
+		border-color: rgba(61, 220, 132, 0.3);
+		background: rgba(61, 220, 132, 0.03);
+	}
+	.ach-brand.tres-rare {
+		border-color: rgba(74, 200, 255, 0.3);
+		background: rgba(74, 200, 255, 0.03);
+	}
+	.ach-brand.rare {
+		border-color: rgba(244, 184, 96, 0.3);
+		background: rgba(244, 184, 96, 0.03);
+	}
+	.ach-brand.epique {
+		border-color: rgba(168, 85, 247, 0.3);
+		background: rgba(168, 85, 247, 0.03);
+	}
+	.ach-brand.legendaire {
+		border-color: rgba(255, 216, 90, 0.3);
+		background: rgba(255, 216, 90, 0.03);
+	}
+	.ach-brand.mythique {
+		border-color: rgba(255, 59, 92, 0.3);
+		background: rgba(255, 59, 92, 0.03);
 	}
 
 	.ach-rarity.commune {
-		background: rgba(156, 163, 175, 0.15);
+		background: rgba(156, 163, 175, 0.1);
 		color: #9ca3af;
 	}
-
 	.ach-rarity.peu-commune {
-		background: rgba(59, 130, 246, 0.15);
-		color: #60a5fa;
+		background: rgba(61, 220, 132, 0.1);
+		color: #3ddc84;
 	}
-
 	.ach-rarity.tres-rare {
-		background: rgba(139, 92, 246, 0.15);
-		color: #a78bfa;
+		background: rgba(74, 200, 255, 0.1);
+		color: #4ac8ff;
 	}
-
 	.ach-rarity.rare {
-		background: rgba(168, 85, 247, 0.15);
-		color: #c084fc;
+		background: rgba(244, 184, 96, 0.1);
+		color: #f4b860;
 	}
-
 	.ach-rarity.epique {
-		background: rgba(236, 72, 153, 0.15);
-		color: #f472b6;
+		background: rgba(168, 85, 247, 0.1);
+		color: #a855f7;
 	}
-
 	.ach-rarity.legendaire {
-		background: rgba(234, 179, 8, 0.15);
-		color: #facc15;
+		background: rgba(255, 216, 90, 0.1);
+		color: #ffd85a;
+	}
+	.ach-rarity.mythique {
+		background: rgba(255, 59, 92, 0.1);
+		color: #ff3b5c;
 	}
 
-	.ach-rarity.mythique {
-		background: rgba(239, 68, 68, 0.15);
-		color: #f87171;
+	.ach-brand.commune .ring-fill {
+		stroke: #9ca3af;
+	}
+	.ach-brand.peu-commune .ring-fill {
+		stroke: #3ddc84;
+	}
+	.ach-brand.tres-rare .ring-fill {
+		stroke: #4ac8ff;
+	}
+	.ach-brand.rare .ring-fill {
+		stroke: #f4b860;
+	}
+	.ach-brand.epique .ring-fill {
+		stroke: #a855f7;
+	}
+	.ach-brand.legendaire .ring-fill {
+		stroke: #ffd85a;
+	}
+	.ach-brand.mythique .ring-fill {
+		stroke: #ff3b5c;
 	}
 
 	.ach-pct {
-		font-size: 12px;
+		font-size: 10px;
 		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
+		font-weight: 600;
+		flex-shrink: 0;
 	}
 
 	.ach-desc {
-		font-size: 14px;
+		font-size: 11px;
 		color: var(--text-secondary);
-		line-height: 1.4;
-		max-width: 500px;
+		line-height: 1.3;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: block;
+	}
+
+	.ach-progress-circle {
+		flex-shrink: 0;
+		position: relative;
+		width: 36px;
+		height: 36px;
+	}
+
+	.progress-fraction {
+		font-family: inherit;
+		font-size: 9px;
+		font-weight: 800;
+		color: var(--text-primary);
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.progress-ring {
+		width: 36px;
+		height: 36px;
+		transform: rotate(-90deg);
+	}
+
+	.ring-bg {
+		fill: none;
+		stroke: var(--surface-3);
+		stroke-width: 3.5;
+	}
+	.ring-fill {
+		fill: none;
+		stroke-width: 3.5;
+		stroke-linecap: round;
+		transition: stroke-dasharray 0.6s ease;
 	}
 
 	.ach-key {
-		margin-top: 8px;
-		font-size: 12px;
+		margin-top: 2px;
+		font-size: 10px;
 		color: var(--text-muted);
 	}
 
 	.ach-key code {
 		background: var(--surface-2);
-		padding: 2px 6px;
+		padding: 1px 4px;
 		border-radius: 4px;
 		color: var(--accent);
 	}
 
 	.lightbox-actions {
 		display: flex;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.secondary-btn {
 		background: var(--surface-2);
 		border: 1px solid var(--border-soft);
 		color: var(--text-primary);
-		padding: 10px 20px;
-		border-radius: 8px;
+		padding: 6px 12px;
+		border-radius: 6px;
 		font-weight: 600;
 		cursor: pointer;
+		font-size: 12px;
 		transition: all 0.2s;
 	}
 
@@ -756,10 +1039,11 @@
 		background: rgba(220, 38, 38, 0.1);
 		border: 1px solid rgba(220, 38, 38, 0.2);
 		color: #ef4444;
-		padding: 10px 20px;
-		border-radius: 8px;
+		padding: 6px 12px;
+		border-radius: 6px;
 		font-weight: 600;
 		cursor: pointer;
+		font-size: 12px;
 		transition: all 0.2s;
 	}
 

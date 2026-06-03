@@ -5,7 +5,20 @@ import { games } from './Games.js';
 import type { Game } from './Games.js';
 import { steamUser } from './user.js';
 
-export const selectedGameId = writable<string | null>(null);
+const SELECTED_GAME_KEY = 'accolade:selected-game:v1';
+
+function getInitialSelectedGameId(): string | null {
+	if (typeof localStorage === 'undefined') return null;
+	return localStorage.getItem(SELECTED_GAME_KEY);
+}
+
+export const selectedGameId = writable<string | null>(getInitialSelectedGameId());
+
+selectedGameId.subscribe((id) => {
+	if (typeof localStorage !== 'undefined' && id) {
+		localStorage.setItem(SELECTED_GAME_KEY, id);
+	}
+});
 
 export const selectedGame = derived(
 	[games, selectedGameId],

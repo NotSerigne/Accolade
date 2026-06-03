@@ -14,13 +14,21 @@
 					const raw = localStorage.getItem('accolade:theme:v1');
 					if (!raw) return;
 					const parsed = JSON.parse(raw);
-					const theme =
-						parsed?.theme === 'light' ? 'light' : parsed?.theme === 'dark' ? 'dark' : null;
+					const theme = parsed?.theme;
 					const accent = typeof parsed?.accentColor === 'string' ? parsed.accentColor : null;
 					if (!theme || !accent) return;
 					const root = document.documentElement;
-					root.setAttribute('data-theme', theme);
+
+					const resolvedTheme =
+						theme === 'system'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: theme;
+
+					root.setAttribute('data-theme', resolvedTheme);
 					root.style.setProperty('--accent', accent);
+					root.style.colorScheme = resolvedTheme;
 				} catch {}
 			})();
 		</script>

@@ -694,7 +694,8 @@ pub fn capture_automatic_screenshot(
         game_id,
         ach_key
     );
-    match crate::screenshots::capture_screenshot(&app_handle, Some(&game_id), Some(&ach_key)) {
+    match crate::screenshots::capture_screenshot(&app_handle, Some(&game_id), Some(&ach_key), true)
+    {
         Ok(filename) => {
             log::info!("[Command] Automatic screenshot captured: {}", filename);
             let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
@@ -710,7 +711,7 @@ pub fn capture_automatic_screenshot(
 #[tauri::command]
 pub fn capture_manual_screenshot(app_handle: tauri::AppHandle) -> Result<String, String> {
     log::info!("[Command] Manual screenshot requested via button");
-    match crate::screenshots::capture_screenshot(&app_handle, None, None) {
+    match crate::screenshots::capture_screenshot(&app_handle, None, None, true) {
         Ok(filename) => {
             log::info!("[Command] Manual screenshot captured: {}", filename);
             let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());

@@ -16,10 +16,17 @@
 		removeGameTag,
 		exportGame,
 		openProfilesFolder,
-		exportSummaryPdf
+		exportSummaryPdf,
+		selectedGameId
 	} from '$lib/stores/selectedGame.js';
 
 	let { game }: { game: Game | null } = $props();
+
+	$effect(() => {
+		if (game?.id) {
+			selectedGameId.set(game.id);
+		}
+	});
 
 	let newTag = $state('');
 
@@ -144,6 +151,17 @@
 	onMount(() => {
 		let unlisten: (() => void) | undefined;
 
+		const handleKeydown = (e: KeyboardEvent) => {
+			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+			if (e.key === 'ArrowLeft' && prevGame) {
+				goToGame(prevGame.id);
+			} else if (e.key === 'ArrowRight' && nextGame) {
+				goToGame(nextGame.id);
+			}
+		};
+		window.addEventListener('keydown', handleKeydown);
+
 		listen<AchievementsUpdatedPayload>('achievements-updated', (event) => {
 			const payload = event.payload;
 			if (game && payload?.game_id === game.id && Array.isArray(payload.achievements)) {
@@ -155,6 +173,7 @@
 
 		return () => {
 			unlisten?.();
+			window.removeEventListener('keydown', handleKeydown);
 		};
 	});
 
@@ -443,7 +462,7 @@
 					stroke="currentColor"
 					stroke-width="3"
 				>
-					<path d="M9 18l6-6 6-6" />
+					<path d="M9 18l6-6-6-6" />
 				</svg>
 			</button>
 		</div>
