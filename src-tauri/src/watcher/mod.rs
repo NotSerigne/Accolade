@@ -329,7 +329,35 @@ pub fn start(app_handle: tauri::AppHandle) {
                 };
                 let game_path = std::path::Path::new(path_buf);
 
-                if !path_buf.is_empty() && paths_changed.iter().any(|p| p.starts_with(game_path)) {
+                // Normalize a path for robust case-insensitive comparison on Windows:
+                // strip UNC prefix (\\?\), lowercase, unify separators.
+                let normalize_path = |p: &std::path::Path| -> String {
+                    let s = p.to_string_lossy();
+                    s.trim_start_matches(r"\\?\")
+                        .to_lowercase()
+                        .replace('/', "\\")
+                };
+
+                let norm_game = normalize_path(game_path);
+                // Also precompute the parent directory of the game path (for file-based paths like achievements.json)
+                let norm_game_parent = game_path.parent().map(normalize_path).unwrap_or_default();
+
+                let path_matches = !path_buf.is_empty()
+                    && paths_changed.iter().any(|p| {
+                        let norm_p = normalize_path(p);
+                        // Match if:
+                        // 1. The changed path IS exactly the game file (e.g. achievements.json)
+                        // 2. The changed path is inside the game directory (when path_buf is a dir)
+                        // 3. The changed path is the parent dir of the game file (notify sometimes emits the folder)
+                        // 4. The changed path is a sibling file inside the game file's parent dir
+                        norm_p == norm_game
+                            || norm_p.starts_with(&format!("{}\\", norm_game))
+                            || (!norm_game_parent.is_empty()
+                                && (norm_p == norm_game_parent
+                                    || norm_p.starts_with(&format!("{}\\", norm_game_parent))))
+                    });
+
+                if path_matches {
                     let achievements = match_emulator(game.clone());
                     let current_live_keys = live_keys(&achievements);
                     let previous_live_keys = live_keys_by_game

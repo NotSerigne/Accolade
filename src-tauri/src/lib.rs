@@ -425,9 +425,9 @@ pub fn run() {
             let args: Vec<String> = std::env::args().collect();
             let is_minimized = args.contains(&"--minimized".to_string());
 
-            if is_minimized {
+            if !is_minimized {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
+                    let _ = window.show();
                 }
             }
 
@@ -435,7 +435,9 @@ pub fn run() {
 
             let api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
 
-            let overlay_url = if cfg!(debug_assertions) {
+            // In debug mode with --minimized (autostart), the Vite dev server is not running,
+            // so we must fall back to the production path to avoid a blank overlay window.
+            let overlay_url = if cfg!(debug_assertions) && !is_minimized {
                 "http://localhost:5173/overlay"
             } else {
                 "/overlay"
