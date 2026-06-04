@@ -314,7 +314,9 @@
 			{/if}
 		</button>
 
-		<span class="watching-badge" class:active={$watcherActive}>{$i18n.t('topbar.scan')}</span>
+		<span class="watching-badge" class:active={$watcherActive}>
+			<span class="watching-dot"></span>{$i18n.t('topbar.scan')}
+		</span>
 		<button class="topbar-icon-btn" title={$i18n.t('topbar.library')}>
 			<svg
 				width="16"
@@ -588,9 +590,22 @@
 	}
 
 	.watching-badge {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		white-space: nowrap;
+		flex-shrink: 0;
 		color: var(--text-muted);
 		font-size: 13px;
 		transition: color 0.3s;
+	}
+	.watching-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: currentColor;
+		flex-shrink: 0;
+		transition: background 0.3s;
 	}
 	.watching-badge.active {
 		color: #3ddc84;

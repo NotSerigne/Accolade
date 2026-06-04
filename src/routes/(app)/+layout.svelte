@@ -20,6 +20,7 @@
 
 	let { children } = $props();
 	let isSetupRoute = $derived(page.url.pathname.startsWith('/setup'));
+	let isGameRoute = $derived(page.url.pathname.startsWith('/games/'));
 	let activeThemeColor = $state<string | null>(null);
 	let activeThemeContrast = $state<string>('#111111');
 
@@ -27,7 +28,7 @@
 		const game = $selectedGame;
 		const s = $settings;
 
-		if (!s.dynamicTheme || !game) {
+		if (!s.dynamicTheme || !game || !isGameRoute) {
 			activeThemeColor = null;
 			activeThemeContrast = '#111111';
 			return;
@@ -140,7 +141,7 @@
 		: 'var(--accent-default)'}
 	style:--accent-text={activeThemeContrast}
 >
-	{#if $settings.dynamicTheme && $selectedGame && !isSetupRoute}
+	{#if $settings.dynamicTheme && $selectedGame && isGameRoute && !isSetupRoute}
 		<div
 			class="dynamic-bg"
 			style:background-image="url({$selectedGame.background_image_url ||
