@@ -338,6 +338,56 @@ fn update_screenshot_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Re
     Ok(())
 }
 
+#[tauri::command]
+async fn enable_autostart(_app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let path = dunce::canonicalize(path).map_err(|e| e.to_string())?;
+        let path_str = path.to_string_lossy().to_string();
+        let cmd = format!("\"{}\" --minimized", path_str);
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let key = hkcu
+            .open_subkey_with_flags(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                KEY_WRITE,
+            )
+            .map_err(|e| e.to_string())?;
+        key.set_value("Accolade", &cmd).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        app.autolaunch().enable().map_err(|e| format!("{}", e))
+    }
+}
+
+#[tauri::command]
+async fn disable_autostart(_app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let key = hkcu
+            .open_subkey_with_flags(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                KEY_WRITE,
+            )
+            .map_err(|e| e.to_string())?;
+        let _ = key.delete_value("Accolade");
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        app.autolaunch().disable().map_err(|e| format!("{}", e))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -495,7 +545,9 @@ pub fn run() {
             commands::delete_screenshot,
             commands::open_screenshots_dir,
             commands::auto_group_games,
-            update_screenshot_shortcut
+            update_screenshot_shortcut,
+            enable_autostart,
+            disable_autostart
         ])
         .run(tauri::generate_context!("tauri.conf.json"))
         .expect("error while running tauri application")

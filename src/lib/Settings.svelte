@@ -258,11 +258,10 @@
 			}
 
 			try {
-				const { enable, disable } = await import('@tauri-apps/plugin-autostart');
 				if (next.launchOnStartup) {
-					await enable();
+					await invoke('enable_autostart');
 				} else {
-					await disable();
+					await invoke('disable_autostart');
 				}
 			} catch (e) {
 				console.warn('Failed to configure autostart:', e);
