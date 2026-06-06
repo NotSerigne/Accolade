@@ -342,6 +342,12 @@ fn update_screenshot_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Re
 async fn enable_autostart(_app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
+        // Refuse to register a debug binary in the registry — it would open a CMD
+        // window and try to load localhost:5173 on every system boot.
+        if cfg!(debug_assertions) {
+            return Err("Cannot enable autostart from a debug build. Use a release build (cargo tauri build).".to_string());
+        }
+
         use winreg::enums::*;
         use winreg::RegKey;
         let path = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -361,7 +367,7 @@ async fn enable_autostart(_app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(not(windows))]
     {
         use tauri_plugin_autostart::ManagerExt;
-        app.autolaunch().enable().map_err(|e| format!("{}", e))
+        _app.autolaunch().enable().map_err(|e| format!("{}", e))
     }
 }
 
