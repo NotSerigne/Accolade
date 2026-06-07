@@ -415,6 +415,11 @@ pub fn exit_app(app_handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
+pub fn is_launched_minimized() -> bool {
+    std::env::args().any(|a| a == "--minimized")
+}
+
+#[tauri::command]
 pub fn hide_app(app_handle: tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.hide();

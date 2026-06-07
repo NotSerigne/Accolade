@@ -543,6 +543,7 @@ pub fn run() {
             commands::get_profiles_dir,
             commands::open_profiles_dir,
             commands::exit_app,
+            commands::is_launched_minimized,
             commands::hide_app,
             commands::toggle_game_favorite,
             commands::add_game_tag,

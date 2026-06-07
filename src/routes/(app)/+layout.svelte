@@ -94,7 +94,11 @@
 				console.error('Failed to register screenshot shortcut:', err);
 			}
 
-			if (s.startMinimized) {
+			// Hide the window only when launched via autostart (--minimized flag from registry).
+			// startMinimized is the user preference that controls whether autostart hides the window;
+			// it must NOT hide the window on a normal launch.
+			const launchedMinimized = await invoke<boolean>('is_launched_minimized');
+			if (launchedMinimized && s.startMinimized) {
 				await invoke('hide_app');
 			}
 

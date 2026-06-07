@@ -360,18 +360,40 @@ pub fn start(app_handle: tauri::AppHandle) {
                 if path_matches {
                     let achievements = match_emulator(game.clone());
                     let current_live_keys = live_keys(&achievements);
-                    let previous_live_keys = live_keys_by_game
-                        .entry(game.id.clone())
-                        .or_insert_with(|| live_keys(&game.achievements));
 
-                    let previous_unlocked =
-                        unlocked_by_game.entry(game.id.clone()).or_insert_with(|| {
-                            game.achievements
-                                .iter()
-                                .filter(|a| a.unlocked || a.unlocked_time.is_some())
-                                .map(|a| a.key.trim().to_lowercase())
-                                .collect()
-                        });
+                    // Snapshot the baseline BEFORE the merge so we can diff against it.
+                    // Seed unlocked_by_game / live_keys_by_game from AppState if not yet seen.
+                    if !unlocked_by_game.contains_key(&game.id)
+                        || !live_keys_by_game.contains_key(&game.id)
+                    {
+                        let stored_achs: Option<Vec<Achievement>> = {
+                            let state = app_handle.state::<AppState>();
+                            state.games.lock().ok().and_then(|gs| {
+                                gs.iter()
+                                    .find(|g| g.id == game.id)
+                                    .map(|g| g.achievements.clone())
+                            })
+                        };
+                        if let Some(ref achs) = stored_achs {
+                            if !unlocked_by_game.contains_key(&game.id) {
+                                let baseline: HashSet<String> = achs
+                                    .iter()
+                                    .filter(|a| a.unlocked || a.unlocked_time.is_some())
+                                    .map(|a| a.key.trim().to_lowercase())
+                                    .collect();
+                                unlocked_by_game.insert(game.id.clone(), baseline);
+                            }
+                            if !live_keys_by_game.contains_key(&game.id) {
+                                live_keys_by_game.insert(game.id.clone(), live_keys(achs));
+                            }
+                        }
+                    }
+
+                    // Snapshot previous state before updating AppState.
+                    let snapshot_previous_unlocked: HashSet<String> =
+                        unlocked_by_game.get(&game.id).cloned().unwrap_or_default();
+                    let snapshot_previous_live_keys: HashSet<String> =
+                        live_keys_by_game.get(&game.id).cloned().unwrap_or_default();
 
                     let (ui_achievements, ui_total) = {
                         let state = app_handle.state::<AppState>();
@@ -384,7 +406,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                                     let merged = merge_live_achievements(
                                         &stored.achievements,
                                         &achievements,
-                                        previous_live_keys,
+                                        &snapshot_previous_live_keys,
                                         &current_live_keys,
                                     );
                                     let total = merged.len() as u32;
@@ -407,7 +429,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                         }
                     }
 
-                    let _unlocked_count = true_current_unlocked.len() as u32;
+                    let previous_unlocked = &snapshot_previous_unlocked;
 
                     let newly_unlocked: Vec<Achievement> = ui_achievements
                         .iter()
@@ -508,7 +530,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                         }
                     }
 
-                    *previous_unlocked = true_current_unlocked;
+                    unlocked_by_game.insert(game.id.clone(), true_current_unlocked);
                     live_keys_by_game.insert(game.id.clone(), current_live_keys);
 
                     let updated_payload = AchievementsUpdatedPayload {
