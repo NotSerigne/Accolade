@@ -152,9 +152,10 @@ pub(crate) async fn enrich_games_with_steam(
                 source,
                 SourceType::Emulator(crate::achievements::models::Emulator::Steam)
             ) {
-                println!(
-                    "[DEBUG] Steam API error for AppID {}: {}. Keeping game but achievements might be missing.",
-                    steam_id, err
+                log::warn!(
+                    "[enrich] Steam API error for AppID {}: {}. Achievements may be missing.",
+                    steam_id,
+                    err
                 );
             }
         }
@@ -230,9 +231,11 @@ pub(crate) async fn enrich_games_with_steam(
             );
         }
 
-        println!(
-            "[DEBUG][enrich_games_with_steam] Successfully enriched {} (AppID: {}, {} achievements)",
-            game.name, steam_id, game.achievements_total
+        log::info!(
+            "[enrich] {} (AppID: {}) — {} achievements",
+            game.name,
+            steam_id,
+            game.achievements_total
         );
     }
 }

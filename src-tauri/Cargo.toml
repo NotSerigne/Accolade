@@ -2,9 +2,9 @@
 name = "Accolade"
 version = "1.0.4"
 description = "Accolade is a desktop app that brings achievements back to life in cracked games."
-authors = ["you"]
-license = ""
-repository = ""
+authors = ["NotSerigne"]
+license = "MIT"
+repository = "https://github.com/NotSerigne/Accolade"
 edition = "2021"
 rust-version = "1.77.2"
 

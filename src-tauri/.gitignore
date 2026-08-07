@@ -3,7 +3,7 @@ target/
 debug/
 **/*.rs.bk
 *.pdb
-Cargo.lock
+
 
 # Tauri generated output
 gen/

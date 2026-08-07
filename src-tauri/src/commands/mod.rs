@@ -130,7 +130,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>, app_handle: tauri::AppHa
 
     enrich_games_with_user_data(&mut games, &user_data);
 
-    println!("[DEBUG][get_all_games] Returning {} games", games.len());
+    log::debug!("[cmd] get_all_games returning {} games", games.len());
     games
 }
 #[tauri::command]
@@ -443,15 +443,16 @@ pub(crate) async fn sync_steam_metadata(
         effective_api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
     }
 
-    println!(
-        "[DEBUG][sync_steam_metadata] Start. steam_id='{}', language='{}', api_key_len={}, sgdb_key_len={}",
-        steam_id, language, effective_api_key.len(), sgdb_api_key.len()
+    log::info!(
+        "[sync] Start. steam_id='{}', language='{}', api_key_len={}, sgdb_key_len={}",
+        steam_id,
+        language,
+        effective_api_key.len(),
+        sgdb_api_key.len()
     );
 
     if effective_api_key.is_empty() {
-        println!(
-            "[DEBUG][sync_steam_metadata] CRITICAL: No Steam API key found in parameters or env."
-        );
+        log::warn!("[sync] No Steam API key found in parameters or env.");
     }
 
     {
@@ -487,10 +488,7 @@ pub(crate) async fn sync_steam_metadata(
             .map_err(|_| String::from("Impossible d'acceder a la liste des jeux"))?;
         gs.clone()
     };
-    println!(
-        "[DEBUG][sync_steam_metadata] Initial state has {} games",
-        cloned_games.len()
-    );
+    log::debug!("[sync] Initial state has {} games", cloned_games.len());
 
     let local_games = tauri::async_runtime::spawn_blocking(|| {
         let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
@@ -516,10 +514,7 @@ pub(crate) async fn sync_steam_metadata(
         }
     }
     if added_local > 0 {
-        println!(
-            "[DEBUG][sync_steam_metadata] Added {} new local cracked games",
-            added_local
-        );
+        log::info!("[sync] Added {} new local cracked games", added_local);
     }
 
     let mut added_steam_games = false;
@@ -530,7 +525,7 @@ pub(crate) async fn sync_steam_metadata(
             .filter(|s| !s.is_empty())
             .collect();
         for s_id in steam_ids {
-            println!("[DEBUG][sync_steam_metadata] Fetching games for {}", s_id);
+            log::info!("[sync] Fetching Steam library for {}", s_id);
 
             let mut all_owned = Vec::new();
 
@@ -560,8 +555,8 @@ pub(crate) async fn sync_steam_metadata(
                 }
             }
 
-            println!(
-                "[DEBUG][sync_steam_metadata] Found {} potential games for {}",
+            log::info!(
+                "[sync] Found {} potential games for {}",
                 all_owned.len(),
                 s_id
             );
@@ -594,10 +589,7 @@ pub(crate) async fn sync_steam_metadata(
                     added_steam_games = true;
                 }
             }
-            println!(
-                "[DEBUG][sync_steam_metadata] Added {} new Steam games for {}",
-                added_count, s_id
-            );
+            log::info!("[sync] Added {} new Steam games for {}", added_count, s_id);
         }
     }
 
@@ -609,7 +601,7 @@ pub(crate) async fn sync_steam_metadata(
 
     // RetroAchievements Sync
     if !ra_username.trim().is_empty() && !ra_api_key.trim().is_empty() {
-        println!("[DEBUG][sync_steam_metadata] Fetching RetroAchievements games");
+        log::info!("[sync] Fetching RetroAchievements games");
         let ra_provider =
             crate::achievements::providers::retroachievements::RetroAchievementsProvider::new(
                 ra_username.clone(),
@@ -618,10 +610,7 @@ pub(crate) async fn sync_steam_metadata(
         use crate::achievements::providers::AchievementProvider;
         match ra_provider.fetch_games().await {
             Ok(ra_games) => {
-                println!(
-                    "[DEBUG][sync_steam_metadata] Found {} RA games",
-                    ra_games.len()
-                );
+                log::info!("[sync] Found {} RetroAchievements games", ra_games.len());
                 for rg in ra_games {
                     if !existing_ids.contains(&rg.id) {
                         cloned_games.push(rg.clone());
@@ -629,13 +618,13 @@ pub(crate) async fn sync_steam_metadata(
                     }
                 }
             }
-            Err(e) => println!("[DEBUG][sync_steam_metadata] RA sync failed: {}", e),
+            Err(e) => log::warn!("[sync] RetroAchievements sync failed: {}", e),
         }
     }
 
     if !effective_api_key.is_empty() {
-        println!(
-            "[DEBUG][sync_steam_metadata] Enriching {} games with Steam metadata",
+        log::info!(
+            "[sync] Enriching {} games with Steam metadata",
             cloned_games.len()
         );
         let main_steam_id = steam_id.split(',').next().unwrap_or("").trim();
@@ -654,8 +643,8 @@ pub(crate) async fn sync_steam_metadata(
         std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default()
     };
     if !sgdb_key.is_empty() {
-        println!(
-            "[DEBUG][sync_steam_metadata] Enriching with SteamGridDB, key len: {}",
+        log::info!(
+            "[sync] Enriching with SteamGridDB (key len: {})",
             sgdb_key.len()
         );
         apply_steamgriddb_icons(&mut cloned_games, &sgdb_key).await;
@@ -675,16 +664,10 @@ pub(crate) async fn sync_steam_metadata(
             .lock()
             .map_err(|_| String::from("Impossible d'acceder a la liste des jeux"))?;
         *games = filtered_games.clone();
-        println!(
-            "[DEBUG][sync_steam_metadata] State updated with {} games",
-            games.len()
-        );
+        log::info!("[sync] State updated with {} games", games.len());
     }
 
-    println!(
-        "[DEBUG][sync_steam_metadata] Returning {} games",
-        filtered_games.len()
-    );
+    log::info!("[sync] Done — returning {} games", filtered_games.len());
     Ok(filtered_games)
 }
 

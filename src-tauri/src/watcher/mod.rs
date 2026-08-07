@@ -465,9 +465,11 @@ pub fn start(app_handle: tauri::AppHandle) {
 
                         let num_new = newly_unlocked.len();
                         for (idx, ach) in newly_unlocked.iter().enumerate() {
-                            println!(
-                                "[DEBUG][achievements] Nouveau succes debloque pour '{}' (ID {}): {}",
-                                display_name, game.id, ach.key
+                            log::info!(
+                                "[watcher] Achievement unlocked for '{}' (ID {}): {}",
+                                display_name,
+                                game.id,
+                                ach.key
                             );
 
                             let enriched = enriched_game_achievements.iter().find(|a| {

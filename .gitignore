@@ -33,12 +33,16 @@ src-tauri/gen/
 # OS
 .DS_Store
 Thumbs.db
+nul
 
-# Environment
+# Environment — never commit real secrets
 .env
 .env.local
 .env.*.local
+config.env
 !.env.example
 !.env.test
-.idea/
-.vscode
+
+# Tauri updater signing keys — keep private
+src-tauri/*.key
+src-tauri/*.key.pub

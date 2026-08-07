@@ -332,10 +332,7 @@ pub async fn fetch_player_achievements(
             }
         }
     } else if let Some(err) = resp.playerstats.error {
-        println!(
-            "[DEBUG][fetch_player_achievements] Steam API Error for AppID {}: {}",
-            app_id, err
-        );
+        log::warn!("[steam] API error for AppID {}: {}", app_id, err);
         return Err(err);
     }
 

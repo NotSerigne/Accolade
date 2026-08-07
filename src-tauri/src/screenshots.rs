@@ -62,7 +62,12 @@ fn is_hdr_enabled() -> bool {
                     for k in keys {
                         if let Ok(val) = sub.get_value::<u32, _>(k) {
                             if val == 1 {
-                                println!("[DEBUG] HDR detected via HKLM {} ({}={})", path, k, val);
+                                log::debug!(
+                                    "[screenshot] HDR detected via HKLM {} ({}={})",
+                                    path,
+                                    k,
+                                    val
+                                );
                                 return true;
                             }
                         }
@@ -84,9 +89,10 @@ fn is_hdr_enabled() -> bool {
         for k in keys {
             if let Ok(val) = key.get_value::<u32, _>(k) {
                 if val > 0 {
-                    println!(
-                        "[DEBUG] HDR detected via HKCU VideoSettings ({}={})",
-                        k, val
+                    log::debug!(
+                        "[screenshot] HDR detected via HKCU VideoSettings ({}={})",
+                        k,
+                        val
                     );
                     return true;
                 }
@@ -207,9 +213,10 @@ pub fn capture_screenshot<R: Runtime>(
     hdr_to_sdr: bool,
 ) -> Result<String, String> {
     let actual_hdr_fix = hdr_to_sdr && is_hdr_enabled();
-    println!(
-        "[DEBUG] Starting screenshot capture... (Setting HDR fix: {}, Actual HDR fix: {})",
-        hdr_to_sdr, actual_hdr_fix
+    log::info!(
+        "[screenshot] Starting capture (hdr_to_sdr={}, actual_hdr_fix={})",
+        hdr_to_sdr,
+        actual_hdr_fix
     );
 
     let now = SystemTime::now()
@@ -218,7 +225,7 @@ pub fn capture_screenshot<R: Runtime>(
         .as_secs();
 
     let dir = get_screenshots_dir(app_handle);
-    println!("[DEBUG] Screenshots directory: {:?}", dir);
+    log::debug!("[screenshot] Directory: {:?}", dir);
 
     let filename = match (game_id, achievement_key) {
         (Some(gid), Some(akey)) => format!("{}--{}--{}.png", gid, akey, now),
@@ -228,29 +235,29 @@ pub fn capture_screenshot<R: Runtime>(
 
     let mut path = dir.clone();
     path.push(&filename);
-    println!("[DEBUG] Saving to: {:?}", path);
+    log::debug!("[screenshot] Saving to: {:?}", path);
 
     #[cfg(target_os = "windows")]
     {
-        println!("[DEBUG] Attempting WGC capture for perfect HDR/SDR mapping...");
+        log::debug!("[screenshot] Attempting WGC capture...");
         match capture_with_wgc(path.clone()) {
             Ok(_) => {
-                println!("[DEBUG] WGC Screenshot saved successfully: {}", filename);
+                log::info!("[screenshot] WGC capture saved: {}", filename);
                 return Ok(filename);
             }
             Err(e) => {
-                println!("[ERROR] WGC Capture failed, falling back to legacy: {}", e);
+                log::warn!("[screenshot] WGC failed, falling back to legacy: {}", e);
             }
         }
     }
 
     let screens = Screen::all().map_err(|e| {
         let err = format!("Failed to get screens: {}", e);
-        println!("[ERROR] {}", err);
+        log::error!("[screenshot] {}", err);
         err
     })?;
 
-    println!("[DEBUG] Found {} screens", screens.len());
+    log::debug!("[screenshot] Found {} screens", screens.len());
 
     let screen = screens
         .iter()
@@ -258,10 +265,13 @@ pub fn capture_screenshot<R: Runtime>(
         .or(screens.first());
 
     if let Some(screen) = screen {
-        println!("[DEBUG] Capturing screen: {:?}", screen.display_info.id);
+        log::debug!(
+            "[screenshot] Capturing screen id={:?}",
+            screen.display_info.id
+        );
         let image = screen.capture().map_err(|e| {
             let err = format!("Capture failed: {}", e);
-            println!("[ERROR] {}", err);
+            log::error!("[screenshot] {}", err);
             err
         })?;
 
@@ -272,14 +282,14 @@ pub fn capture_screenshot<R: Runtime>(
             let clipping_ratio = analyze_clipping(&rgba_image);
             let needs_tonemap = clipping_ratio > 0.05;
 
-            println!(
-                "[DEBUG] HDR Analysis: {:.2}% bright pixels. Adaptive tone mapping: {}",
+            log::debug!(
+                "[screenshot] HDR analysis: {:.2}% bright pixels. Tone mapping: {}",
                 clipping_ratio * 100.0,
                 if needs_tonemap { "ACTIVE" } else { "INACTIVE" }
             );
 
             if needs_tonemap {
-                println!("[DEBUG] Applying Intelligent HDR to SDR conversion (ACES)...");
+                log::debug!("[screenshot] Applying ACES tone mapping...");
 
                 // Precompute LUT for performance
                 let mut lut = [0u8; 256];
@@ -361,20 +371,20 @@ pub fn capture_screenshot<R: Runtime>(
             )
             .map_err(|e| {
                 let err = format!("Encoding failed: {}", e);
-                println!("[ERROR] {}", err);
+                log::error!("[screenshot] {}", err);
                 err
             })?;
 
         fs::write(&path, buffer).map_err(|e| {
             let err = format!("FS write failed: {}", e);
-            println!("[ERROR] {}", err);
+            log::error!("[screenshot] {}", err);
             err
         })?;
 
-        println!("[DEBUG] Screenshot saved successfully: {}", filename);
+        log::info!("[screenshot] Saved: {}", filename);
         Ok(filename)
     } else {
-        println!("[ERROR] No screen found");
+        log::error!("[screenshot] No screen found");
         Err("No screen found".to_string())
     }
 }
