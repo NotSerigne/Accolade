@@ -118,7 +118,7 @@
 
 <div class="compare-page">
 	<header class="page-header">
-		<h1>Comparer les Profils</h1>
+		<h1>{$i18n.t('compare.title')}</h1>
 		<p class="subtitle">{$i18n.t('compare.subtitle')}</p>
 
 		<div class="header-actions">
