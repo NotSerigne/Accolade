@@ -3,7 +3,7 @@
 
   # Accolade
 
-  **Donnez une seconde vie à vos succès.**
+  **Give your achievements a second life.**
 
   [![Latest Release](https://img.shields.io/github/v/release/NotSerigne/Accolade?style=flat-square&color=c8a96e&label=version)](https://github.com/NotSerigne/Accolade/releases/latest)
   [![Downloads](https://img.shields.io/github/downloads/NotSerigne/Accolade/total?style=flat-square&color=c8a96e)](https://github.com/NotSerigne/Accolade/releases)
@@ -12,41 +12,61 @@
   [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
   [![Rust](https://img.shields.io/badge/Rust-2021-orange?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
-  _Accolade est une application Windows qui synchronise et affiche vos succès issus de jeux crackés, avec des notifications en overlay style PS5/Steam et une interface moderne._
+  _A Windows app that tracks and displays your achievements from emulated games — with real-time overlay notifications, stats, and a clean modern UI._
 
-  [Télécharger](#-télécharger) • [Fonctionnalités](#-fonctionnalités) • [Émulateurs supportés](#-émulateurs-supportés) • [Configuration](#-configuration) • [Contribuer](#-contribuer)
+  [Download](#-download) • [Features](#-features) • [Supported Emulators](#-supported-emulators) • [Setup](#-setup) • [Contributing](#-contributing)
 
 </div>
 
 ---
 
-## ⬇️ Télécharger
+## ⬇️ Download
 
-Rendez-vous sur la page [**Releases**](https://github.com/NotSerigne/Accolade/releases/latest) et téléchargez l'installateur `.msi` ou le setup `.exe`.
+Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/latest) page and grab the `.msi` installer or the `.exe` setup.
 
-> **Prérequis** : Windows 10 / 11 (64-bit). WebView2 est généralement déjà présent ; si ce n'est pas le cas, Windows vous proposera de l'installer automatiquement.
+> **Requirements**: Windows 10 / 11 (64-bit). WebView2 is usually already installed; if not, Windows will prompt you automatically.
 
----
+## ✨ Features
 
-## ✨ Fonctionnalités
-
-- 🔍 **Scan automatique** — Détection des fichiers de succès pour tous les émulateurs supportés.
-- 🔔 **Overlay temps réel** — Notification en plein jeu dès qu'un succès est débloqué, sans alt-tab.
-- 🖼️ **Métadonnées Steam** — Noms, descriptions, icônes et rareté récupérés depuis l'API Steam.
-- 🎨 **Personnalisation** — Thème clair / sombre / système, couleur d'accentuation, sons de notification (PS4, PS5, Xbox, Steam…).
-- 📊 **Statistiques & Journal** — Vue d'ensemble de votre progression, favoris, tags et objectifs personnels.
-- 📸 **Screenshots automatiques** — Capture d'écran déclenchée à chaque succès débloqué, avec raccourci configurable.
-- 🌍 **Multilingue** — Interface disponible en FR, EN, ES, DE, IT.
-- 🚀 **Démarrage avec Windows** — Mode silencieux dans la barre des tâches.
-- ⚡ **Ultra léger** — Cœur Rust via Tauri v2, ~10 Mo en RAM au repos.
+- 🔍 **Auto-detection** — Automatically scans and parses achievements for all supported emulators and Steam.
+- 🔔 **Real-time overlay** — In-game notifications the moment an achievement unlocks, no alt-tab needed.
+- 🖼️ **Steam metadata** — Names, descriptions, icons and rarity pulled straight from the Steam API.
+- 🎨 **Fully customizable** — Light / Dark / System theme, accent color, notification sounds.
+- 📊 **Stats & journal** — Progress overview, favorites, tags and personal objectives.
+- 📸 **Auto screenshots** — Captures a screenshot on every achievement unlock.
+- 🌍 **Multi-language** — UI available in EN, FR, ES, DE, IT.
+- 🚀 **Launch with Windows** — Silent tray mode on startup.
+- ⚡ **Lightweight** — Rust core via Tauri v2.
 
 ---
 
-## 🕹️ Émulateurs Supportés
+## 📸 Screenshots
 
-| Émulateur | Emplacement par défaut |
+<p align="center">
+  <img src="docs/screenshots/unlock-demo.gif" width="600">
+</p>
+
+<table>
+<tr>
+<td><img src="docs/screenshots/dashboard.png" width="400"></td>
+<td><img src="docs/screenshots/gamepage.png" width="400"></td>
+</tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+<img src="docs/screenshots/theme.png" width="400">
+<img src="docs/screenshots/language.png" width="400">
+<img src="docs/screenshots/screenshot.png" width="400">
+</details>
+  
+---
+
+## 🕹️ Supported Emulators
+
+| Emulator | Default location |
 | :--- | :--- |
-| **Goldberg** | `%APPDATA%\Goldberg SteamEmu Saves` ou `%APPDATA%\GSE Saves` |
+| **Goldberg** | `%APPDATA%\Goldberg SteamEmu Saves` or `%APPDATA%\GSE Saves` |
 | **Empress** | `%APPDATA%\Empress-Emulator` |
 | **CODEX** | `%APPDATA%\Steam\CODEX` |
 | **OnlineFix** | `%PUBLIC%\Documents\OnlineFix` |
@@ -54,57 +74,76 @@ Rendez-vous sur la page [**Releases**](https://github.com/NotSerigne/Accolade/re
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Setup
 
-Au premier lancement, l'assistant de configuration vous guidera. Vous aurez besoin de :
+On first launch, a setup wizard will guide you through the configuration. You'll need:
 
-| Paramètre | Obligatoire | Comment l'obtenir |
+| Setting | Required | How to get it |
 | :--- | :---: | :--- |
-| **Steam ID** (64-bit) | ✅ | [steamid.io](https://steamid.io) ou votre profil Steam → *Copier l'URL du profil* |
-| **Steam API Key** | ✅ | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) (compte Steam requis) |
-| **SteamGridDB API Key** | ⬜ | [steamgriddb.com/profile/preferences/api](https://www.steamgriddb.com/profile/preferences/api) — améliore la qualité des icônes |
+| **Steam ID** (64-bit) | ✅ | [steamid.io](https://steamid.io) or your Steam profile URL |
+| **Steam API Key** | ✅ | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
+| **SteamGridDB API Key** | ⬜ | [steamgriddb.com/profile/preferences/api](https://www.steamgriddb.com/profile/preferences/api) — improves icon quality |
 
-> **Dossiers de jeux** : ajoutez les dossiers racines où se trouvent vos jeux. Accolade cherchera automatiquement les fichiers de succès dans les emplacements connus des émulateurs.
+> **Game folders**: add the root folders where your games are installed. Accolade will automatically look for achievement files in all known emulator locations.
 
 ---
 
-## 🛠️ Build depuis les sources
+## 🛠️ Build from source
 
-Vous avez besoin de [Node.js 20+](https://nodejs.org/), [Rust](https://www.rust-lang.org/tools/install) et [Tauri CLI](https://tauri.app/start/prerequisites/).
+You'll need [Node.js 20+](https://nodejs.org/), [Rust](https://www.rust-lang.org/tools/install) and the [Tauri CLI](https://tauri.app/start/prerequisites/).
 
 ```bash
 git clone https://github.com/NotSerigne/Accolade.git
 cd Accolade
 npm install
 
-# Développement (hot-reload)
+# Development (hot-reload)
 npm run tauri dev
 
-# Build release (génère l'installateur dans src-tauri/target/release/bundle/)
+# Release build (installer output in src-tauri/target/release/bundle/)
 npm run tauri build
 ```
 
 ---
 
-## 🤝 Contribuer
+## 🤝 Contributing
 
-Les contributions sont les bienvenues ! Pour signaler un bug ou proposer une fonctionnalité, ouvrez une [Issue](https://github.com/NotSerigne/Accolade/issues/new/choose) en utilisant le template adapté.
+Contributions are welcome! To report a bug or suggest a feature, open an [Issue](https://github.com/NotSerigne/Accolade/issues/new/choose) using the appropriate template.
 
-Pour soumettre du code :
+To submit code:
 
-1. Fork le projet
-2. Créez une branche (`git checkout -b feature/ma-feature`)
-3. Commitez vos changements
-4. Ouvrez une Pull Request
+1. Fork the project
+2. Create a branch (`git checkout -b feature/my-feature`)
+3. Commit your changes
+4. Open a Pull Request
+
+> 🇫🇷 The developer is French — feel free to open issues or discussions in French too.
 
 ---
 
-## 📄 Licence
+## 📔Legal
+⚠️ The software offered here is solely for informational purposes and does not facilitate or promote unauthorized access to copyrighted content.
 
-Distribué sous licence [MIT](LICENSE). © 2025 NotSerigne.
+Use of the software given here is at your own risk. There is no explicit or implicit warranty; this is offered just as is.
+The authors and firm disclaim all liability for any harm that may occur to you or your computer as a result of installing or using the free software and its accompanying documentation on this website.
+And for anything that might happen as a result of using or not being able to use the resources on this website.
+
+No cracking scene groups are connected to or involved with the software offered here.
+
+Software provided here is not affiliated nor associated with Steam, © Valve Corporation, Uplay, © Ubisoft and data from theirs API is provided as is without any express or implied warranty.
+
+The software offered here is not connected to Steam or copyright Valve Corporation, and information from their API is given without any kind of explicit or implicit guaranty.
+
+Copyright and other trademarks belong to their respective owners. The use of third-party resources is not meant to violate any copyright or trademark. The materials of this project are protected by copyright, unless otherwise noted.
+
+---
+
+## 📄 License
+
+Distributed under the [MIT License](LICENSE). © 2025 NotSerigne.
 
 ---
 
 <div align="center">
-  <sub>Accolade n'est pas affilié à Valve, Steam ou tout autre éditeur de jeux vidéo.</sub>
+  <sub>Accolade is not affiliated with Valve, Steam, or any game publisher.</sub>
 </div>

@@ -190,7 +190,7 @@
 			class="game-slot nav-btn"
 			class:active={isFavoritesActive}
 			onclick={goFavorites}
-			title={$i18n.t('sidebar.favorites') || 'Favoris'}
+			title={$i18n.t('sidebar.favorites')}
 		>
 			<svg
 				width="20"
@@ -213,7 +213,7 @@
 			class="game-slot nav-btn"
 			class:active={isCollectionsActive}
 			onclick={goCollections}
-			title={$i18n.t('sidebar.collections') || 'Collections'}
+			title={$i18n.t('sidebar.collections')}
 		>
 			<svg
 				width="20"

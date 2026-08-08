@@ -197,7 +197,7 @@
 			</div>
 
 			<div class="filter-item">
-				<label for="sort-by">Sort</label>
+				<label for="sort-by">{$i18n.t('games.sort.label')}</label>
 				<div class="sort-controls">
 					<select id="sort-by" bind:value={$gameFilters.sortBy} class="filter-select">
 						<option value="name">{$i18n.t('games.sort.name')}</option>
@@ -205,7 +205,7 @@
 						<option value="completion">{$i18n.t('games.sort.completion')}</option>
 						<option value="exe_name">{$i18n.t('games.sort.exe')}</option>
 					</select>
-					<button class="sort-order-btn" onclick={toggleSortOrder} title="Change order">
+					<button class="sort-order-btn" onclick={toggleSortOrder} title={$i18n.t('games.sort.changeOrder')}>
 						{$gameFilters.sortOrder === 'asc' ? '↑' : '↓'}
 					</button>
 				</div>
@@ -229,7 +229,7 @@
 				class="view-btn"
 				class:active={$gameFilters.displayMode === 'grid'}
 				onclick={() => ($gameFilters.displayMode = 'grid')}
-				title="Grid view"
+				title={$i18n.t('games.view.grid')}
 			>
 				⊞
 			</button>
@@ -237,7 +237,7 @@
 				class="view-btn"
 				class:active={$gameFilters.displayMode === 'list'}
 				onclick={() => ($gameFilters.displayMode = 'list')}
-				title="List view"
+				title={$i18n.t('games.view.list')}
 			>
 				≡
 			</button>
@@ -245,7 +245,7 @@
 				class="view-btn"
 				class:active={$gameFilters.displayMode === 'timeline'}
 				onclick={() => ($gameFilters.displayMode = 'timeline')}
-				title="Timeline view"
+				title={$i18n.t('games.view.timeline')}
 			>
 				◆
 			</button>

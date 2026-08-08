@@ -2,6 +2,7 @@
 	import type { Game } from '$lib/stores/Games.js';
 	import type { SteamUser } from '$lib/stores/user.js';
 	import { calculateAdvancedStats } from '$lib/stores/selectedGame.js';
+	import { i18n } from '$lib/stores/i18n.js';
 
 	interface ProfileData {
 		user?: SteamUser;
@@ -118,7 +119,7 @@
 <div class="compare-page">
 	<header class="page-header">
 		<h1>Comparer les Profils</h1>
-		<p class="subtitle">Importez vos fichiers JSON pour comparer les bibliothèques</p>
+		<p class="subtitle">{$i18n.t('compare.subtitle')}</p>
 
 		<div class="header-actions">
 			<label class="upload-btn">
@@ -135,7 +136,7 @@
 						points="17 8 12 3 7 8"
 					/><line x1="12" y1="3" x2="12" y2="15" /></svg
 				>
-				Sélectionner des profils (.json)
+				{$i18n.t('compare.selectProfiles')}
 				<input
 					type="file"
 					accept=".json"
@@ -160,14 +161,14 @@
 						class="user-avatar"
 					/>
 					<div class="user-meta">
-						<span class="user-name">{profile1.user?.personaname || 'Profil 1'}</span>
+						<span class="user-name">{profile1.user?.personaname || $i18n.t('compare.defaultProfile1')}</span>
 						<span class="user-games">{profile1.games.length} jeux</span>
 					</div>
 				</div>
 			{:else}
 				<div class="placeholder-card">
 					<div class="icon">📁</div>
-					<span>Profil 1 non chargé</span>
+					<span>{$i18n.t('compare.profile1NotLoaded')}</span>
 				</div>
 			{/if}
 		</div>
@@ -184,14 +185,14 @@
 						class="user-avatar"
 					/>
 					<div class="user-meta">
-						<span class="user-name">{profile2.user?.personaname || 'Profil 2'}</span>
+						<span class="user-name">{profile2.user?.personaname || $i18n.t('compare.defaultProfile2')}</span>
 						<span class="user-games">{profile2.games.length} jeux</span>
 					</div>
 				</div>
 			{:else}
 				<div class="placeholder-card">
 					<div class="icon">📁</div>
-					<span>Profil 2 non chargé</span>
+					<span>{$i18n.t('compare.profile2NotLoaded')}</span>
 				</div>
 			{/if}
 		</div>
@@ -204,20 +205,20 @@
 		<div class="stats-ribbon">
 			<div class="ribbon-item">
 				<div class="val">{statsSummary?.comp1}% vs {statsSummary?.comp2}%</div>
-				<div class="lbl">Complétion Moyenne</div>
+				<div class="lbl">{$i18n.t('compare.avgCompletion')}</div>
 			</div>
 			<div class="ribbon-item">
 				<div class="val">{statsSummary?.commonCount}</div>
-				<div class="lbl">Jeux Communs</div>
+				<div class="lbl">{$i18n.t('compare.commonGames')}</div>
 			</div>
-			<button class="reset-btn" onclick={reset}>Réinitialiser</button>
+			<button class="reset-btn" onclick={reset}>{$i18n.t('compare.reset')}</button>
 		</div>
 
 		<section class="fun-stats">
-			<h2>Duel Statistique</h2>
+			<h2>{$i18n.t('compare.statDuel')}</h2>
 			<div class="fun-stats-grid">
 				<div class="fun-card">
-					<div class="fun-label">Total succès débloqués</div>
+					<div class="fun-label">{$i18n.t('compare.totalUnlocked')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.totalUnlocked ?? '?'}</span>
 						<span class="v-vs">vs</span>
@@ -225,7 +226,7 @@
 					</div>
 				</div>
 				<div class="fun-card">
-					<div class="fun-label">Record en un jour</div>
+					<div class="fun-label">{$i18n.t('compare.recordDay')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.maxAchievementsInDay ?? '?'}</span>
 						<span class="v-vs">vs</span>
@@ -233,7 +234,7 @@
 					</div>
 				</div>
 				<div class="fun-card">
-					<div class="fun-label">Record en une semaine</div>
+					<div class="fun-label">{$i18n.t('compare.recordWeek')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.maxAchievementsInWeek ?? '?'}</span>
 						<span class="v-vs">vs</span>
@@ -241,7 +242,7 @@
 					</div>
 				</div>
 				<div class="fun-card">
-					<div class="fun-label">Succès restants</div>
+					<div class="fun-label">{$i18n.t('compare.remaining')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.totalRemaining ?? '?'}</span>
 						<span class="v-vs">vs</span>
@@ -249,14 +250,14 @@
 					</div>
 				</div>
 				<div class="fun-card rarest">
-					<div class="fun-label">Le plus rare débloqué</div>
+					<div class="fun-label">{$i18n.t('compare.rarestUnlocked')}</div>
 					<div class="fun-desc">
 						<div class="d1">
 							{s1?.rarestAchievement
 								? `${s1.rarestAchievement.name} (${s1.rarestAchievement.pct}%)`
 								: 'N/A'}
 						</div>
-						<div class="d-vs">contre</div>
+						<div class="d-vs">{$i18n.t('compare.against')}</div>
 						<div class="d2">
 							{s2?.rarestAchievement
 								? `${s2.rarestAchievement.name} (${s2.rarestAchievement.pct}%)`
@@ -305,7 +306,7 @@
 			</section>
 		{:else}
 			<div class="empty-state">
-				<p>Aucun jeu en commun détecté entre ces deux profils.</p>
+				<p>{$i18n.t('compare.noCommonGames')}</p>
 			</div>
 		{/if}
 	{:else}
@@ -321,7 +322,7 @@
 					d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
 				/><path d="M2 12h20" /></svg
 			>
-			<p>Veuillez importer deux fichiers d'export pour commencer la comparaison.</p>
+			<p>{$i18n.t('compare.importTwoFiles')}</p>
 		</div>
 	{/if}
 </div>

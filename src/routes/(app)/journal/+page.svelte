@@ -155,11 +155,19 @@
 							<div class="event-info">
 								{#if event.type === 'achievement'}
 									<div class="achievement-row">
-										<img
-											src={event.achievement.icon}
-											alt={event.achievement.name}
-											class="achievement-icon"
-										/>
+										{#if event.achievement.icon}
+											<img
+												src={event.achievement.icon}
+												alt={event.achievement.name}
+												class="achievement-icon"
+												onerror={(e) => {
+													const t = e.target as HTMLImageElement;
+													t.style.display = 'none';
+												}}
+											/>
+										{:else}
+											<div class="achievement-icon achievement-icon-placeholder">🏆</div>
+										{/if}
 										<div class="text">
 											<span class="name">{event.achievement.name}</span>
 											<span class="game">{event.game.name}</span>
@@ -320,6 +328,14 @@
 		width: 40px;
 		height: 40px;
 		border-radius: 8px;
+	}
+	.achievement-icon-placeholder {
+		background: rgba(200, 169, 110, 0.1);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 18px;
+		flex-shrink: 0;
 	}
 	.trophy-icon {
 		width: 40px;

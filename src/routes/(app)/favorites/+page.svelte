@@ -57,10 +57,10 @@
 
 <main class="favorites-page">
 	<header class="page-header">
-		<h1>♥️ {$i18n.t('favorites.title') || 'Mes Favoris'}</h1>
+		<h1>♥️ {$i18n.t('favorites.title')}</h1>
 		<p class="subtitle">
 			{favoriteGames.length}
-			{$i18n.t('favorites.count') || 'jeux marqués comme favoris'}
+			{$i18n.t('favorites.count')}
 		</p>
 	</header>
 
@@ -110,10 +110,10 @@
 	{:else}
 		<div class="empty-state">
 			<div class="empty-icon">♥️</div>
-			<h2>{$i18n.t('favorites.emptyTitle') || 'Aucun favori pour le moment'}</h2>
-			<p>{$i18n.t('favorites.emptyText') || 'Marquez vos jeux préférés pour les retrouver ici.'}</p>
+			<h2>{$i18n.t('favorites.emptyTitle')}</h2>
+			<p>{$i18n.t('favorites.emptyText')}</p>
 			<button class="browse-btn" onclick={() => goto(resolve('/'))}>
-				{$i18n.t('favorites.browseGames') || 'Parcourir les jeux'}
+				{$i18n.t('favorites.browseGames')}
 			</button>
 		</div>
 	{/if}

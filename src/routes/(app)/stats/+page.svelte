@@ -2,6 +2,8 @@
 	// src/routes/(app)/stats/+page.svelte
 	import { games, totalUnlockedAchievements, type Achievement } from '$lib/stores/Games.js';
 	import { SvelteDate, SvelteMap } from 'svelte/reactivity';
+	import { get } from 'svelte/store';
+	import { i18n } from '$lib/stores/i18n.js';
 
 	let activeTab = $state('overview');
 
@@ -56,7 +58,7 @@
 	oneYearAgo.setFullYear(today.getFullYear() - 1);
 
 	function formatDate(date: Date | SvelteDate) {
-		return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+		return date.toLocaleDateString(get(i18n).locale, { day: 'numeric', month: 'short', year: 'numeric' });
 	}
 
 	let heatmapData = $derived.by(() => {
@@ -138,20 +140,20 @@
 		return grid;
 	});
 
-	const monthLabels = [
-		'Jan',
-		'Fév',
-		'Mar',
-		'Avr',
-		'Mai',
-		'Juin',
-		'Juil',
-		'Août',
-		'Sep',
-		'Oct',
-		'Nov',
-		'Déc'
-	];
+	let monthLabels = $derived([
+		$i18n.t('stats.month.jan'),
+		$i18n.t('stats.month.feb'),
+		$i18n.t('stats.month.mar'),
+		$i18n.t('stats.month.apr'),
+		$i18n.t('stats.month.may'),
+		$i18n.t('stats.month.jun'),
+		$i18n.t('stats.month.jul'),
+		$i18n.t('stats.month.aug'),
+		$i18n.t('stats.month.sep'),
+		$i18n.t('stats.month.oct'),
+		$i18n.t('stats.month.nov'),
+		$i18n.t('stats.month.dec')
+	]);
 
 	let heatmapMonths = $derived.by(() => {
 		try {
@@ -181,15 +183,15 @@
 	let timeframeLabel = $derived.by(() => {
 		switch (cumulativeTimeframe) {
 			case '1y':
-				return 'Dernière année';
+				return $i18n.t('stats.lastYear');
 			case '6m':
-				return '6 derniers mois';
+				return $i18n.t('stats.last6Months');
 			case '1m':
-				return 'Dernier mois';
+				return $i18n.t('stats.lastMonth');
 			case '1w':
-				return 'Dernière semaine';
+				return $i18n.t('stats.lastWeek');
 			default:
-				return 'Historique complet';
+				return $i18n.t('stats.fullHistory');
 		}
 	});
 
@@ -386,10 +388,12 @@
 				count: periodUnlocked,
 				label:
 					unit === 'day'
-						? start.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+						? start.toLocaleDateString($i18n.locale, { day: 'numeric', month: 'short' })
 						: unit === 'month'
-							? start.toLocaleDateString('fr-FR', { month: 'short' })
-							: `Sem. ${start.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}`
+							? start.toLocaleDateString($i18n.locale, { month: 'short' })
+							: $i18n.t('stats.weekAbbrev', {
+									date: start.toLocaleDateString($i18n.locale, { day: 'numeric', month: 'short' })
+								})
 			});
 		}
 
@@ -473,7 +477,7 @@
 						<li>• {item}</li>
 					{/each}
 					{#if tooltip.list.length > 5}
-						<li class="more">+{tooltip.list.length - 5} autres</li>
+						<li class="more">{$i18n.t('stats.andMore', { count: tooltip.list.length - 5 })}</li>
 					{/if}
 				</ul>
 			{/if}
@@ -482,7 +486,7 @@
 
 	<header class="stats-header">
 		<div class="header-left">
-			<h1>Statistiques</h1>
+			<h1>{$i18n.t('stats.title')}</h1>
 			<div class="tabs">
 				<button
 					type="button"
@@ -492,7 +496,7 @@
 						activeTab = 'overview';
 					}}
 				>
-					Vue d'ensemble
+					{$i18n.t('stats.tabOverview')}
 				</button>
 				<button
 					type="button"
@@ -502,7 +506,7 @@
 						activeTab = 'activity';
 					}}
 				>
-					Activité
+					{$i18n.t('stats.tabActivity')}
 				</button>
 			</div>
 		</div>
@@ -527,7 +531,7 @@
 						>
 					</div>
 					<div class="card-info">
-						<span class="label">JEUX DÉTECTÉS</span>
+						<span class="label">{$i18n.t('stats.gamesDetected')}</span>
 						<span class="value">{$games.length}</span>
 					</div>
 				</div>
@@ -547,9 +551,9 @@
 						>
 					</div>
 					<div class="card-info">
-						<span class="label">SUCCÈS DÉBLOQUÉS</span>
+						<span class="label">{$i18n.t('stats.achievementsUnlocked')}</span>
 						<span class="value">{$totalUnlockedAchievements}</span>
-						<span class="sub">sur {totalPossibleAchievements}</span>
+						<span class="sub">{$i18n.t('stats.outOf', { count: totalPossibleAchievements })}</span>
 					</div>
 				</div>
 
@@ -566,9 +570,9 @@
 						>
 					</div>
 					<div class="card-info">
-						<span class="label">TAUX DE COMPLÉTION</span>
+						<span class="label">{$i18n.t('stats.completionRate')}</span>
 						<span class="value">{globalCompletionRate}%</span>
-						<span class="sub">moyenne globale</span>
+						<span class="sub">{$i18n.t('stats.globalAverage')}</span>
 					</div>
 				</div>
 
@@ -587,17 +591,17 @@
 						>
 					</div>
 					<div class="card-info">
-						<span class="label">SUCCÈS RESTANTS</span>
+						<span class="label">{$i18n.t('stats.achievementsRemaining')}</span>
 						<span class="value">{remainingAchievements}</span>
-						<span class="sub">à débloquer</span>
+						<span class="sub">{$i18n.t('stats.toUnlock')}</span>
 					</div>
 				</div>
 
 				<!-- Main Grid Row -->
 				<div class="card top-games">
 					<div class="card-header">
-						<h2>Top jeux par progression</h2>
-						<span class="count">{$games.length} jeux</span>
+						<h2>{$i18n.t('stats.topGamesByProgress')}</h2>
+						<span class="count">{$i18n.t('stats.gamesCount', { count: $games.length })}</span>
 					</div>
 					<div class="games-progress-list">
 						{#each topGames as game (game.steam_id)}
@@ -621,23 +625,23 @@
 
 				<div class="side-column">
 					<div class="card global-progression">
-						<h2>PROGRESSION GLOBALE</h2>
+						<h2>{$i18n.t('stats.globalProgression')}</h2>
 						<div class="donut-wrap">
 							<div class="donut" style="--pct: {globalCompletionRate}">
 								<div class="donut-inner">
 									<span class="donut-val">{globalCompletionRate}%</span>
-									<span class="donut-label">complétion</span>
+									<span class="donut-label">{$i18n.t('stats.completionLabel')}</span>
 								</div>
 							</div>
 						</div>
 						<div class="unlocked-count">
 							<span class="val">{$totalUnlockedAchievements} / {totalPossibleAchievements}</span>
-							<span class="lbl">succès débloqués</span>
+							<span class="lbl">{$i18n.t('stats.unlockedAchievementsLabel')}</span>
 						</div>
 					</div>
 
 					<div class="card podium">
-						<h2>PODIUM</h2>
+						<h2>{$i18n.t('stats.podium')}</h2>
 						<div class="podium-list">
 							{#each podium as game, i (game.steam_id)}
 								<div class="podium-item">
@@ -658,11 +662,22 @@
 								fill="none"
 								stroke="currentColor"
 								stroke-width="2"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg
-							> SUCCÈS LE PLUS RARE</span
+							> {$i18n.t('stats.rarestAchievement')}</span
 						>
 						{#if rarestAchievement}
 							<div class="rarity-item">
-								<img src={rarestAchievement.icon} alt={rarestAchievement.name} />
+								{#if rarestAchievement.icon}
+									<img
+										src={rarestAchievement.icon}
+										alt={rarestAchievement.name}
+										onerror={(e) => {
+											const t = e.target as HTMLImageElement;
+											t.style.display = 'none';
+										}}
+									/>
+								{:else}
+									<div class="rarity-icon-placeholder">🏆</div>
+								{/if}
 								<div class="info">
 									<span class="name">{rarestAchievement.name}</span>
 									<span class="game">{rarestAchievement.gameName}</span>
@@ -670,7 +685,7 @@
 								<span class="rarity-badge">{rarestAchievement.completionpercentage}%</span>
 							</div>
 						{:else}
-							<p class="empty">Aucun succès</p>
+							<p class="empty">{$i18n.t('stats.noAchievement')}</p>
 						{/if}
 					</div>
 
@@ -683,11 +698,11 @@
 								fill="none"
 								stroke="currentColor"
 								stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-							> MEILLEURE SEMAINE</span
+							> {$i18n.t('stats.bestWeek')}</span
 						>
 						<div class="best-week-val">
 							<span class="val">{bestWeek.count}</span>
-							<span class="lbl">succès en une semaine</span>
+							<span class="lbl">{$i18n.t('stats.achievementsInAWeek')}</span>
 						</div>
 					</div>
 				</div>
@@ -696,16 +711,18 @@
 			<section class="activity-view">
 				<div class="card heatmap-card">
 					<div class="card-header">
-						<h2>Activité</h2>
-						<span class="sub">{$totalUnlockedAchievements} succès sur 52 semaines</span>
+						<h2>{$i18n.t('stats.tabActivity')}</h2>
+						<span class="sub"
+							>{$i18n.t('stats.achievementsOver52Weeks', { count: $totalUnlockedAchievements })}</span
+						>
 					</div>
 					<div class="heatmap-container">
 						<div class="heatmap-wrapper">
 							<div class="heatmap-y-labels">
-								<span class="day-label">Lun</span>
-								<span class="day-label">Mer</span>
-								<span class="day-label">Ven</span>
-								<span class="day-label">Dim</span>
+								<span class="day-label">{$i18n.t('stats.dayMon')}</span>
+								<span class="day-label">{$i18n.t('stats.dayWed')}</span>
+								<span class="day-label">{$i18n.t('stats.dayFri')}</span>
+								<span class="day-label">{$i18n.t('stats.daySun')}</span>
 							</div>
 							<div class="heatmap-scroll-area">
 								<div class="heatmap-months">
@@ -721,7 +738,7 @@
 													class="heatmap-cell"
 													role="gridcell"
 													tabindex="-1"
-													aria-label="Case d'activité"
+													aria-label={$i18n.t('stats.activityCellAriaLabel')}
 													class:lvl1={cell.count > 0 && cell.count <= 1}
 													class:lvl2={cell.count > 1 && cell.count <= 3}
 													class:lvl3={cell.count > 3 && cell.count <= 6}
@@ -731,12 +748,12 @@
 													onmouseenter={(e) =>
 														showTooltip(
 															e,
-															cell.date.toLocaleDateString('fr-FR', {
+															cell.date.toLocaleDateString($i18n.locale, {
 																day: 'numeric',
 																month: 'long',
 																year: 'numeric'
 															}),
-															`${cell.count} succès`,
+															$i18n.t('stats.achievementsCount', { count: cell.count }),
 															'',
 															cell.achievements.map((a) => a.name)
 														)}
@@ -749,14 +766,14 @@
 							</div>
 						</div>
 						<div class="heatmap-legend">
-							<span>Moins</span>
+							<span>{$i18n.t('stats.less')}</span>
 							<div class="heatmap-cell"></div>
 							<div class="heatmap-cell lvl1"></div>
 							<div class="heatmap-cell lvl2"></div>
 							<div class="heatmap-cell lvl3"></div>
 							<div class="heatmap-cell lvl4"></div>
 							<div class="heatmap-cell lvl5"></div>
-							<span>Plus</span>
+							<span>{$i18n.t('stats.more')}</span>
 						</div>
 					</div>
 				</div>
@@ -765,13 +782,13 @@
 					<div class="card chart-card">
 						<div class="chart-header-row">
 							<div class="title-group">
-								<h2>Progression cumulée</h2>
+								<h2>{$i18n.t('stats.cumulativeProgress')}</h2>
 								<p class="sub">{timeframeLabel}</p>
 							</div>
 							<div class="chart-nav-group">
 								{#if cumulativeTimeframe !== 'all'}
 									<div class="window-nav">
-										<button onclick={() => currentWindowOffset++} aria-label="Précédent">
+										<button onclick={() => currentWindowOffset++} aria-label={$i18n.t('stats.previous')}>
 											<svg
 												width="14"
 												height="14"
@@ -784,7 +801,7 @@
 										<button
 											onclick={() => (currentWindowOffset = Math.max(0, currentWindowOffset - 1))}
 											disabled={currentWindowOffset === 0}
-											aria-label="Suivant"
+											aria-label={$i18n.t('stats.next')}
 										>
 											<svg
 												width="14"
@@ -803,28 +820,28 @@
 										onclick={() => {
 											cumulativeTimeframe = 'all';
 											currentWindowOffset = 0;
-										}}>Tout</button
+									}}>{$i18n.t('stats.all')}</button
 									>
 									<button
 										class:active={cumulativeTimeframe === '1y'}
 										onclick={() => {
 											cumulativeTimeframe = '1y';
 											currentWindowOffset = 0;
-										}}>An</button
+										}}>{$i18n.t('stats.year')}</button
 									>
 									<button
 										class:active={cumulativeTimeframe === '1m'}
 										onclick={() => {
 											cumulativeTimeframe = '1m';
 											currentWindowOffset = 0;
-										}}>Mois</button
+										}}>{$i18n.t('stats.month')}</button
 									>
 									<button
 										class:active={cumulativeTimeframe === '1w'}
 										onclick={() => {
 											cumulativeTimeframe = '1w';
 											currentWindowOffset = 0;
-										}}>Sem</button
+										}}>{$i18n.t('stats.week')}</button
 									>
 								</div>
 							</div>
@@ -864,37 +881,37 @@
 											fill="var(--accent, #c8a96e)"
 											class="chart-point"
 											role="img"
-											aria-label="Point de données"
+											aria-label={$i18n.t('stats.dataPoint')}
 											onmouseenter={(e) =>
 												showTooltip(
 													e,
-													p.date.toLocaleDateString('fr-FR', {
+													p.date.toLocaleDateString($i18n.locale, {
 														day: 'numeric',
 														month: 'short',
 														year: 'numeric',
 														hour: '2-digit',
 														minute: '2-digit'
 													}),
-													`${p.count} succès cumulés`
+													$i18n.t('stats.cumulativeAchievements', { count: p.count })
 												)}
 											onmouseleave={hideTooltip}
 										/>
 									{/each}
 								</svg>
 							{:else if activeTab === 'activity'}
-								<div class="empty-chart">Pas assez de données pour le graphique.</div>
+								<div class="empty-chart">{$i18n.t('stats.notEnoughData')}</div>
 							{/if}
 						</div>
 					</div>
 					<div class="card chart-card">
-						<h2>Rythme de déblocage</h2>
+						<h2>{$i18n.t('stats.unlockRhythm')}</h2>
 						<p class="sub">
 							{#if cumulativeTimeframe === '1w' || cumulativeTimeframe === '1m'}
-								Succès par jour
+								{$i18n.t('stats.achievementsPerDay')}
 							{:else if cumulativeTimeframe === '1y'}
-								Succès par mois
+								{$i18n.t('stats.achievementsPerMonth')}
 							{:else}
-								Succès par semaine
+								{$i18n.t('stats.achievementsPerWeek')}
 							{/if}
 						</p>
 						<div class="chart-container">
@@ -903,12 +920,16 @@
 									<div
 										class="bar"
 										role="img"
-										aria-label="Barre d'activité hebdomadaire"
+										aria-label={$i18n.t('stats.weeklyActivityBar')}
 										class:max={item.isMax}
 										class:empty={item.count === 0}
 										style="height: {Math.max(item.height, 2)}%"
 										onmouseenter={(e) =>
-											showTooltip(e, item.label, `${item.count} succès débloqués`)}
+											showTooltip(
+												e,
+												item.label,
+												$i18n.t('stats.achievementsUnlockedCount', { count: item.count })
+											)}
 										onmouseleave={hideTooltip}
 									></div>
 								{/each}
@@ -919,8 +940,8 @@
 
 				<div class="card recent-list">
 					<div class="card-header">
-						<h2>Succès récents</h2>
-						<span class="count">50 derniers succès débloqués</span>
+						<h2>{$i18n.t('stats.recentAchievements')}</h2>
+						<span class="count">{$i18n.t('stats.last50Achievements')}</span>
 					</div>
 					<div class="recent-scroll">
 						{#each allUnlockedAchievements.slice(0, 50) as a (a.gameName + ':' + a.key)}
@@ -935,7 +956,7 @@
 									<p class="desc">{a.desc}</p>
 								</div>
 								<span class="time"
-									>🕒 {new Date((a.unlocked_time ?? 0) * 1000).toLocaleDateString('fr-FR', {
+									>🕒 {new Date((a.unlocked_time ?? 0) * 1000).toLocaleDateString($i18n.locale, {
 										day: 'numeric',
 										month: 'short'
 									})}</span
@@ -1272,6 +1293,17 @@
 		width: 40px;
 		height: 40px;
 		border-radius: 8px;
+	}
+	.rarity-icon-placeholder {
+		width: 40px;
+		height: 40px;
+		border-radius: 8px;
+		background: rgba(200, 169, 110, 0.1);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 18px;
+		flex-shrink: 0;
 	}
 	.rarity-item .info {
 		flex: 1;

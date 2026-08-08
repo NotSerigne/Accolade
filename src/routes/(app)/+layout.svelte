@@ -16,6 +16,7 @@
 	import Sidebar from '$lib/Sidebar.svelte';
 	import Topbar from '$lib/Topbar.svelte';
 	import { selectedGame, extractGameThemeColor } from '$lib/stores/selectedGame.js';
+	import { i18n } from '$lib/stores/i18n.js';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 
 	let { children } = $props();
@@ -170,7 +171,7 @@
 		<button
 			type="button"
 			class="settings-backdrop"
-			aria-label="Fermer les paramètres"
+			aria-label={$i18n.t('button.close')}
 			onclick={closeSettings}
 		></button>
 		<div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">

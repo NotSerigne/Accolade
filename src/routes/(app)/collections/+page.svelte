@@ -70,10 +70,10 @@
 
 <main class="collections-page">
 	<header class="page-header">
-		<h1>📁 {$i18n.t('collections.title') || 'Mes Collections'}</h1>
+		<h1>📁 {$i18n.t('collections.title')}</h1>
 		<p class="subtitle">
 			{Object.keys(collections).filter((k) => k !== 'Sans collection').length}
-			{$i18n.t('collections.count') || 'collections personnalisées'}
+			{$i18n.t('collections.count')}
 		</p>
 	</header>
 

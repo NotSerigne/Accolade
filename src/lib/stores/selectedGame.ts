@@ -37,7 +37,7 @@ export async function toggleGameFavorite(gameId: string) {
 }
 
 /**
- * Extrait la couleur dominante d'une image et l'ajuste pour la visibilité.
+ * Extracts the dominant color from an image and adjusts it for visibility.
  */
 export async function extractGameThemeColor(imageUrl: string): Promise<string | null> {
 	if (!imageUrl) return null;
@@ -52,7 +52,7 @@ export async function extractGameThemeColor(imageUrl: string): Promise<string | 
 			const ctx = canvas.getContext('2d');
 			if (!ctx) return resolve(null);
 
-			// On réduit l'image pour l'analyse de performance
+			// Downscale the image for performance during analysis
 			canvas.width = 40;
 			canvas.height = 40;
 			ctx.drawImage(img, 0, 0, 40, 40);
@@ -63,10 +63,10 @@ export async function extractGameThemeColor(imageUrl: string): Promise<string | 
 				b = 0,
 				count = 0;
 
-			// On calcule la moyenne des couleurs (plus simple et performant)
+			// Average colors for a simple and fast dominant tone
 			for (let i = 0; i < data.length; i += 4) {
 				const alpha = data[i + 3];
-				if (alpha < 150) continue; // On ignore les pixels trop transparents
+				if (alpha < 150) continue; // Ignore pixels that are too transparent
 
 				r += data[i];
 				g += data[i + 1];
@@ -80,12 +80,12 @@ export async function extractGameThemeColor(imageUrl: string): Promise<string | 
 			g = Math.floor(g / count);
 			b = Math.floor(b / count);
 
-			// Ajustement de la couleur pour garantir qu'elle "pop"
+			// Adjust the color so it stays readable on dark backgrounds
 			const [h, s, l] = rgbToHsl(r, g, b);
 
-			// On booste la saturation si elle est trop faible
+			// Boost saturation if it is too low
 			const finalS = Math.max(s, 0.5);
-			// On ajuste la luminosité pour qu'elle soit bien visible sur fond sombre
+			// Keep luminance visible on dark backgrounds
 			const finalL = Math.max(Math.min(l, 0.65), 0.45);
 
 			const [fR, fG, fB] = hslToRgb(h, finalS, finalL);

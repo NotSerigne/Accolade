@@ -7,14 +7,14 @@
 
 	function rarityLabel(pct: string): string {
 		const n = parseFloat(pct);
-		if (isNaN(n)) return rarityLabelByIndex($i18n.language, 6);
-		if (n <= 0.1) return rarityLabelByIndex($i18n.language, 0);
-		if (n <= 1) return rarityLabelByIndex($i18n.language, 1);
-		if (n <= 3) return rarityLabelByIndex($i18n.language, 2);
-		if (n <= 7) return rarityLabelByIndex($i18n.language, 3);
-		if (n <= 15) return rarityLabelByIndex($i18n.language, 4);
-		if (n <= 35) return rarityLabelByIndex($i18n.language, 5);
-		return rarityLabelByIndex($i18n.language, 6);
+		if (isNaN(n)) return rarityLabelByIndex(i18n.language, 6);
+		if (n <= 0.1) return rarityLabelByIndex(i18n.language, 0);
+		if (n <= 1) return rarityLabelByIndex(i18n.language, 1);
+		if (n <= 3) return rarityLabelByIndex(i18n.language, 2);
+		if (n <= 7) return rarityLabelByIndex(i18n.language, 3);
+		if (n <= 15) return rarityLabelByIndex(i18n.language, 4);
+		if (n <= 35) return rarityLabelByIndex(i18n.language, 5);
+		return rarityLabelByIndex(i18n.language, 6);
 	}
 
 	function rarityPalette(pct: string) {

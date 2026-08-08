@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { convertFileSrc } from '@tauri-apps/api/core';
+	import { get } from 'svelte/store';
 	import { games } from '$lib/stores/Games.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { settings } from '$lib/stores/settings.js';
@@ -132,7 +133,7 @@
 
 	async function deleteScreenshot(screenshot: Screenshot, event: Event) {
 		event.stopPropagation();
-		if (confirm($i18n.t('screenshots.deleteConfirm') || "Supprimer cette capture d'écran ?")) {
+		if (confirm($i18n.t('screenshots.deleteConfirm'))) {
 			try {
 				await invoke('delete_screenshot', { filename: screenshot.filename });
 				if (selectedScreenshot?.filename === screenshot.filename) {
@@ -154,8 +155,8 @@
 	}
 
 	function formatDate(timestamp: number | null | undefined) {
-		if (!timestamp) return 'Date inconnue';
-		return new Date(timestamp * 1000).toLocaleString($i18n.locale || 'fr-FR', {
+		if (!timestamp) return $i18n.t('screenshots.unknownDate');
+		return new Date(timestamp * 1000).toLocaleString(get(i18n).locale || 'fr-FR', {
 			dateStyle: 'medium',
 			timeStyle: 'short'
 		});
@@ -173,10 +174,12 @@
 <div class="page-container" in:fade={{ duration: 200 }}>
 	<header class="header">
 		<div class="header-content">
-			<h1>{$i18n.t('screenshots.title') || "Captures d'écran"}</h1>
+			<h1>{$i18n.t('screenshots.title')}</h1>
 			<p class="subtitle">
 				{screenshots.length}
-				{screenshots.length > 1 ? 'captures enregistrées' : 'capture enregistrée'}
+				{screenshots.length > 1
+					? $i18n.t('screenshots.countPlural')
+					: $i18n.t('screenshots.countSingular')}
 			</p>
 		</div>
 		<button class="action-btn" onclick={openFolder}>
@@ -190,7 +193,7 @@
 			>
 				<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
 			</svg>
-			{$i18n.t('screenshots.openFolder') || 'Ouvrir le dossier'}
+			{$i18n.t('screenshots.openFolder')}
 		</button>
 	</header>
 
@@ -214,15 +217,14 @@
 					<polyline points="21 15 16 10 5 21" />
 				</svg>
 			</div>
-			<h2>{$i18n.t('screenshots.emptyTitle') || 'Aucune capture'}</h2>
+			<h2>{$i18n.t('screenshots.emptyTitle')}</h2>
 			<p>
-				{$i18n.t('screenshots.emptyDesc') ||
-					'Les captures prises lors de vos succès apparaîtront ici.'}
+				{$i18n.t('screenshots.emptyDesc')}
 			</p>
 			<p class="hint">
-				{$i18n.t('screenshots.hintPrefix') || 'Appuyez sur'}
+				{$i18n.t('screenshots.hintPrefix')}
 				<kbd>{$settings.screenshotShortcut || 'F12'}</kbd>
-				{$i18n.t('screenshots.hintSuffix') || 'pour prendre une capture manuelle.'}
+				{$i18n.t('screenshots.hintSuffix')}
 			</p>
 		</div>
 	{:else}
@@ -242,7 +244,7 @@
 							<button
 								class="delete-btn"
 								onclick={(e) => deleteScreenshot(screenshot, e)}
-								title="Supprimer"
+								title={$i18n.t('button.remove')}
 							>
 								<svg
 									width="16"
@@ -261,7 +263,7 @@
 					</div>
 					<div class="card-info">
 						<span class="game-name"
-							>{getGameData(screenshot.game_id)?.name || screenshot.game_id || 'Manuel'}</span
+							>{getGameData(screenshot.game_id)?.name || screenshot.game_id || $i18n.t('screenshots.manual')}</span
 						>
 						<span class="date"
 							>{formatDate(
@@ -299,7 +301,7 @@
 						class="nav-btn-mini"
 						disabled={currentIndex <= 0}
 						onclick={() => navigateScreenshot('prev')}
-						aria-label="Précédent"
+						aria-label={$i18n.t('stats.previous')}
 					>
 						<svg
 							width="18"
@@ -317,7 +319,7 @@
 						class="nav-btn-mini"
 						disabled={currentIndex >= screenshots.length - 1}
 						onclick={() => navigateScreenshot('next')}
-						aria-label="Suivant"
+						aria-label={$i18n.t('stats.next')}
 					>
 						<svg
 							width="18"
@@ -365,12 +367,24 @@
 
 								{#if ach}
 									<div class="ach-brand {getRarityClass(ach.rarity, ach.completionpercentage)}">
-										<img class="ach-icon" src={ach.icon} alt="Achievement icon" />
+										{#if ach.icon}
+											<img
+												class="ach-icon"
+												src={ach.icon}
+												alt="Achievement icon"
+												onerror={(e) => {
+													const t = e.target as HTMLImageElement;
+													t.style.display = 'none';
+												}}
+											/>
+										{:else}
+											<div class="ach-icon ach-icon-placeholder">🏆</div>
+										{/if}
 										<div class="ach-details">
 											<div class="ach-header">
 												<h4>{ach.name || ach.key}</h4>
 												{#if achIndex}
-													<span class="ach-badge">Succès n°{achIndex}</span>
+													<span class="ach-badge">{$i18n.t('screenshots.achievementNumber', { count: achIndex })}</span>
 												{/if}
 												{#if ach.rarity}
 													<span
@@ -409,7 +423,7 @@
 									</div>
 								{:else if selectedScreenshot.achievement_key}
 									<div class="ach-key">
-										Succès : <code>{selectedScreenshot.achievement_key}</code>
+										{$i18n.t('screenshots.achievement')}: <code>{selectedScreenshot.achievement_key}</code>
 									</div>
 								{/if}
 							</div>
@@ -813,6 +827,13 @@
 		object-fit: cover;
 		box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 		flex-shrink: 0;
+	}
+	.ach-icon-placeholder {
+		background: rgba(200, 169, 110, 0.1);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 16px;
 	}
 
 	.ach-details {

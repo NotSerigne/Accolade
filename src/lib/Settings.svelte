@@ -170,7 +170,7 @@
 			await invoke('test_achievement_notif');
 		} catch (error) {
 			console.error('Test notification failed:', error);
-			saveError = $i18n.t('setup.errorTest', {
+			saveError = get(i18n).t('setup.errorTest', {
 				details: error instanceof Error ? error.message : String(error)
 			});
 		}
@@ -179,9 +179,9 @@
 	async function handleExport() {
 		try {
 			const path = await exportProfile();
-			alert(`Profil exporté avec succès dans :\n${path}`);
+			alert(path);
 		} catch {
-			alert("Échec de l'exportation");
+			alert(get(i18n).t('setup.errorSave', { details: '' }));
 		}
 	}
 
@@ -191,22 +191,22 @@
 			const user = get(steamUser);
 			const stats = calculateAdvancedStats(gamesList);
 
-			const title = `Profil Accolade de ${user?.personaname || 'Joueur'}`;
-			let content = `Date du rapport: ${new Date().toLocaleDateString()}\n`;
-			content += `Joueur: ${user?.personaname || 'Anonyme'} (SteamID: ${user?.steamid || 'N/A'})\n\n`;
+			const title = `${get(i18n).t('settings.reportTitle')} ${user?.personaname || get(i18n).t('settings.unknownPlayer')}`;
+			let content = `${get(i18n).t('settings.reportDate')}: ${new Date().toLocaleDateString()}\n`;
+			content += `${get(i18n).t('settings.reportPlayer')}: ${user?.personaname || get(i18n).t('settings.unknownPlayer')} (SteamID: ${user?.steamid || 'N/A'})\n\n`;
 
-			content += `--- STATISTIQUES GLOBALES ---\n`;
-			content += `Total de jeux: ${gamesList.length}\n`;
-			content += `Succès débloqués: ${stats.totalUnlocked}\n`;
-			content += `Succès restants: ${stats.totalRemaining}\n`;
-			content += `Jeux complétés: ${get(totalCompletedGames)}\n\n`;
+			content += `${get(i18n).t('settings.reportGlobalStats')}\n`;
+			content += `${get(i18n).t('settings.reportTotalGames')}: ${gamesList.length}\n`;
+			content += `${get(i18n).t('settings.reportUnlocked')}: ${stats.totalUnlocked}\n`;
+			content += `${get(i18n).t('settings.reportRemaining')}: ${stats.totalRemaining}\n`;
+			content += `${get(i18n).t('settings.reportCompletedGames')}: ${get(totalCompletedGames)}\n\n`;
 
-			content += `--- RECORDS & CURIOSITÉS ---\n`;
-			content += `Succès le plus rare: ${stats.rarestAchievement ? `${stats.rarestAchievement.name} (${stats.rarestAchievement.pct}%)` : 'N/A'}\n`;
-			content += `Record en une journée: ${stats.maxAchievementsInDay} succès\n`;
-			content += `Record en une semaine: ${stats.maxAchievementsInWeek} succès\n\n`;
+			content += `${get(i18n).t('settings.reportRecords')}\n`;
+			content += `${get(i18n).t('settings.reportRarest')}: ${stats.rarestAchievement ? `${stats.rarestAchievement.name} (${stats.rarestAchievement.pct}%)` : 'N/A'}\n`;
+			content += `${get(i18n).t('settings.reportOneDay')}: ${stats.maxAchievementsInDay} succès\n`;
+			content += `${get(i18n).t('settings.reportOneWeek')}: ${stats.maxAchievementsInWeek} succès\n\n`;
 
-			content += `--- DÉTAILS DES JEUX ---\n`;
+			content += `${get(i18n).t('settings.reportGameDetails')}\n`;
 			content += `------------------\n`;
 			gamesList.forEach((g) => {
 				const unlocked = g.achievements?.filter((a) => a.unlocked).length || 0;
@@ -215,10 +215,10 @@
 			});
 
 			const path = await exportSummaryPdf(title, content);
-			alert(`Résumé PDF exporté avec succès dans :\n${path}`);
+			alert(path);
 		} catch (err) {
 			console.error('PDF Export Error:', err);
-			alert(`Échec de l'exportation PDF : ${err}`);
+			alert(get(i18n).t('setup.errorSave', { details: String(err) }));
 		}
 	}
 
@@ -272,7 +272,7 @@
 			settingsOpen.set(false);
 		} catch (error) {
 			const details = error instanceof Error ? error.message : String(error);
-			saveError = $i18n.t('setup.errorSave', { details });
+			saveError = get(i18n).t('setup.errorSave', { details });
 			console.error('Failed to save settings:', error);
 		} finally {
 			isSaving = false;
@@ -450,8 +450,8 @@
 
 			<div class="setting-row" style="margin-top: 14px;">
 				<div class="setting-info">
-					<div class="setting-name">Clé API (Web API Key)</div>
-					<div class="setting-desc">Disponible dans vos paramètres sur le site</div>
+					<div class="setting-name">{$i18n.t('settings.raApiKey')}</div>
+					<div class="setting-desc">{$i18n.t('settings.raApiKeyDesc')}</div>
 				</div>
 				<div class="api-key-wrap">
 					<input
@@ -647,12 +647,12 @@
 
 		<!-- ── Section Comportement ── -->
 		<section class="settings-section">
-			<div class="section-label">{$i18n.t('settings.behavior') || 'Comportement'}</div>
+			<div class="section-label">{$i18n.t('settings.behavior')}</div>
 
 			<div class="setting-row">
 				<div class="setting-info">
 					<div class="setting-name">
-						{$i18n.t('settings.launchOnStartup') || 'Lancer au démarrage de Windows'}
+						{$i18n.t('settings.launchOnStartup')}
 					</div>
 				</div>
 				<label class="toggle-switch">
@@ -664,7 +664,7 @@
 			<div class="setting-row" style="margin-top: 14px;">
 				<div class="setting-info">
 					<div class="setting-name">
-						{$i18n.t('settings.startMinimized') || 'Démarrer en minimisé'}
+						{$i18n.t('settings.startMinimized')}
 					</div>
 				</div>
 				<label class="toggle-switch">
@@ -676,7 +676,7 @@
 			<div class="setting-row" style="margin-top: 14px;">
 				<div class="setting-info">
 					<div class="setting-name">
-						{$i18n.t('settings.minimizeToTray') || "Minimiser l'app à la place de fermer"}
+						{$i18n.t('settings.minimizeToTray')}
 					</div>
 				</div>
 				<label class="toggle-switch">
@@ -688,7 +688,7 @@
 			<div class="setting-row" style="margin-top: 14px;">
 				<div class="setting-info">
 					<div class="setting-name">
-						{$i18n.t('settings.screenshotShortcut') || 'Raccourci de capture'}
+						{$i18n.t('settings.screenshotShortcut')}
 					</div>
 					<div class="setting-desc">
 						{$i18n.t('settings.screenshotShortcutDesc') ||
@@ -730,7 +730,7 @@
 				<div class="setting-info">
 					<div class="setting-name">Test de capture</div>
 					<div class="setting-desc">
-						Vérifier que la capture d'écran fonctionne sur votre système
+						{$i18n.t('settings.screenshotTestDesc')}
 					</div>
 				</div>
 				<button
@@ -882,7 +882,7 @@
 			>
 				<div class="setting-info">
 					<div class="setting-name">Gestion des Profils</div>
-					<div class="setting-desc">Exportez vos données ou ouvrez le dossier des exports</div>
+					<div class="setting-desc">{$i18n.t('settings.profilesDesc')}</div>
 				</div>
 				<div class="profile-actions">
 					<button class="profile-btn secondary" onclick={handleExport}>
@@ -944,9 +944,9 @@
 			<!-- Dynamic Theme Toggle -->
 			<div class="setting-row" style="margin-top: 20px;">
 				<div class="setting-info">
-					<div class="setting-name">{$i18n.t('setup.dynamicTheme') || 'Thème dynamique'}</div>
+					<div class="setting-name">{$i18n.t('setup.dynamicTheme')}</div>
 					<div class="setting-desc">
-						{$i18n.t('setup.dynamicThemeDesc') || 'Adapte la couleur et le fond au jeu sélectionné'}
+						{$i18n.t('setup.dynamicThemeDesc')}
 					</div>
 				</div>
 				<label class="toggle-switch">

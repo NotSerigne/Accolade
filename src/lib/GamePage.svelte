@@ -1,6 +1,7 @@
 <script lang="ts">
 	// src/lib/GamePage.svelte
 	import { onMount, tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { listen } from '@tauri-apps/api/event';
 	import { loadAchievements, type Game, type Achievement, games } from '$lib/stores/Games.js';
 	import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
@@ -70,9 +71,9 @@
 		if (game) {
 			try {
 				const path = await exportGame(game);
-				alert(`Jeu exporté avec succès dans :\n${path}`);
+				alert(path);
 			} catch {
-				alert("Échec de l'exportation");
+				alert('Export failed');
 			}
 		}
 	}
@@ -80,14 +81,14 @@
 	async function handleExportGamePdf() {
 		if (game) {
 			try {
-				const title = `Rapport de Succès: ${game.name}`;
+				const title = game.name;
 				const unlocked = achievements.filter((a) => a.unlocked).length;
 				const total = achievements.length;
 				let content = `Jeu: ${game.name}\n`;
 				content += `Identifiant: ${game.id}\n`;
 				content += `Source: ${typeof game.source === 'object' ? game.source.type : game.source}\n`;
 				content += `Progression: ${unlocked}/${total} (${total > 0 ? Math.round((unlocked / total) * 100) : 0}%)\n\n`;
-				content += `Liste des succès débloqués:\n`;
+				content += 'Unlocked achievements:\n';
 				content += `--------------------------\n`;
 
 				achievements
@@ -97,10 +98,10 @@
 					});
 
 				const path = await exportSummaryPdf(title, content);
-				alert(`Rapport PDF exporté avec succès dans :\n${path}`);
+				alert(path);
 			} catch (err) {
 				console.error('PDF Export Error:', err);
-				alert(`Échec de l'exportation PDF : ${err}`);
+				alert(String(err));
 			}
 		}
 	}
@@ -316,13 +317,13 @@
 	function rarityLabel(pct: string): string {
 		const n = parseFloat(pct);
 		if (isNaN(n)) return '';
-		if (n <= 0.1) return rarityLabelByIndex($i18n.language, 0);
-		if (n <= 1) return rarityLabelByIndex($i18n.language, 1);
-		if (n <= 3) return rarityLabelByIndex($i18n.language, 2);
-		if (n <= 7) return rarityLabelByIndex($i18n.language, 3);
-		if (n <= 15) return rarityLabelByIndex($i18n.language, 4);
-		if (n <= 35) return rarityLabelByIndex($i18n.language, 5);
-		return rarityLabelByIndex($i18n.language, 6);
+		if (n <= 0.1) return rarityLabelByIndex(get(i18n).language, 0);
+		if (n <= 1) return rarityLabelByIndex(get(i18n).language, 1);
+		if (n <= 3) return rarityLabelByIndex(get(i18n).language, 2);
+		if (n <= 7) return rarityLabelByIndex(get(i18n).language, 3);
+		if (n <= 15) return rarityLabelByIndex(get(i18n).language, 4);
+		if (n <= 35) return rarityLabelByIndex(get(i18n).language, 5);
+		return rarityLabelByIndex(get(i18n).language, 6);
 	}
 
 	type RarityPalette = {
@@ -518,7 +519,7 @@
 									<span class="stat-value">{totalCount}</span>
 								</div>
 								<div class="stat-item">
-									<span class="stat-label">DÉBLOQUÉS</span>
+									<span class="stat-label">{$i18n.t('game.unlocked')}</span>
 									<span class="stat-value highlight">{unlockedCount}</span>
 								</div>
 							</div>
@@ -562,12 +563,12 @@
 							<button
 								class="tab"
 								class:active={filter === 'unlocked'}
-								onclick={() => (filter = 'unlocked')}>Débloqués</button
+								onclick={() => (filter = 'unlocked')}>{$i18n.t('game.unlocked')}</button
 							>
 							<button
 								class="tab"
 								class:active={filter === 'locked'}
-								onclick={() => (filter = 'locked')}>Verrouillés</button
+								onclick={() => (filter = 'locked')}>{$i18n.t('game.locked')}</button
 							>
 						</div>
 
@@ -592,15 +593,15 @@
 						</div>
 
 						<select class="sort-select" bind:value={sort}>
-							<option value="date">Date d'obtention</option>
-							<option value="rarity">Rareté</option>
-							<option value="name">Nom</option>
+							<option value="date">{$i18n.t('game.sort.date')}</option>
+							<option value="rarity">{$i18n.t('game.sort.rarity')}</option>
+							<option value="name">{$i18n.t('game.sort.name')}</option>
 						</select>
 
 						<button
 							class="order-btn"
 							onclick={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')}
-							title={sortOrder === 'asc' ? 'Croissant' : 'Décroissant'}
+							title={sortOrder === 'asc' ? $i18n.t('game.sort.asc') : $i18n.t('game.sort.desc')}
 						>
 							{#if sortOrder === 'asc'}
 								<svg
@@ -647,7 +648,7 @@
 										r="3"
 									/>
 								</svg>
-								<span>Révélés</span>
+								<span>{$i18n.t('game.revealed')}</span>
 							{:else}
 								<svg
 									width="14"
@@ -662,11 +663,11 @@
 									></path>
 									<line x1="1" y1="1" x2="23" y2="23"></line>
 								</svg>
-								<span>Cachés</span>
+								<span>{$i18n.t('game.hidden')}</span>
 							{/if}
 						</button>
 
-						<button class="profile-btn-mini" onclick={handleExportGame} title="Exporter JSON">
+						<button class="profile-btn-mini" onclick={handleExportGame} title={$i18n.t('game.exportJson')}>
 							<svg
 								width="14"
 								height="14"
@@ -680,7 +681,7 @@
 							>
 						</button>
 
-						<button class="profile-btn-mini" onclick={handleExportGamePdf} title="Exporter PDF">
+						<button class="profile-btn-mini" onclick={handleExportGamePdf} title={$i18n.t('game.exportPdf')}>
 							<svg
 								width="14"
 								height="14"
@@ -699,7 +700,7 @@
 							>
 						</button>
 
-						<button class="profile-btn-mini" onclick={openProfilesFolder} title="Dossier exports">
+						<button class="profile-btn-mini" onclick={openProfilesFolder} title={$i18n.t('game.exportFolder')}>
 							<svg
 								width="14"
 								height="14"
@@ -717,7 +718,7 @@
 					<!-- Liste -->
 					<div class="achievements-list">
 						{#if loading}
-							<div class="loading-state">Chargement…</div>
+							<div class="loading-state">{$i18n.t('game.loading')}</div>
 						{:else}
 							<div class="ach-grid">
 								{#each filtered as ach (ach.key)}
@@ -759,7 +760,7 @@
 												<div class="ach-header-row">
 													<div class="ach-name" class:muted={isLocked}>
 														{isLocked && isSecret && !revealed
-															? 'Succès caché'
+															? $i18n.t('game.secretAchievement')
 															: ach.name || ach.key}
 													</div>
 													{#if isUnlocked && ach.unlocked_time}
@@ -771,7 +772,7 @@
 													{#if showDescription}
 														<div class="ach-desc">{descText}</div>
 													{:else if showMaskedDescription}
-														<div class="ach-desc italic">Description masquée</div>
+														<div class="ach-desc italic">{$i18n.t('game.descHidden')}</div>
 													{/if}
 												</div>
 
@@ -814,7 +815,7 @@
 																>
 																	<polyline points="20 6 9 17 4 12" />
 																</svg>
-																Copié
+																{$i18n.t('game.copied')}
 															{:else}
 																<svg
 																	width="11"
@@ -828,7 +829,7 @@
 																		d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
 																	/>
 																</svg>
-																Copier le nom
+																{$i18n.t('game.copyName')}
 															{/if}
 														</button>
 														<button
@@ -852,7 +853,7 @@
 																	y2="3"
 																/>
 															</svg>
-															Chercher un guide
+															{$i18n.t('game.findGuide')}
 														</button>
 													</div>
 												</div>
@@ -863,7 +864,7 @@
 							</div>
 
 							{#if filtered.length === 0}
-								<div class="empty-state">Aucun succès trouvé.</div>
+								<div class="empty-state">{$i18n.t('game.noAchievementFound')}</div>
 							{/if}
 						{/if}
 					</div>
