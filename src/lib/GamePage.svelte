@@ -112,6 +112,7 @@
 	};
 
 	let achievements = $state<Achievement[]>([]);
+	let activeView = $state<'achievements' | 'map'>('achievements');
 	let filter = $state<'all' | 'unlocked' | 'locked'>('all');
 	let search = $state('');
 	let sort = $state<'date' | 'rarity' | 'name'>('date');
@@ -245,6 +246,22 @@
 	let unlockedCount = $derived(merged.filter((a) => a.unlocked).length);
 	let totalCount = $derived(merged.length);
 	let progressPct = $derived(totalCount > 0 ? Math.round((unlockedCount / totalCount) * 100) : 0);
+	let mapAchievements = $derived.by(() => {
+		const unlocked = merged
+			.filter((achievement) => achievement.unlocked || Boolean(achievement.unlocked_time))
+			.sort((a, b) => (a.unlocked_time ?? 0) - (b.unlocked_time ?? 0));
+		const locked = merged.filter(
+			(achievement) => !achievement.unlocked && !achievement.unlocked_time
+		).sort((a, b) => {
+			const rarityA = parseFloat(a.completionpercentage);
+			const rarityB = parseFloat(b.completionpercentage);
+			const normalizedA = Number.isFinite(rarityA) ? rarityA : Number.POSITIVE_INFINITY;
+			const normalizedB = Number.isFinite(rarityB) ? rarityB : Number.POSITIVE_INFINITY;
+
+			return normalizedB - normalizedA || a.name.localeCompare(b.name);
+		});
+		return [...unlocked, ...locked];
+	});
 
 	function normalizeAchievementKey(key: string): string {
 		return (key || '').trim().toLowerCase();
@@ -267,7 +284,28 @@
 		flashTimer = setTimeout(() => {
 			flashAchievementKey = '';
 			flashTimer = null;
-		}, 850);
+		}, 1800);
+	}
+
+	async function openAchievementFromMap(key: string) {
+		activeView = 'achievements';
+		filter = 'all';
+		search = '';
+
+		const normalizedKey = normalizeAchievementKey(key);
+		let target: HTMLDivElement | undefined;
+
+		for (let i = 0; i < 20; i += 1) {
+			await tick();
+			target = rowRefs.get(normalizedKey);
+			if (target) break;
+			await delay(50);
+		}
+
+		if (target) {
+			target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			triggerAchievementFlash(normalizedKey);
+		}
 	}
 
 	function delay(ms: number): Promise<void> {
@@ -556,83 +594,42 @@
 
 				<div class="main-section">
 					<div class="controls-bar">
-						<div class="filter-tabs">
-							<button class="tab" class:active={filter === 'all'} onclick={() => (filter = 'all')}
-								>Tout</button
-							>
-							<button
-								class="tab"
-								class:active={filter === 'unlocked'}
-								onclick={() => (filter = 'unlocked')}>{$i18n.t('game.unlocked')}</button
-							>
-							<button
-								class="tab"
-								class:active={filter === 'locked'}
-								onclick={() => (filter = 'locked')}>{$i18n.t('game.locked')}</button
-							>
+						<div class="view-tabs">
+							<button class="tab" class:active={activeView === 'achievements'} onclick={() => (activeView = 'achievements')}>Succès</button>
+							<button class="tab" class:active={activeView === 'map'} onclick={() => (activeView = 'map')}>Carte de progression</button>
 						</div>
 
-						<div class="search-wrap">
-							<svg
-								width="14"
-								height="14"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2.5"
-							>
-								<circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-							</svg>
-							<input
-								class="search-input"
-								type="text"
-								placeholder="Chercher un  fa..."
-								bind:value={search}
-							/>
-							<span class="search-count">{filtered.length} / {totalCount}</span>
-						</div>
+						<div class="controls-bottom">
+						{#if activeView === 'achievements'}
+							<div class="filter-tabs">
+								<button class="tab" class:active={filter === 'all'} onclick={() => (filter = 'all')}>Tout</button>
+								<button class="tab" class:active={filter === 'unlocked'} onclick={() => (filter = 'unlocked')}>{$i18n.t('game.unlocked')}</button>
+								<button class="tab" class:active={filter === 'locked'} onclick={() => (filter = 'locked')}>{$i18n.t('game.locked')}</button>
+							</div>
 
-						<select class="sort-select" bind:value={sort}>
-							<option value="date">{$i18n.t('game.sort.date')}</option>
-							<option value="rarity">{$i18n.t('game.sort.rarity')}</option>
-							<option value="name">{$i18n.t('game.sort.name')}</option>
-						</select>
-
-						<button
-							class="order-btn"
-							onclick={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')}
-							title={sortOrder === 'asc' ? $i18n.t('game.sort.asc') : $i18n.t('game.sort.desc')}
-						>
-							{#if sortOrder === 'asc'}
-								<svg
-									width="14"
-									height="14"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2.5"
-								>
-									<path d="M12 19V5M5 12l7-7 7 7" />
+							<div class="search-wrap">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+									<circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
 								</svg>
-							{:else}
-								<svg
-									width="14"
-									height="14"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2.5"
-								>
-									<path d="M12 5v14M5 12l7 7 7-7" />
-								</svg>
-							{/if}
-						</button>
+								<input class="search-input" type="text" placeholder="Chercher un succès..." bind:value={search} />
+								<span class="search-count">{filtered.length} / {totalCount}</span>
+							</div>
 
-						<button
-							class="reveal-btn"
-							class:active={revealed}
-							onclick={() => (revealed = !revealed)}
-						>
+							<select class="sort-select" bind:value={sort}>
+								<option value="date">{$i18n.t('game.sort.date')}</option>
+								<option value="rarity">{$i18n.t('game.sort.rarity')}</option>
+								<option value="name">{$i18n.t('game.sort.name')}</option>
+							</select>
+
+							<button class="order-btn" onclick={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')} title={sortOrder === 'asc' ? $i18n.t('game.sort.asc') : $i18n.t('game.sort.desc')}>
+								{#if sortOrder === 'asc'}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+								{:else}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+								{/if}
+							</button>
+
+								<button class="reveal-btn" class:active={revealed} onclick={() => (revealed = !revealed)}>
 							{#if revealed}
 								<svg
 									width="14"
@@ -665,9 +662,16 @@
 								</svg>
 								<span>{$i18n.t('game.hidden')}</span>
 							{/if}
-						</button>
+								</button>
+						{:else}
+							<div class="map-summary">
+								<span class="map-summary-title">Progression</span>
+								<span class="map-summary-value">{unlockedCount} / {totalCount} étapes</span>
+							</div>
+						{/if}
 
-						<button class="profile-btn-mini" onclick={handleExportGame} title={$i18n.t('game.exportJson')}>
+								<div class="export-actions">
+									<button class="profile-btn-mini" onclick={handleExportGame} title={$i18n.t('game.exportJson')}>
 							<svg
 								width="14"
 								height="14"
@@ -679,9 +683,9 @@
 									points="7 10 12 15 17 10"
 								/><line x1="12" y1="15" x2="12" y2="3" /></svg
 							>
-						</button>
+									</button>
 
-						<button class="profile-btn-mini" onclick={handleExportGamePdf} title={$i18n.t('game.exportPdf')}>
+									<button class="profile-btn-mini" onclick={handleExportGamePdf} title={$i18n.t('game.exportPdf')}>
 							<svg
 								width="14"
 								height="14"
@@ -698,9 +702,9 @@
 									y2="17"
 								/><polyline points="10 9 9 9 8 9" /></svg
 							>
-						</button>
+									</button>
 
-						<button class="profile-btn-mini" onclick={openProfilesFolder} title={$i18n.t('game.exportFolder')}>
+									<button class="profile-btn-mini" onclick={openProfilesFolder} title={$i18n.t('game.exportFolder')}>
 							<svg
 								width="14"
 								height="14"
@@ -712,11 +716,14 @@
 									d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
 								/></svg
 							>
-						</button>
+									</button>
+								</div>
+								</div>
 					</div>
 
-					<!-- Liste -->
-					<div class="achievements-list">
+					{#if activeView === 'achievements'}
+						<!-- Liste -->
+						<div class="achievements-list">
 						{#if loading}
 							<div class="loading-state">{$i18n.t('game.loading')}</div>
 						{:else}
@@ -750,11 +757,21 @@
 										<div class="ach-card-inner">
 											<div class="ach-icon-box">
 												{#if displayIcon}
-													<img src={displayIcon} alt={ach.name} class:muted-icon={isLocked} />
+													<img
+														src={displayIcon}
+														alt={ach.name}
+														class:muted-icon={isLocked}
+														onerror={(event) => {
+															const target = event.currentTarget as HTMLImageElement;
+															target.style.display = 'none';
+															target.parentElement?.classList.add('icon-error');
+														}}
+													/>
+													<span class="ach-placeholder icon-fallback">🏆</span>
 												{:else}
 													<span class="ach-placeholder">🏆</span>
 												{/if}
-											</div>
+												</div>
 
 											<div class="ach-details">
 												<div class="ach-header-row">
@@ -868,6 +885,68 @@
 							{/if}
 						{/if}
 					</div>
+					{:else}
+						<div class="achievements-list">
+							<div class="progress-map">
+								<div class="map-intro">
+									<div class="map-intro-copy">
+										<h2>Carte de progression</h2>
+										<p>Chaque étape représente un succès de ce jeu.</p>
+									</div>
+									<strong class="map-overall-progress">{unlockedCount}/{totalCount}</strong>
+								</div>
+								<div class="map-track">
+									{#each mapAchievements as ach, index (ach.key)}
+										{@const palette = rarityPalette(ach.completionpercentage)}
+										{@const isUnlocked = ach.unlocked || Boolean(ach.unlocked_time)}
+										<div
+											class="map-achievement-card"
+											class:unlocked={isUnlocked}
+											role="button"
+											tabindex="0"
+											onclick={() => void openAchievementFromMap(ach.key)}
+											onkeydown={(event) => {
+												if (event.key === 'Enter' || event.key === ' ') {
+													event.preventDefault();
+													void openAchievementFromMap(ach.key);
+												}
+											}}
+											aria-label={`Voir la description de ${ach.name || ach.key}`}
+										>
+											<div
+												class="map-achievement-index"
+												class:complete={isUnlocked}
+												aria-label={`Succès ${index + 1} sur ${totalCount}`}
+											>
+												<span>{index + 1}</span>
+												<small>/{totalCount}</small>
+											</div>
+											<div class="map-achievement-icon">
+												{#if ach.icon || ach.icon_gray}
+													<img src={isUnlocked ? ach.icon : ach.icon_gray || ach.icon} alt="" />
+												{:else}
+													<span>🏆</span>
+												{/if}
+											</div>
+											<div class="map-achievement-content">
+												<div class="map-achievement-title">{ach.name || ach.key}</div>
+												<div class="map-achievement-description">{ach.desc || 'Succès à débloquer'}</div>
+												<div class="map-achievement-meta">
+													<span class="map-rarity" style:color={palette.badgeColor}>{rarityLabel(ach.completionpercentage) || 'Inconnu'} · {parseFloat(ach.completionpercentage || '0').toFixed(1)}%</span>
+													<div class="map-rarity-track">
+														<div class="map-rarity-fill" style:width={`${Math.min(parseFloat(ach.completionpercentage) || 0, 100)}%`} style:background={palette.fill}></div>
+													</div>
+												</div>
+											</div>
+											<div class="map-achievement-status" class:complete={isUnlocked}>
+												{isUnlocked ? '✓' : '·'}
+											</div>
+										</div>
+									{/each}
+								</div>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -1222,34 +1301,52 @@
 
 	.controls-bar {
 		display: flex;
-		align-items: center;
-		gap: 14px;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 12px;
 		padding: 20px 28px;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 		flex-shrink: 0;
-		overflow-x: auto;
-		scrollbar-width: none;
+		overflow: visible;
 	}
-	.controls-bar::-webkit-scrollbar {
-		display: none;
+
+	.view-tabs,
+	.controls-bottom {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+	}
+
+	.view-tabs {
+		align-self: flex-start;
+	}
+
+	.controls-bottom {
+		width: 100%;
+		flex-wrap: wrap;
+		gap: 8px;
 	}
 
 	.filter-tabs {
 		display: flex;
+		flex: 0 1 auto;
+		min-width: 0;
 		background: rgba(0, 0, 0, 0.3);
 		border-radius: 10px;
 		padding: 4px;
 		gap: 4px;
 	}
 	.tab {
-		padding: 8px 18px;
+		padding: 8px 14px;
 		border-radius: 8px;
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		font-size: 13px;
+		font-size: 12px;
 		color: #6a7080;
 		font-weight: 600;
+		white-space: nowrap;
 		transition: all 0.25s;
 	}
 	.tab.active {
@@ -1288,8 +1385,9 @@
 	}
 
 	.search-wrap {
-		flex: 1;
-		max-width: 440px;
+		flex: 1 1 180px;
+		min-width: 150px;
+		max-width: none;
 		height: 38px;
 		background: rgba(0, 0, 0, 0.3);
 		border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1314,9 +1412,25 @@
 		font-size: 12px;
 		color: #333;
 		font-weight: 700;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.export-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-shrink: 0;
+	}
+
+	.export-actions {
+		margin-left: auto;
+		gap: 6px;
 	}
 
 	.sort-select {
+		flex: 0 1 160px;
+		min-width: 125px;
 		height: 38px;
 		background: rgba(255, 255, 255, 0.05);
 		border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1362,7 +1476,7 @@
 
 	.reveal-btn {
 		height: 38px;
-		padding: 0 16px;
+		padding: 0 12px;
 		background: rgba(255, 255, 255, 0.03);
 		border: 1px solid rgba(255, 255, 255, 0.08);
 		border-radius: 10px;
@@ -1373,6 +1487,8 @@
 		align-items: center;
 		gap: 8px;
 		transition: all 0.2s;
+		flex: 0 1 auto;
+		white-space: nowrap;
 	}
 	.reveal-btn.active {
 		background: color-mix(in srgb, var(--accent, #0066cc) 12%, transparent);
@@ -1383,9 +1499,200 @@
 		font-weight: 600;
 	}
 
+	.map-summary {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-right: auto;
+		color: #6a7080;
+		font-size: 12px;
+	}
+	.map-summary-title {
+		color: #fff;
+		font-weight: 700;
+	}
+	.map-summary-value {
+		color: var(--accent);
+		font-weight: 700;
+	}
+
 	.achievements-list {
 		flex: 1;
 		padding: 24px 28px;
+	}
+	.progress-map {
+		min-height: 100%;
+		padding: 8px 0 32px;
+	}
+	.map-intro {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20px;
+		margin-bottom: 28px;
+	}
+	.map-intro-copy {
+		min-width: 0;
+	}
+	.map-intro h2 {
+		margin: 0 0 6px;
+		color: #fff;
+		font-size: 20px;
+	}
+	.map-intro p {
+		margin: 0;
+		color: #6a7080;
+		font-size: 13px;
+	}
+	.map-track {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 10px;
+		padding: 0 2px;
+	}
+	.map-overall-progress {
+		color: var(--accent);
+		font-size: 16px;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.map-achievement-index {
+		width: 42px;
+		height: 42px;
+		border: 2px solid rgba(255, 255, 255, 0.12);
+		border-radius: 50%;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 1px;
+		color: #8f97a8;
+		background: rgba(255, 255, 255, 0.03);
+		font-size: 13px;
+		font-weight: 800;
+		font-variant-numeric: tabular-nums;
+	}
+	.map-achievement-index span,
+	.map-achievement-index small {
+		font: inherit;
+		line-height: 1;
+	}
+	.map-achievement-index small {
+		font-size: 9px;
+		font-weight: 700;
+		color: #596171;
+	}
+	.map-achievement-index.complete {
+		border-color: var(--accent);
+		color: var(--accent);
+		box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 28%, transparent);
+	}
+	.map-achievement-card {
+		min-width: 0;
+		min-height: 78px;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px;
+		background: rgba(8, 12, 18, 0.72);
+		border: 1px solid rgba(255, 255, 255, 0.07);
+		border-radius: 10px;
+		cursor: pointer;
+		transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+	}
+	.map-achievement-card:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.map-achievement-card:hover {
+		transform: translateY(-2px);
+		border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+	}
+	.map-achievement-card.unlocked {
+		border-color: color-mix(in srgb, var(--accent) 35%, rgba(255, 255, 255, 0.07));
+	}
+	.map-achievement-icon {
+		width: 48px;
+		height: 48px;
+		border-radius: 8px;
+		overflow: hidden;
+		flex-shrink: 0;
+		background: #10141b;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.map-achievement-icon img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.map-achievement-icon span {
+		font-size: 22px;
+	}
+	.map-achievement-content {
+		flex: 1;
+		min-width: 0;
+	}
+	.map-achievement-title {
+		color: #fff;
+		font-size: 13px;
+		font-weight: 700;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.map-achievement-description {
+		color: #7d8596;
+		font-size: 11px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		margin-top: 3px;
+	}
+	.map-achievement-meta {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 7px;
+	}
+	.map-rarity {
+		font-size: 9px;
+		font-weight: 800;
+		white-space: nowrap;
+		text-transform: uppercase;
+	}
+	.map-rarity-track {
+		height: 3px;
+		flex: 1;
+		min-width: 24px;
+		border-radius: 3px;
+		background: rgba(255, 255, 255, 0.08);
+		overflow: hidden;
+	}
+	.map-rarity-fill {
+		height: 100%;
+		border-radius: inherit;
+	}
+	.map-achievement-status {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #596171;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		font-size: 14px;
+		font-weight: 900;
+	}
+	.map-achievement-status.complete {
+		background: var(--accent);
+		color: var(--accent-text);
+		border-color: var(--accent);
+		box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
 	}
 	.ach-grid {
 		display: flex;
@@ -1440,6 +1747,12 @@
 		align-items: center;
 		justify-content: center;
 		height: 100%;
+	}
+	.ach-placeholder.icon-fallback {
+		display: none;
+	}
+	:global(.ach-icon-box.icon-error .icon-fallback) {
+		display: flex;
 	}
 
 	.ach-details {
@@ -1564,17 +1877,20 @@
 	}
 
 	.ach-card.jump-flash {
-		animation: achJumpFlash 0.85s ease;
+		animation: achJumpFlash 1.8s ease;
 	}
 	@keyframes achJumpFlash {
 		0% {
-			transform: scale(1.02);
-			background: rgba(0, 102, 204, 0.15);
-			border-color: rgba(0, 102, 204, 0.4);
+			transform: scale(1.015);
+			background: color-mix(in srgb, var(--accent) 18%, rgba(8, 12, 18, 0.6));
+			border-color: var(--accent);
+			box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent),
+				0 0 24px color-mix(in srgb, var(--accent) 30%, transparent);
 		}
 		100% {
 			transform: scale(1);
 			background: rgba(8, 12, 18, 0.6);
+			box-shadow: none;
 		}
 	}
 

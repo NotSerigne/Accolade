@@ -627,7 +627,18 @@
 					<div class="card global-progression">
 						<h2>{$i18n.t('stats.globalProgression')}</h2>
 						<div class="donut-wrap">
-							<div class="donut" style="--pct: {globalCompletionRate}">
+							<div class="donut">
+								<svg class="donut-ring" viewBox="0 0 140 140" aria-hidden="true">
+									<circle class="donut-track" cx="70" cy="70" r="58" />
+									<circle
+										class="donut-progress"
+										cx="70"
+										cy="70"
+										r="58"
+										pathLength="100"
+										stroke-dasharray="{globalCompletionRate} 100"
+									/>
+								</svg>
 								<div class="donut-inner">
 									<span class="donut-val">{globalCompletionRate}%</span>
 									<span class="donut-label">{$i18n.t('stats.completionLabel')}</span>
@@ -1187,21 +1198,44 @@
 		margin-bottom: 16px;
 	}
 	.donut {
+		position: relative;
 		width: 100%;
 		height: 100%;
 		border-radius: 50%;
-		background: conic-gradient(
-			var(--accent, #c8a96e) calc(var(--pct) * 1%),
-			rgba(255, 255, 255, 0.05) 0
-		);
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		box-shadow:
+			0 0 0 1px rgba(255, 255, 255, 0.025),
+			0 0 22px color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+	}
+	.donut-ring {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		transform: rotate(-90deg);
+		overflow: visible;
+	}
+	.donut-track,
+	.donut-progress {
+		fill: none;
+		stroke-width: 12;
+	}
+	.donut-track {
+		stroke: rgba(255, 255, 255, 0.055);
+	}
+	.donut-progress {
+		stroke: color-mix(in srgb, var(--accent, #c8a96e) 82%, #ffffff);
+		stroke-linecap: round;
+		filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent, #c8a96e) 24%, transparent));
+		transition: stroke-dasharray 0.6s ease;
 	}
 	.donut-inner {
-		width: 80%;
-		height: 80%;
+		width: 82%;
+		height: 82%;
 		background: #1a1a1a;
+		box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.22);
 		border-radius: 50%;
 		display: flex;
 		flex-direction: column;

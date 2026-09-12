@@ -527,6 +527,30 @@ pub(crate) async fn sync_steam_metadata(
         for s_id in steam_ids {
             log::info!("[sync] Fetching Steam library for {}", s_id);
 
+            match fetch_steam_user(&effective_api_key, s_id).await {
+                Ok(Some(profile)) if profile.communityvisibilitystate == Some(3) => {}
+                Ok(Some(profile)) => {
+                    log::info!(
+                        "[sync] Skipping Steam library for {}: profile is not public (visibility state {:?})",
+                        s_id,
+                        profile.communityvisibilitystate
+                    );
+                    continue;
+                }
+                Ok(None) => {
+                    log::warn!("[sync] Skipping Steam library for {}: profile was not found", s_id);
+                    continue;
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[sync] Skipping Steam library for {}: unable to verify profile visibility: {}",
+                        s_id,
+                        err
+                    );
+                    continue;
+                }
+            }
+
             let mut all_owned = Vec::new();
 
             // 1. Owned games

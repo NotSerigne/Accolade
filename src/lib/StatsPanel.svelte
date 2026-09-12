@@ -109,37 +109,37 @@
 
 	let rarityRows = $derived.by(() => [
 		{
-			label: rarityLabelByIndex(i18n.language, 0),
+			label: rarityLabelByIndex($i18n.language, 0),
 			count: rarityBreakdown.mythic,
 			className: 'mythic'
 		},
 		{
-			label: rarityLabelByIndex(i18n.language, 1),
+			label: rarityLabelByIndex($i18n.language, 1),
 			count: rarityBreakdown.legendary,
 			className: 'legendary'
 		},
 		{
-			label: rarityLabelByIndex(i18n.language, 2),
+			label: rarityLabelByIndex($i18n.language, 2),
 			count: rarityBreakdown.epic,
 			className: 'epic'
 		},
 		{
-			label: rarityLabelByIndex(i18n.language, 3),
+			label: rarityLabelByIndex($i18n.language, 3),
 			count: rarityBreakdown.veryRare,
 			className: 'very-rare'
 		},
 		{
-			label: rarityLabelByIndex(i18n.language, 4),
+			label: rarityLabelByIndex($i18n.language, 4),
 			count: rarityBreakdown.rare,
 			className: 'rare'
 		},
 		{
-			label: rarityLabelByIndex(i18n.language, 5),
+			label: rarityLabelByIndex($i18n.language, 5),
 			count: rarityBreakdown.uncommon,
 			className: 'uncommon'
 		},
 		{
-			label: rarityLabelByIndex(i18n.language, 6),
+			label: rarityLabelByIndex($i18n.language, 6),
 			count: rarityBreakdown.common,
 			className: 'common'
 		}

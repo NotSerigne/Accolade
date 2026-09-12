@@ -18,6 +18,8 @@ pub struct SteamUser {
     pub steamid: String,
     pub personaname: String,
     pub avatarfull: String,
+    #[serde(default)]
+    pub communityvisibilitystate: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -119,7 +121,15 @@ fn build_icon_url(steam_id: u32, hash: &str) -> String {
     if hash.is_empty() {
         return String::new();
     }
-    format!("https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{steam_id}/{hash}")
+    if hash.starts_with("https://") {
+        return hash.to_string();
+    }
+    if hash.starts_with("http://") {
+        return hash.replacen("http://", "https://", 1);
+    }
+    return format!(
+        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{steam_id}/{hash}"
+    );
 }
 
 fn extract_xml_value(line: &str, tag: &str) -> Option<String> {

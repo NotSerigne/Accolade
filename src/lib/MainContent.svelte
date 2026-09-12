@@ -7,14 +7,14 @@
 
 	function rarityLabel(pct: string): string {
 		const n = parseFloat(pct);
-		if (isNaN(n)) return rarityLabelByIndex(i18n.language, 6);
-		if (n <= 0.1) return rarityLabelByIndex(i18n.language, 0);
-		if (n <= 1) return rarityLabelByIndex(i18n.language, 1);
-		if (n <= 3) return rarityLabelByIndex(i18n.language, 2);
-		if (n <= 7) return rarityLabelByIndex(i18n.language, 3);
-		if (n <= 15) return rarityLabelByIndex(i18n.language, 4);
-		if (n <= 35) return rarityLabelByIndex(i18n.language, 5);
-		return rarityLabelByIndex(i18n.language, 6);
+		if (isNaN(n)) return rarityLabelByIndex($i18n.language, 6);
+		if (n <= 0.1) return rarityLabelByIndex($i18n.language, 0);
+		if (n <= 1) return rarityLabelByIndex($i18n.language, 1);
+		if (n <= 3) return rarityLabelByIndex($i18n.language, 2);
+		if (n <= 7) return rarityLabelByIndex($i18n.language, 3);
+		if (n <= 15) return rarityLabelByIndex($i18n.language, 4);
+		if (n <= 35) return rarityLabelByIndex($i18n.language, 5);
+		return rarityLabelByIndex($i18n.language, 6);
 	}
 
 	function rarityPalette(pct: string) {
@@ -48,14 +48,25 @@
 		});
 	}
 
-	type RecentAchievement = Achievement & { gameName: string; gameId: string };
+	type RecentAchievement = Achievement & {
+		gameName: string;
+		gameId: string;
+		steamId: number | null;
+		gameHeaderImage: string;
+	};
 
 	let recentActivity = $derived.by((): RecentAchievement[] => {
 		return $games
 			.flatMap((g) =>
 				(g.achievements ?? [])
 					.filter((a) => a.unlocked && a.unlocked_time)
-					.map((a) => ({ ...a, gameName: g.name, gameId: g.id }))
+					.map((a) => ({
+						...a,
+						gameName: g.name,
+						gameId: g.id,
+						steamId: g.steam_id,
+						gameHeaderImage: g.header_image_url
+					}))
 			)
 			.sort((a, b) => (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0))
 			.slice(0, 6);
@@ -91,17 +102,32 @@
 								class="activity-icon"
 								onerror={(e) => {
 									const t = e.target as HTMLImageElement;
-									if (!t.src.includes('header.jpg')) {
-										t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${item.gameId}/header.jpg`;
+									if (item.gameHeaderImage && t.src !== item.gameHeaderImage) {
+										t.src = item.gameHeaderImage;
+									} else if (item.steamId && !t.src.includes('/steam/apps/')) {
+										t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${item.steamId}/header.jpg`;
+									} else {
+										t.style.display = 'none';
+										t.parentElement?.classList.add('icon-error');
 									}
 								}}
 							/>
-						{:else}
+							<span class="activity-icon-fallback">🏆</span>
+						{:else if item.gameHeaderImage || item.steamId}
 							<img
-								src="https://cdn.cloudflare.steamstatic.com/steam/apps/{item.gameId}/header.jpg"
+								src={item.gameHeaderImage ||
+									`https://cdn.cloudflare.steamstatic.com/steam/apps/${item.steamId}/header.jpg`}
 								alt={item.name}
 								class="activity-icon"
+								onerror={(e) => {
+									const t = e.target as HTMLImageElement;
+									t.style.display = 'none';
+									t.parentElement?.classList.add('icon-error');
+								}}
 							/>
+							<span class="activity-icon-fallback">🏆</span>
+						{:else}
+							<span class="activity-icon activity-icon-fallback always-visible">🏆</span>
 						{/if}
 					</div>
 					<div class="activity-info">
@@ -210,6 +236,7 @@
 
 	.activity-card {
 		display: flex;
+		align-items: center;
 		gap: 14px;
 		padding: 12px;
 		background: var(--surface-2);
@@ -230,6 +257,12 @@
 
 	.activity-icon-wrap {
 		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 56px;
+		height: 56px;
+		position: relative;
 	}
 
 	.activity-icon {
@@ -238,6 +271,21 @@
 		border-radius: 8px;
 		object-fit: cover;
 		background: var(--surface-3);
+	}
+
+	.activity-icon-fallback {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		font-size: 24px;
+	}
+
+	:global(.activity-icon-wrap.icon-error .activity-icon-fallback) {
+		display: flex;
+	}
+
+	.activity-icon-fallback.always-visible {
+		display: flex;
 	}
 
 	.activity-info {

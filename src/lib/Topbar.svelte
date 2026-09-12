@@ -317,20 +317,6 @@
 		<span class="watching-badge" class:active={$watcherActive}>
 			<span class="watching-dot"></span>{$i18n.t('topbar.scan')}
 		</span>
-		<button class="topbar-icon-btn" title={$i18n.t('topbar.library')}>
-			<svg
-				width="16"
-				height="16"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-			>
-				<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path
-					d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
-				/>
-			</svg>
-		</button>
 	</div>
 </header>
 
@@ -345,25 +331,6 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-	}
-
-	.topbar-icon-btn {
-		width: 32px;
-		height: 32px;
-		border-radius: 8px;
-		border: 0.5px solid var(--border-soft);
-		background: var(--surface-2);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		color: var(--text-muted);
-		flex-shrink: 0;
-		transition: background 0.15s;
-	}
-
-	.topbar-icon-btn:hover {
-		background: var(--surface-hover);
 	}
 
 	.topbar-search {
