@@ -2,10 +2,64 @@
 use crate::achievements::models::{Achievement, Game, SourceType};
 use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata_with_client};
 use futures::stream::{self, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{window::Color, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
+
+/// Last known-good Steam store metadata for a given AppID, persisted to disk.
+///
+/// The Steam store `appdetails` endpoint is strictly rate-limited and frequently
+/// returns `success: false` when too many requests are made in a short window
+/// (which happens easily with large libraries, or repeated syncs during dev/testing).
+/// Without this cache, a rate-limited fetch leaves a game permanently unnamed/imageless
+/// (falling back to a raw `steam_<appid>` id) until a later sync happens to succeed.
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct CachedAppDetails {
+    name: String,
+    header_image_url: String,
+    background_image_url: String,
+    game_icon_url: String,
+    genres: Vec<String>,
+    #[serde(default)]
+    achievements: Vec<Achievement>,
+    fetched_at: u64,
+}
+
+fn appdetails_cache_path(app_handle: &tauri::AppHandle) -> PathBuf {
+    let mut path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    path.push("steam_appdetails_cache.json");
+    path
+}
+
+fn load_appdetails_cache(path: &Path) -> HashMap<u32, CachedAppDetails> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_appdetails_cache(path: &Path, cache: &HashMap<u32, CachedAppDetails>) {
+    if let Ok(json) = serde_json::to_string(cache) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 pub struct AppState {
     pub(crate) games: Mutex<Vec<Game>>,
@@ -82,10 +136,15 @@ pub(crate) async fn enrich_games_with_steam(
     api_key: &str,
     steam_id: &str,
     language: &str,
+    app_handle: &tauri::AppHandle,
 ) {
     if api_key.trim().is_empty() || games.is_empty() {
         return;
     }
+
+    let cache_path = appdetails_cache_path(app_handle);
+    let mut appdetails_cache = load_appdetails_cache(&cache_path);
+    let mut cache_dirty = false;
 
     const STEAM_METADATA_CONCURRENCY: usize = 6;
 
@@ -160,11 +219,24 @@ pub(crate) async fn enrich_games_with_steam(
             }
         }
 
-        let mut merged_achievements = if let Some(meta) = metadata {
-            merge_schema_with_local(meta.achievements.clone(), local_state)
+        // The achievements schema fetch (icons/descriptions/localized names) can fail or be
+        // rate-limited independently from the rest of the metadata. Fall back to the last
+        // known-good cached schema instead of wiping out achievement data for games that have
+        // no local backup (i.e. legitimately-owned Steam games, as opposed to cracked games
+        // which keep their own local unlocker files).
+        let live_achievements = metadata
+            .as_ref()
+            .map(|m| m.achievements.clone())
+            .unwrap_or_default();
+        let schema_source = if !live_achievements.is_empty() {
+            live_achievements
         } else {
-            local_state.clone()
+            appdetails_cache
+                .get(&steam_id)
+                .map(|c| c.achievements.clone())
+                .unwrap_or_default()
         };
+        let mut merged_achievements = merge_schema_with_local(schema_source, local_state);
 
         if let Some(Ok(pa)) = player_achievements_res {
             for (key, info) in pa {
@@ -200,29 +272,87 @@ pub(crate) async fn enrich_games_with_steam(
         game.achievements = merged_achievements;
         game.achievements_total = game.achievements.len() as u32;
 
+        // `name`/images (appdetails) and `achievements` (GetGameAchievements) are fetched via
+        // separate HTTP requests and can succeed or fail independently, so each is cached and
+        // merged separately below rather than treating a partial failure as a total one.
+        let mut cache_entry = appdetails_cache.get(&steam_id).cloned().unwrap_or_default();
+        let mut entry_dirty = false;
+
         if let Some(meta) = metadata {
-            game.genres = meta.genres.clone();
             if !meta.name.is_empty() {
+                // Successful appdetails fetch: use fresh data and refresh the on-disk cache
+                // so future rate-limited fetches for this game can still fall back to it.
                 game.name = meta.name.clone();
-            }
-            if !meta.header_image_url.is_empty() {
-                game.header_image_url = meta.header_image_url.clone();
-            } else {
+                game.genres = meta.genres.clone();
+                game.header_image_url = if !meta.header_image_url.is_empty() {
+                    meta.header_image_url.clone()
+                } else {
+                    format!(
+                        "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
+                        steam_id
+                    )
+                };
+                if !meta.game_icon_url.is_empty() {
+                    game.game_icon = meta.game_icon_url.clone();
+                }
+                game.background_image_url = if !meta.background_image_url.is_empty() {
+                    meta.background_image_url.clone()
+                } else {
+                    format!(
+                        "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
+                        steam_id
+                    )
+                };
+
+                cache_entry.name = meta.name.clone();
+                cache_entry.header_image_url = meta.header_image_url.clone();
+                cache_entry.background_image_url = meta.background_image_url.clone();
+                cache_entry.game_icon_url = meta.game_icon_url.clone();
+                cache_entry.genres = meta.genres.clone();
+                entry_dirty = true;
+            } else if !cache_entry.name.is_empty() {
+                // appdetails likely failed or was rate-limited (success:false) - fall back
+                // to the last known-good cached metadata instead of leaving the game
+                // permanently unnamed/imageless (e.g. showing a raw "steam_<appid>" id).
+                if game.name.is_empty() {
+                    game.name = cache_entry.name.clone();
+                }
+                if game.genres.is_empty() {
+                    game.genres = cache_entry.genres.clone();
+                }
+                if game.header_image_url.is_empty() {
+                    game.header_image_url = if !cache_entry.header_image_url.is_empty() {
+                        cache_entry.header_image_url.clone()
+                    } else {
+                        format!(
+                            "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
+                            steam_id
+                        )
+                    };
+                }
+                if game.game_icon.is_empty() && !cache_entry.game_icon_url.is_empty() {
+                    game.game_icon = cache_entry.game_icon_url.clone();
+                }
+                if game.background_image_url.is_empty() {
+                    game.background_image_url = if !cache_entry.background_image_url.is_empty() {
+                        cache_entry.background_image_url.clone()
+                    } else {
+                        format!(
+                            "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
+                            steam_id
+                        )
+                    };
+                }
+            } else if game.header_image_url.is_empty() {
                 game.header_image_url = format!(
                     "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
                     steam_id
                 );
             }
-            if !meta.game_icon_url.is_empty() {
-                game.game_icon = meta.game_icon_url.clone();
-            }
-            if !meta.background_image_url.is_empty() {
-                game.background_image_url = meta.background_image_url.clone();
-            } else {
-                game.background_image_url = format!(
-                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
-                    steam_id
-                );
+
+            if !meta.achievements.is_empty() {
+                cache_entry.achievements = meta.achievements.clone();
+                entry_dirty = true;
             }
         } else if game.header_image_url.is_empty() {
             game.header_image_url = format!(
@@ -231,12 +361,22 @@ pub(crate) async fn enrich_games_with_steam(
             );
         }
 
+        if entry_dirty {
+            cache_entry.fetched_at = now_unix();
+            appdetails_cache.insert(steam_id, cache_entry);
+            cache_dirty = true;
+        }
+
         log::info!(
             "[enrich] {} (AppID: {}) — {} achievements",
             game.name,
             steam_id,
             game.achievements_total
         );
+    }
+
+    if cache_dirty {
+        save_appdetails_cache(&cache_path, &appdetails_cache);
     }
 }
 
@@ -468,7 +608,7 @@ pub fn run() {
             .background_color(Color(0, 0, 0, 0))
             .always_on_top(true)
             .skip_taskbar(true)
-            .visible(false)
+            .visible(true)
             .build()?;
 
             overlay_win.set_ignore_cursor_events(true)?;

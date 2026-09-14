@@ -236,6 +236,7 @@
 		saveError = '';
 
 		try {
+			const previousShortcut = get(settings).screenshotShortcut;
 			const next: AppSettings = {
 				steamId: draft.steamId,
 				steamApiKey: draft.steamApiKey,
@@ -262,6 +263,11 @@
 				await invoke('update_screenshot_shortcut', { shortcutStr: next.screenshotShortcut });
 			} catch (err) {
 				console.error('Failed to update screenshot shortcut:', err);
+				draft.screenshotShortcut = previousShortcut;
+				await saveSettings({ ...next, screenshotShortcut: previousShortcut });
+				const details = err instanceof Error ? err.message : String(err);
+				saveError = get(i18n).t('settings.shortcutError', { details });
+				return;
 			}
 
 			try {

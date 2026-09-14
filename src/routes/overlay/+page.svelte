@@ -138,8 +138,6 @@
 		if (processingQueue || queue.length === 0) return;
 		processingQueue = true;
 
-		const win = getCurrentWindow();
-
 		while (queue.length > 0) {
 			const payload = queue.shift()!;
 
@@ -157,7 +155,6 @@
 			position = resolvedPosition;
 			achievement = payload;
 			visible = true;
-			await win.show();
 
 			// Wait for animation to finish before taking screenshot
 			await new Promise((resolve) => setTimeout(resolve, 500));
@@ -178,7 +175,6 @@
 
 			visible = false;
 			await new Promise((resolve) => setTimeout(resolve, 600));
-			await win.hide();
 		}
 
 		processingQueue = false;

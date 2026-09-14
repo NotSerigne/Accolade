@@ -421,26 +421,67 @@ pub async fn fetch_steam_metadata_with_client(
     let (lang_res, en_res, details_res) = futures::join!(lang_req, en_req, details_req);
 
     let mut achievements_lang = Vec::new();
-    if let Ok(r) = lang_res {
-        if r.status().is_success() {
+    match lang_res {
+        Ok(r) if r.status().is_success() => {
             if let Ok(text) = r.text().await {
                 achievements_lang = parse_achievements_xml(&text, steam_id);
             }
         }
+        Ok(r) => log::warn!(
+            "[steam metadata] GetGameAchievements ({} lang) HTTP {} for AppID {}",
+            steam_language,
+            r.status(),
+            steam_id
+        ),
+        Err(e) => log::warn!(
+            "[steam metadata] GetGameAchievements ({} lang) request failed for AppID {}: {}",
+            steam_language,
+            steam_id,
+            e
+        ),
     }
 
     let mut achievements_en = Vec::new();
-    if let Ok(r) = en_res {
-        if r.status().is_success() {
+    match en_res {
+        Ok(r) if r.status().is_success() => {
             if let Ok(text) = r.text().await {
                 achievements_en = parse_achievements_xml(&text, steam_id);
             }
         }
+        Ok(r) => log::warn!(
+            "[steam metadata] GetGameAchievements (english) HTTP {} for AppID {}",
+            r.status(),
+            steam_id
+        ),
+        Err(e) => log::warn!(
+            "[steam metadata] GetGameAchievements (english) request failed for AppID {}: {}",
+            steam_id,
+            e
+        ),
     }
 
-    let details_map = details_res?
-        .json::<HashMap<String, AppDetailsEnvelope>>()
-        .await?;
+    let details_map = match details_res {
+        Ok(r) if r.status().is_success() => r
+            .json::<HashMap<String, AppDetailsEnvelope>>()
+            .await
+            .unwrap_or_default(),
+        Ok(r) => {
+            log::warn!(
+                "[steam metadata] appdetails HTTP {} for AppID {}",
+                r.status(),
+                steam_id
+            );
+            HashMap::new()
+        }
+        Err(e) => {
+            log::warn!(
+                "[steam metadata] appdetails request failed for AppID {}: {}",
+                steam_id,
+                e
+            );
+            HashMap::new()
+        }
+    };
 
     let en_map: HashMap<String, &RawAchievement> = achievements_en
         .iter()

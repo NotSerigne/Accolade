@@ -538,7 +538,10 @@ pub(crate) async fn sync_steam_metadata(
                     continue;
                 }
                 Ok(None) => {
-                    log::warn!("[sync] Skipping Steam library for {}: profile was not found", s_id);
+                    log::warn!(
+                        "[sync] Skipping Steam library for {}: profile was not found",
+                        s_id
+                    );
                     continue;
                 }
                 Err(err) => {
@@ -657,6 +660,7 @@ pub(crate) async fn sync_steam_metadata(
             &effective_api_key,
             main_steam_id,
             &language,
+            &app_handle,
         )
         .await;
     }

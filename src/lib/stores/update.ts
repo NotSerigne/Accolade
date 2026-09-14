@@ -63,11 +63,18 @@ export async function checkForUpdates(silent = true): Promise<void> {
 			}
 		} catch (err) {
 			console.error('[update] check failed:', err);
-			updateState.update((s) => ({
-				...s,
-				status: 'error',
-				error: err instanceof Error ? err.message : String(err)
-			}));
+			if (silent) {
+				// A background check failing (offline, endpoint unreachable, dev environment, etc.)
+				// should never interrupt the user with an error toast - only surface errors
+				// when the user explicitly requested the check.
+				updateState.update((s) => ({ ...s, status: 'idle' }));
+			} else {
+				updateState.update((s) => ({
+					...s,
+					status: 'error',
+					error: err instanceof Error ? err.message : String(err)
+				}));
+			}
 		} finally {
 			checkInFlight = null;
 		}

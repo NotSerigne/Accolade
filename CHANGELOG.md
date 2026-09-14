@@ -3,6 +3,20 @@
 All notable changes to Accolade are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.1] - Unreleased
+
+### Fixed
+- **Objectives**: clicking a game card now opens its game page, with keyboard
+  activation supported as well.
+- **Screenshot shortcut**: conflicting global shortcuts now show a clear error
+  and restore the previously working shortcut.
+- **Fullscreen overlay**: achievement notifications no longer trigger freeze or
+  flicker in exclusive fullscreen games.
+- **Steam metadata sync**: rate-limited or partial Steam responses now use
+  cached metadata and achievements instead of leaving games unnamed or empty.
+- **Background updates**: failed silent update checks no longer interrupt users
+  with an error notification; explicit checks still report failures.
+
 ## [1.1.0] - Unreleased
 
 ### Added

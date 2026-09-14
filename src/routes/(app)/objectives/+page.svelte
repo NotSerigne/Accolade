@@ -1,6 +1,8 @@
 <script lang="ts">
 	// src/routes/(app)/objectives/+page.svelte
 	import { games, type Game } from '$lib/stores/Games.js';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { i18n } from '$lib/stores/i18n.js';
 
 	let sortBy = $state('progression');
@@ -110,7 +112,18 @@
 		<section class="games-section">
 			<div class="games-list">
 				{#each sortedGames as game, i (game.id)}
-					<div class="game-objective-card">
+					<div
+						class="game-objective-card"
+						role="button"
+						tabindex="0"
+						onclick={() => void goto(resolve('/(app)/games/[id]', { id: game.id }))}
+						onkeydown={(event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault();
+								void goto(resolve('/(app)/games/[id]', { id: game.id }));
+							}
+						}}
+					>
 						<span class="rank">{i + 1}</span>
 						<img
 							src={getGameIcon(game)}
@@ -314,6 +327,7 @@
 		display: flex;
 		align-items: center;
 		gap: 20px;
+		cursor: pointer;
 		transition: background 0.2s;
 	}
 	.game-objective-card:hover {

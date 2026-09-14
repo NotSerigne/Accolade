@@ -148,6 +148,8 @@ const translations = {
 		'settings.appearance': 'Apparence',
 		'settings.screenshotShortcut': 'Raccourci de capture',
 		'settings.screenshotShortcutDesc': 'Touche pour prendre une capture manuelle',
+		'settings.shortcutError':
+			"Impossible d'utiliser ce raccourci, il est peut-être déjà utilisé par une autre application (ex. Steam) : {details}",
 		'settings.language': 'Langue',
 		'settings.languageInterface': 'Interface',
 		'settings.languageDesc': "Langue de l'interface et des données Steam",
@@ -485,6 +487,8 @@ const translations = {
 		'settings.appearance': 'Appearance',
 		'settings.screenshotShortcut': 'Screenshot shortcut',
 		'settings.screenshotShortcutDesc': 'Key to take a manual screenshot',
+		'settings.shortcutError':
+			'Could not use this shortcut, it may already be in use by another application (e.g. Steam): {details}',
 		'settings.language': 'Language',
 		'settings.languageInterface': 'Interface',
 		'settings.languageDesc': 'Language for the interface and Steam data',
