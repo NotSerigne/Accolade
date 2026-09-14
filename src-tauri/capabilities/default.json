@@ -17,6 +17,8 @@
 		"core:app:default",
 		"core:image:default",
 		"core:webview:default",
-		"core:resources:default"
+		"core:resources:default",
+		"updater:default",
+		"process:allow-restart"
 	]
 }

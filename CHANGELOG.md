@@ -3,6 +3,15 @@
 All notable changes to Accolade are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.0] - Unreleased
+
+### Added
+- **Auto-update**: Accolade now checks GitHub Releases for new versions on
+  startup and lets users download and install updates in-app, without
+  reinstalling manually. A notification appears when an update is available,
+  and a "Check for updates" button was added to Settings. Updates are
+  cryptographically signed and verified before installation.
+
 ## [1.0.4] - 2025-08-07
 
 ### Fixed

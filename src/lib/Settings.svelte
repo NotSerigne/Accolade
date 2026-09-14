@@ -19,6 +19,8 @@
 		rarityLabelByIndex,
 		type TranslationKey
 	} from '$lib/stores/i18n.js';
+	import { updateState, checkForUpdates } from '$lib/stores/update.js';
+	import { getVersion } from '@tauri-apps/api/app';
 
 	let draft = $state<AppSettings>({ ...get(settings) });
 
@@ -29,6 +31,11 @@
 	let previewAudio = $state<HTMLAudioElement | null>(null);
 	let previewingSound = $state('');
 	let isRecordingShortcut = $state(false);
+	let appVersion = $state('');
+
+	getVersion()
+		.then((v) => (appVersion = v))
+		.catch(() => {});
 
 	function handleShortcutKeydown(e: KeyboardEvent) {
 		if (!isRecordingShortcut) return;
@@ -758,6 +765,49 @@
 						<circle cx="12" cy="13" r="4" />
 					</svg>
 					Prendre une capture
+				</button>
+			</div>
+		</section>
+
+		<div class="separator"></div>
+
+		<!-- ── Section Mises à jour ── -->
+		<section class="settings-section">
+			<div class="section-label">{$i18n.t('update.section')}</div>
+			<div class="setting-row">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('update.currentVersion')}</div>
+					<div class="setting-desc">
+						{#if $updateState.status === 'checking'}
+							{$i18n.t('update.checking')}
+						{:else if $updateState.status === 'up-to-date'}
+							{$i18n.t('update.upToDate')}
+						{:else if $updateState.status === 'available'}
+							{$i18n.t('update.available', { version: $updateState.version ?? '' })}
+						{:else if $updateState.status === 'error'}
+							{$i18n.t('update.error')}
+						{:else}
+							v{appVersion}
+						{/if}
+					</div>
+				</div>
+				<button
+					class="test-btn"
+					disabled={$updateState.status === 'checking' || $updateState.status === 'downloading'}
+					onclick={() => checkForUpdates(false)}
+				>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+					>
+						<path d="M21 12a9 9 0 1 1-3-6.7" />
+						<polyline points="21 3 21 9 15 9" />
+					</svg>
+					{$i18n.t('update.checkForUpdates')}
 				</button>
 			</div>
 		</section>

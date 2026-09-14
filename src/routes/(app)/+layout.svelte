@@ -18,6 +18,8 @@
 	import { selectedGame, extractGameThemeColor } from '$lib/stores/selectedGame.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { checkForUpdates } from '$lib/stores/update.js';
+	import UpdateNotice from '$lib/UpdateNotice.svelte';
 
 	let { children } = $props();
 	let isSetupRoute = $derived(page.url.pathname.startsWith('/setup'));
@@ -121,6 +123,8 @@
 				sgdbKeyLen: s.steamGridDbApiKey?.length
 			});
 			await syncSteamMetadata(s.steamApiKey, s.steamGridDbApiKey);
+
+			void checkForUpdates(true);
 		})();
 
 		return () => {
@@ -176,9 +180,11 @@
 		></button>
 		<div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
 			<Settings />
+			</div>
 		</div>
-	</div>
-{/if}
+	{/if}
+
+	<UpdateNotice />
 
 <style>
 	.app-container {
