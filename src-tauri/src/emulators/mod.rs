@@ -17,6 +17,46 @@ pub trait EmulatorParser {
     fn emulator(&self) -> Emulator;
 }
 
+/// Normalizes a raw (current, max) progress pair read from an emulator file.
+///
+/// Emulators write `0`/`0` (or nothing at all) for achievements that are not
+/// progress-based, so progress is only reported when the target is strictly
+/// positive. The current value is clamped to `[0, max]`.
+pub(crate) fn normalize_progress(
+    current: Option<f64>,
+    max: Option<f64>,
+) -> (Option<f64>, Option<f64>) {
+    match max {
+        Some(max) if max.is_finite() && max > 0.0 => {
+            let current = current
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.0)
+                .clamp(0.0, max);
+            (Some(current), Some(max))
+        }
+        _ => (None, None),
+    }
+}
+
+/// Same as [`normalize_progress`] but from raw INI string values.
+pub(crate) fn parse_progress_str(
+    current: Option<&str>,
+    max: Option<&str>,
+) -> (Option<f64>, Option<f64>) {
+    let parse =
+        |raw: Option<&str>| raw.and_then(|v| v.trim().trim_matches('"').parse::<f64>().ok());
+    normalize_progress(parse(current), parse(max))
+}
+
+/// Case-insensitive lookup of the first matching key in an INI section.
+pub(crate) fn ini_get_ci<'a>(prop: &'a ini::Properties, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|wanted| {
+        prop.iter()
+            .find(|(k, _)| k.trim().eq_ignore_ascii_case(wanted))
+            .map(|(_, v)| v)
+    })
+}
+
 pub fn game_scanner(parsers: Vec<Box<dyn EmulatorParser>>) -> Vec<Game> {
     let mut games: Vec<Game> = Vec::new();
 
@@ -91,4 +131,41 @@ fn extract_steam_id_from_path(path: &str) -> u32 {
     }
 
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_ignored_when_max_is_zero_or_missing() {
+        assert_eq!(parse_progress_str(Some("0"), Some("0")), (None, None));
+        assert_eq!(parse_progress_str(Some("5"), None), (None, None));
+        assert_eq!(parse_progress_str(None, None), (None, None));
+        assert_eq!(parse_progress_str(Some("abc"), Some("xyz")), (None, None));
+    }
+
+    #[test]
+    fn progress_parsed_and_clamped() {
+        assert_eq!(
+            parse_progress_str(Some("37"), Some("100")),
+            (Some(37.0), Some(100.0))
+        );
+        assert_eq!(
+            parse_progress_str(Some("150"), Some("100")),
+            (Some(100.0), Some(100.0))
+        );
+        assert_eq!(
+            parse_progress_str(Some("-3"), Some("10")),
+            (Some(0.0), Some(10.0))
+        );
+        assert_eq!(
+            parse_progress_str(None, Some("10")),
+            (Some(0.0), Some(10.0))
+        );
+        assert_eq!(
+            parse_progress_str(Some(" 2.5 "), Some("\"5\"")),
+            (Some(2.5), Some(5.0))
+        );
+    }
 }

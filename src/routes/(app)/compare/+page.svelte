@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import type { Game } from '$lib/stores/Games.js';
 	import type { SteamUser } from '$lib/stores/user.js';
 	import { calculateAdvancedStats } from '$lib/stores/selectedGame.js';
@@ -18,54 +21,144 @@
 
 	let profile1 = $state<ProfileData | null>(null);
 	let profile2 = $state<ProfileData | null>(null);
+	let isDraggingOver = $state(false);
+	let dragHoverSlot = $state<1 | 2 | null>(null);
+	let slot1El: HTMLElement | null = null;
+	let slot2El: HTMLElement | null = null;
+
+	function parseJsonText(rawText: string): ProfileData | null {
+		try {
+			const data = JSON.parse(rawText);
+			let profile: ProfileData;
+
+			if (Array.isArray(data)) {
+				profile = { games: data };
+			} else if (data && Array.isArray(data.games)) {
+				profile = data;
+			} else {
+				return null;
+			}
+
+			if (!profile.stats) {
+				profile.stats = calculateAdvancedStats(profile.games);
+			}
+
+			return profile;
+		} catch {
+			return null;
+		}
+	}
 
 	async function parseFile(file: File): Promise<ProfileData | null> {
 		if (!file.name.toLowerCase().endsWith('.json')) return null;
 		return new Promise((resolve) => {
 			const reader = new FileReader();
 			reader.onload = (e) => {
-				try {
-					const data = JSON.parse(e.target?.result as string);
-					let profile: ProfileData;
-
-					if (Array.isArray(data)) {
-						profile = { games: data };
-					} else if (data.games) {
-						profile = data;
-					} else {
-						return resolve(null);
-					}
-
-					// Calculer les stats si elles manquent
-					if (!profile.stats) {
-						profile.stats = calculateAdvancedStats(profile.games);
-					}
-
-					resolve(profile);
-				} catch {
-					resolve(null);
-				}
+				resolve(parseJsonText((e.target?.result as string) || ''));
 			};
 			reader.readAsText(file);
 		});
 	}
 
-	async function handleFiles(files: FileList | File[]) {
+	function assignProfile(data: ProfileData, targetSlot?: 1 | 2 | null) {
+		if (targetSlot === 1) {
+			profile1 = data;
+		} else if (targetSlot === 2) {
+			profile2 = data;
+		} else if (!profile1) {
+			profile1 = data;
+		} else if (!profile2) {
+			profile2 = data;
+		} else {
+			profile1 = profile2;
+			profile2 = data;
+		}
+	}
+
+	async function handleFiles(files: FileList | File[], targetSlot?: 1 | 2 | null) {
 		const validFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.json'));
 		if (validFiles.length === 0) return;
 
-		for (const file of validFiles) {
-			const data = await parseFile(file);
+		for (let i = 0; i < validFiles.length; i++) {
+			const data = await parseFile(validFiles[i]);
 			if (data) {
-				if (!profile1) profile1 = data;
-				else if (!profile2) profile2 = data;
-				else {
-					profile1 = profile2;
-					profile2 = data;
-				}
+				assignProfile(data, validFiles.length === 1 ? targetSlot : null);
 			}
 		}
 	}
+
+	async function handleDroppedPaths(paths: string[], targetSlot?: 1 | 2 | null) {
+		const jsonPaths = paths.filter((p) => p.toLowerCase().endsWith('.json'));
+		if (jsonPaths.length === 0) return;
+
+		for (let i = 0; i < jsonPaths.length; i++) {
+			try {
+				const raw = await invoke<string>('read_json_file', { path: jsonPaths[i] });
+				const data = parseJsonText(raw);
+				if (data) {
+					assignProfile(data, jsonPaths.length === 1 ? targetSlot : null);
+				}
+			} catch (err) {
+				console.error('[compare] Failed to read dropped JSON file:', err);
+			}
+		}
+	}
+
+	function detectSlotAtPosition(x: number, y: number): 1 | 2 | null {
+		const scale = window.devicePixelRatio || 1;
+		const candidates = [
+			{ cx: x, cy: y },
+			{ cx: x / scale, cy: y / scale }
+		];
+
+		for (const { cx, cy } of candidates) {
+			if (slot1El) {
+				const r1 = slot1El.getBoundingClientRect();
+				if (cx >= r1.left && cx <= r1.right && cy >= r1.top && cy <= r1.bottom) return 1;
+			}
+			if (slot2El) {
+				const r2 = slot2El.getBoundingClientRect();
+				if (cx >= r2.left && cx <= r2.right && cy >= r2.top && cy <= r2.bottom) return 2;
+			}
+		}
+		return null;
+	}
+
+	onMount(() => {
+		let unlisten: (() => void) | null = null;
+		const win = getCurrentWindow();
+		void win
+			.onDragDropEvent((event) => {
+				const payload = event.payload;
+				if (payload.type === 'enter' || payload.type === 'over') {
+					isDraggingOver = true;
+					if ('position' in payload && payload.position) {
+						dragHoverSlot = detectSlotAtPosition(payload.position.x, payload.position.y);
+					}
+				} else if (payload.type === 'leave') {
+					isDraggingOver = false;
+					dragHoverSlot = null;
+				} else if (payload.type === 'drop') {
+					const slot =
+						'position' in payload && payload.position
+							? detectSlotAtPosition(payload.position.x, payload.position.y)
+							: dragHoverSlot;
+					isDraggingOver = false;
+					dragHoverSlot = null;
+					if ('paths' in payload && payload.paths?.length) {
+						void handleDroppedPaths(payload.paths, slot);
+					}
+				}
+			})
+			.then((fn) => {
+				unlisten = fn;
+			})
+			.catch(() => {});
+
+		return () => {
+			unlisten?.();
+		};
+	});
 
 	const statsSummary = $derived.by(() => {
 		if (!profile1 || !profile2) return null;
@@ -116,7 +209,52 @@
 	}
 </script>
 
-<div class="compare-page">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="compare-page"
+	class:is-dragging={isDraggingOver}
+	ondragover={(e) => {
+		e.preventDefault();
+		isDraggingOver = true;
+	}}
+	ondragleave={(e) => {
+		if (e.currentTarget === e.target) {
+			isDraggingOver = false;
+			dragHoverSlot = null;
+		}
+	}}
+	ondrop={(e) => {
+		e.preventDefault();
+		const slot = dragHoverSlot;
+		isDraggingOver = false;
+		dragHoverSlot = null;
+		if (e.dataTransfer?.files?.length) {
+			void handleFiles(e.dataTransfer.files, slot);
+		}
+	}}
+>
+	{#if isDraggingOver}
+		<div class="drop-overlay">
+			<div class="drop-overlay-box">
+				<svg
+					width="44"
+					height="44"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+					<polyline points="7 10 12 15 17 10" />
+					<line x1="12" y1="15" x2="12" y2="3" />
+				</svg>
+				<span>{$i18n.t('compare.dropOverlay')}</span>
+			</div>
+		</div>
+	{/if}
+
 	<header class="page-header">
 		<h1>{$i18n.t('compare.title')}</h1>
 		<p class="subtitle">{$i18n.t('compare.subtitle')}</p>
@@ -143,15 +281,46 @@
 					multiple
 					onchange={(e) => {
 						const input = e.target as HTMLInputElement;
-						if (input.files) handleFiles(input.files);
+						if (input.files) void handleFiles(input.files);
 					}}
 				/>
 			</label>
 		</div>
+		<p class="drop-hint-label">{$i18n.t('compare.dropHint')}</p>
 	</header>
 
 	<div class="profiles-overview">
-		<div class="profile-slot" class:active={profile1}>
+		<label
+			class="profile-slot"
+			class:active={profile1}
+			class:drag-target={dragHoverSlot === 1}
+			bind:this={slot1El}
+			ondragover={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				isDraggingOver = true;
+				dragHoverSlot = 1;
+			}}
+			ondrop={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				isDraggingOver = false;
+				dragHoverSlot = null;
+				if (e.dataTransfer?.files?.length) {
+					void handleFiles(e.dataTransfer.files, 1);
+				}
+			}}
+		>
+			<input
+				type="file"
+				accept=".json"
+				class="slot-file-input"
+				onchange={(e) => {
+					const input = e.target as HTMLInputElement;
+					if (input.files) void handleFiles(input.files, 1);
+					input.value = '';
+				}}
+			/>
 			{#if profile1}
 				<div class="user-info-card">
 					<img
@@ -161,7 +330,9 @@
 						class="user-avatar"
 					/>
 					<div class="user-meta">
-						<span class="user-name">{profile1.user?.personaname || $i18n.t('compare.defaultProfile1')}</span>
+						<span class="user-name"
+							>{profile1.user?.personaname || $i18n.t('compare.defaultProfile1')}</span
+						>
 						<span class="user-games">{profile1.games.length} jeux</span>
 					</div>
 				</div>
@@ -171,11 +342,41 @@
 					<span>{$i18n.t('compare.profile1NotLoaded')}</span>
 				</div>
 			{/if}
-		</div>
+		</label>
 
 		<div class="vs-badge">VS</div>
 
-		<div class="profile-slot" class:active={profile2}>
+		<label
+			class="profile-slot"
+			class:active={profile2}
+			class:drag-target={dragHoverSlot === 2}
+			bind:this={slot2El}
+			ondragover={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				isDraggingOver = true;
+				dragHoverSlot = 2;
+			}}
+			ondrop={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				isDraggingOver = false;
+				dragHoverSlot = null;
+				if (e.dataTransfer?.files?.length) {
+					void handleFiles(e.dataTransfer.files, 2);
+				}
+			}}
+		>
+			<input
+				type="file"
+				accept=".json"
+				class="slot-file-input"
+				onchange={(e) => {
+					const input = e.target as HTMLInputElement;
+					if (input.files) void handleFiles(input.files, 2);
+					input.value = '';
+				}}
+			/>
 			{#if profile2}
 				<div class="user-info-card">
 					<img
@@ -185,7 +386,9 @@
 						class="user-avatar"
 					/>
 					<div class="user-meta">
-						<span class="user-name">{profile2.user?.personaname || $i18n.t('compare.defaultProfile2')}</span>
+						<span class="user-name"
+							>{profile2.user?.personaname || $i18n.t('compare.defaultProfile2')}</span
+						>
 						<span class="user-games">{profile2.games.length} jeux</span>
 					</div>
 				</div>
@@ -195,7 +398,7 @@
 					<span>{$i18n.t('compare.profile2NotLoaded')}</span>
 				</div>
 			{/if}
-		</div>
+		</label>
 	</div>
 
 	{#if profile1 && profile2}
@@ -270,7 +473,7 @@
 
 		{#if commonGames.length > 0}
 			<section class="comparison-details">
-				<h2>Comparaison des jeux communs</h2>
+				<h2>{$i18n.t('compare.commonGamesComparison')}</h2>
 				<div class="compare-grid">
 					{#each commonGames as game (game.id)}
 						{@const g1 = getGameStats(profile1!, game.id)}
@@ -339,6 +542,33 @@
 		position: relative;
 	}
 
+	.drop-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		background: rgba(10, 12, 18, 0.72);
+		backdrop-filter: blur(6px);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+	}
+
+	.drop-overlay-box {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 14px;
+		padding: 36px 56px;
+		border-radius: 20px;
+		border: 2px dashed var(--accent, #c8a96e);
+		background: rgba(200, 169, 110, 0.1);
+		color: var(--accent, #c8a96e);
+		font-size: 1.1rem;
+		font-weight: 700;
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+	}
+
 	/* Subtile Floating Scrollbar */
 	.compare-page::-webkit-scrollbar {
 		width: 14px;
@@ -362,7 +592,7 @@
 
 	.page-header {
 		text-align: center;
-		margin-bottom: 50px;
+		margin-bottom: 40px;
 	}
 	h1 {
 		font-size: 2.2rem;
@@ -378,6 +608,12 @@
 		display: flex;
 		justify-content: center;
 		margin-top: 10px;
+	}
+
+	.drop-hint-label {
+		margin-top: 12px;
+		font-size: 0.82rem;
+		color: var(--text-muted);
 	}
 
 	.upload-btn {
@@ -400,7 +636,8 @@
 		box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 40%, transparent);
 	}
 
-	.upload-btn input {
+	.upload-btn input,
+	.slot-file-input {
 		display: none;
 	}
 
@@ -416,15 +653,24 @@
 		width: 340px;
 		height: 100px;
 		background: var(--surface-1);
-		border: 1px solid var(--border-soft);
+		border: 1px dashed var(--border-soft);
 		border-radius: 16px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		transition: all 0.3s;
+		cursor: pointer;
+		transition: all 0.25s ease;
+	}
+
+	.profile-slot:hover,
+	.profile-slot.drag-target {
+		border-color: var(--accent, #c8a96e);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 8%, var(--surface-1));
+		transform: translateY(-2px);
 	}
 
 	.profile-slot.active {
+		border-style: solid;
 		border-color: var(--accent);
 		background: var(--surface-2);
 	}
@@ -461,7 +707,7 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 8px;
-		opacity: 0.4;
+		opacity: 0.5;
 	}
 	.placeholder-card .icon {
 		font-size: 1.5rem;

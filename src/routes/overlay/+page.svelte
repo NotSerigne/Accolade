@@ -7,6 +7,7 @@
 	import { Store } from '@tauri-apps/plugin-store';
 	import { invoke } from '@tauri-apps/api/core';
 	import AchievementNotif from '$lib/AchievementNotif.svelte';
+	import HudTracker from '$lib/HudTracker.svelte';
 
 	type WindowPosition =
 		| 'top-left'
@@ -28,6 +29,28 @@
 		test?: boolean;
 		game_id?: string;
 		ach_key?: string;
+		is_progress?: boolean;
+		progress_current?: number;
+		progress_max?: number;
+	}
+
+	interface HudAchievement {
+		key: string;
+		name: string;
+		desc: string;
+		icon: string;
+		icon_gray: string;
+		unlocked: boolean;
+		unlocked_time: number | null;
+		progress?: number | null;
+		max_progress?: number | null;
+	}
+
+	interface HudData {
+		game_id: string;
+		game_name: string;
+		achievements: HudAchievement[];
+		pinned_keys: string[];
 	}
 
 	const NOTIF_WIDTH = 460;
@@ -131,6 +154,44 @@
 	let visible = $state(false);
 	let position = $state<WindowPosition>('top-right');
 
+	let hudVisible = $state(false);
+	let hudGameName = $state('');
+	let hudItems = $state<HudAchievement[]>([]);
+
+	async function refreshHudData(): Promise<void> {
+		try {
+			const data = await invoke<HudData | null>('get_hud_data', { fallbackGameId: typeof localStorage !== 'undefined' ? localStorage.getItem('accolade:selected-game:v1') : null });
+			if (!data) {
+				hudGameName = '';
+				hudItems = [];
+				return;
+			}
+			hudGameName = data.game_name;
+			const pinSet = new Set(data.pinned_keys.map((k) => k.trim().toLowerCase()));
+			if (pinSet.size > 0) {
+				hudItems = data.achievements
+					.filter((a) => pinSet.has(a.key.trim().toLowerCase()))
+					.slice(0, 4);
+			} else {
+				hudItems = data.achievements
+					.filter((a) => !a.unlocked && !a.unlocked_time)
+					.slice(0, 3);
+			}
+		} catch (e) {
+			console.error('Failed to refresh HUD data:', e);
+		}
+	}
+
+	async function toggleHud(): Promise<void> {
+		if (!hudVisible) {
+			await positionOverlay('top-left');
+			await refreshHudData();
+			hudVisible = true;
+		} else {
+			hudVisible = false;
+		}
+	}
+
 	let queue: Achievement[] = [];
 	let processingQueue = false;
 
@@ -148,7 +209,9 @@
 				await getOverlayPreferences();
 			const resolvedPosition = await positionOverlay(windowPosition);
 
-			playNotificationSound(notificationSound, notificationVolume);
+			if (!payload.is_progress) {
+				playNotificationSound(notificationSound, notificationVolume);
+			}
 
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -159,7 +222,12 @@
 			// Wait for animation to finish before taking screenshot
 			await new Promise((resolve) => setTimeout(resolve, 500));
 
-			if (!achievement.test && achievement.game_id && achievement.ach_key) {
+			if (
+				!achievement.test &&
+				!achievement.is_progress &&
+				achievement.game_id &&
+				achievement.ach_key
+			) {
 				try {
 					await invoke('capture_automatic_screenshot', {
 						gameId: achievement.game_id,
@@ -170,30 +238,51 @@
 				}
 			}
 
-			// Wait for notification to be visible (5s total, 500ms already passed) + fade out (0.6s)
-			await new Promise((resolve) => setTimeout(resolve, 5100));
+			const holdMs = payload.is_progress ? 3000 : 5100;
+			await new Promise((resolve) => setTimeout(resolve, holdMs));
 
 			visible = false;
 			await new Promise((resolve) => setTimeout(resolve, 600));
 		}
 
+		if (hudVisible) {
+			await positionOverlay('top-left');
+		}
 		processingQueue = false;
 	}
 
 	onMount(() => {
-		let unlisten: (() => void) | undefined;
+		const cleanups: Array<() => void> = [];
 
 		listen<Achievement>('achievement-notif', (event) => {
 			queue.push(event.payload);
 			processQueue();
-		}).then((cleanup) => {
-			unlisten = cleanup;
-		});
+		}).then((fn) => cleanups.push(fn));
+
+		listen('toggle-hud', () => {
+			void toggleHud();
+		}).then((fn) => cleanups.push(fn));
+
+		listen('achievements-updated', () => {
+			if (hudVisible) void refreshHudData();
+		}).then((fn) => cleanups.push(fn));
+
+		listen('pinned-achievements-updated', () => {
+			if (hudVisible) void refreshHudData();
+		}).then((fn) => cleanups.push(fn));
+
+		listen('running-game-changed', () => {
+			if (hudVisible) void refreshHudData();
+		}).then((fn) => cleanups.push(fn));
 
 		return () => {
-			unlisten?.();
+			for (const fn of cleanups) fn();
 		};
 	});
 </script>
 
-<AchievementNotif {achievement} {visible} {position} />
+{#if visible && achievement}
+	<AchievementNotif {achievement} {visible} {position} />
+{:else if hudVisible}
+	<HudTracker visible={hudVisible} gameName={hudGameName} achievements={hudItems} />
+{/if}

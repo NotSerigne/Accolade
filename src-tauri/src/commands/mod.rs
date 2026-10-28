@@ -762,3 +762,112 @@ pub fn open_screenshots_dir(app_handle: tauri::AppHandle) -> Result<(), String> 
         .open_path(path.to_string_lossy().to_string(), None::<String>)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn get_pinned_achievements(app_handle: tauri::AppHandle, game_id: String) -> Vec<String> {
+    load_user_data(&app_handle)
+        .pinned_achievements
+        .remove(&game_id)
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn toggle_pinned_achievement(
+    app_handle: tauri::AppHandle,
+    game_id: String,
+    ach_key: String,
+) -> Result<Vec<String>, String> {
+    let mut user_data = load_user_data(&app_handle);
+    let pins = user_data
+        .pinned_achievements
+        .entry(game_id.clone())
+        .or_default();
+    let wanted = ach_key.trim().to_lowercase();
+    if let Some(pos) = pins.iter().position(|k| k.trim().to_lowercase() == wanted) {
+        pins.remove(pos);
+    } else {
+        pins.push(ach_key);
+    }
+    let updated = pins.clone();
+    save_user_data(&app_handle, &user_data)?;
+    let _ = tauri::Emitter::emit(
+        &app_handle,
+        "pinned-achievements-updated",
+        serde_json::json!({ "game_id": game_id, "pins": updated }),
+    );
+    Ok(updated)
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct HudData {
+    pub game_id: String,
+    pub game_name: String,
+    pub achievements: Vec<Achievement>,
+    pub pinned_keys: Vec<String>,
+}
+
+#[tauri::command]
+pub fn get_hud_data(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    fallback_game_id: Option<String>,
+) -> Option<HudData> {
+    let running = state.running_game.lock().ok().and_then(|g| g.clone());
+    let games = state.games.lock().ok()?;
+    let user_data = load_user_data(&app_handle);
+
+    let target = running
+        .as_ref()
+        .and_then(|r| {
+            games.iter().find(|g| {
+                r.game_id.as_ref().is_some_and(|id| &g.id == id) || g.steam_id == Some(r.app_id)
+            })
+        })
+        .or_else(|| {
+            fallback_game_id
+                .as_ref()
+                .and_then(|id| games.iter().find(|g| &g.id == id))
+        })
+        .or_else(|| {
+            // Fall back to the first game that has at least one pinned achievement.
+            games.iter().find(|g| {
+                user_data
+                    .pinned_achievements
+                    .get(&g.id)
+                    .is_some_and(|p| !p.is_empty())
+            })
+        })?;
+
+    let pinned_keys = user_data
+        .pinned_achievements
+        .get(&target.id)
+        .cloned()
+        .unwrap_or_default();
+
+    Some(HudData {
+        game_id: target.id.clone(),
+        game_name: if target.name.is_empty() {
+            target.id.clone()
+        } else {
+            target.name.clone()
+        },
+        achievements: target.achievements.clone(),
+        pinned_keys,
+    })
+}
+
+#[tauri::command]
+pub fn get_all_pinned_achievements(
+    app_handle: tauri::AppHandle,
+) -> std::collections::HashMap<String, Vec<String>> {
+    load_user_data(&app_handle).pinned_achievements
+}
+
+#[tauri::command]
+pub fn read_json_file(path: String) -> Result<String, String> {
+    let trimmed = path.trim();
+    if !trimmed.to_ascii_lowercase().ends_with(".json") {
+        return Err("Only .json files are allowed".to_string());
+    }
+    std::fs::read_to_string(trimmed).map_err(|e| e.to_string())
+}

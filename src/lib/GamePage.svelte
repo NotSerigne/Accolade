@@ -3,6 +3,7 @@
 	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { listen } from '@tauri-apps/api/event';
+	import { invoke } from '@tauri-apps/api/core';
 	import { loadAchievements, type Game, type Achievement, games } from '$lib/stores/Games.js';
 	import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
 	import { goto } from '$app/navigation';
@@ -53,6 +54,37 @@
 	}
 
 	let copiedKey = $state<string | null>(null);
+	let pinnedKeys = $state<string[]>([]);
+
+	$effect(() => {
+		const gid = game?.id;
+		if (!gid) {
+			pinnedKeys = [];
+			return;
+		}
+		void invoke<string[]>('get_pinned_achievements', { gameId: gid })
+			.then((pins) => {
+				pinnedKeys = pins ?? [];
+			})
+			.catch(() => {});
+	});
+
+	function isPinned(key: string): boolean {
+		const norm = key.trim().toLowerCase();
+		return pinnedKeys.some((k) => k.trim().toLowerCase() === norm);
+	}
+
+	async function togglePin(key: string): Promise<void> {
+		if (!game) return;
+		try {
+			pinnedKeys = await invoke<string[]>('toggle_pinned_achievement', {
+				gameId: game.id,
+				achKey: key
+			});
+		} catch (e) {
+			console.error('Failed to toggle pin:', e);
+		}
+	}
 
 	function copyToClipboard(text: string, key: string) {
 		navigator.clipboard.writeText(text);
@@ -342,6 +374,10 @@
 			achievementJumpIntent.set(null);
 		})();
 	});
+
+	function formatProgressVal(n: number): string {
+		return Number.isInteger(n) ? String(n) : n.toFixed(1);
+	}
 
 	function formatDate(ts: number | null): string {
 		if (!ts) return '';
@@ -794,6 +830,19 @@
 												</div>
 
 												<div class="ach-footer-row">
+													{#if isLocked && ach.max_progress && ach.max_progress > 0}
+														{@const cur = ach.progress ?? 0}
+														{@const pct = Math.min(Math.max((cur / ach.max_progress) * 100, 0), 100)}
+														<div class="ach-progress-info">
+															<span class="ach-progress-tag">
+																{formatProgressVal(cur)} / {formatProgressVal(ach.max_progress)}
+															</span>
+															<div class="rarity-progress-track">
+																<div class="ach-progress-fill" style:width="{pct}%"></div>
+															</div>
+														</div>
+													{/if}
+
 													{#if ach.completionpercentage}
 														<div class="rarity-info">
 															<span
@@ -816,6 +865,26 @@
 													{/if}
 
 													<div class="ach-actions">
+														<button
+															class="action-btn"
+															class:is-copied={isPinned(ach.key)}
+															onclick={() => togglePin(ach.key)}
+														>
+															<svg
+																width="11"
+																height="11"
+																viewBox="0 0 24 24"
+																fill={isPinned(ach.key) ? 'currentColor' : 'none'}
+																stroke="currentColor"
+																stroke-width="2.5"
+																stroke-linecap="round"
+																stroke-linejoin="round"
+															>
+																<line x1="12" y1="17" x2="12" y2="22" />
+																<path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+															</svg>
+															{isPinned(ach.key) ? $i18n.t('hud.unpin') : $i18n.t('hud.pin')}
+														</button>
 														<button
 															class="action-btn"
 															class:is-copied={copiedKey === ach.key}
@@ -1836,6 +1905,26 @@
 	.rarity-progress-fill {
 		height: 100%;
 		border-radius: 3px;
+	}
+	.ach-progress-info {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-right: 12px;
+	}
+	.ach-progress-tag {
+		font-size: 9px;
+		font-weight: 800;
+		padding: 2px 7px;
+		border-radius: 4px;
+		background: color-mix(in srgb, var(--accent, #c8a96e) 16%, transparent);
+		color: var(--accent, #c8a96e);
+		letter-spacing: 0.4px;
+	}
+	.ach-progress-fill {
+		height: 100%;
+		border-radius: 3px;
+		background: var(--accent, #c8a96e);
 	}
 
 	.ach-actions {

@@ -532,6 +532,7 @@ pub async fn fetch_steam_metadata_with_client(
                 completionpercentage: format!("{:.1}", a.player_percent_unlocked),
                 desc,
                 hidden: a.hidden,
+                ..Default::default()
             }
         })
         .collect();

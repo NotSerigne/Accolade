@@ -67,6 +67,9 @@ pub struct AppState {
     pub(crate) ra_username: Mutex<String>,
     pub(crate) ra_api_key: Mutex<String>,
     pub(crate) language: Mutex<String>,
+    pub(crate) running_game: Mutex<Option<game_detector::RunningGame>>,
+    pub(crate) screenshot_shortcut: Mutex<String>,
+    pub(crate) hud_shortcut: Mutex<String>,
 }
 
 fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> Vec<Achievement> {
@@ -114,6 +117,8 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
                         s.desc
                     },
                     hidden: s.hidden,
+                    progress: live.progress,
+                    max_progress: live.max_progress,
                 }
             } else {
                 s
@@ -454,30 +459,89 @@ pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
     }
 }
 
-#[tauri::command]
-fn update_screenshot_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<(), String> {
+fn register_all_shortcuts(
+    app: &tauri::AppHandle,
+    screenshot_str: &str,
+    hud_str: &str,
+) -> Result<(), String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
-    log::info!("[Shortcut] Manual registration request: {}", shortcut_str);
+    let parse_opt = |s: &str| -> Result<Option<Shortcut>, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+            return Ok(None);
+        }
+        trimmed
+            .parse::<Shortcut>()
+            .map(Some)
+            .map_err(|e| format!("Invalid shortcut format '{}': {}", trimmed, e))
+    };
 
-    let shortcut: Shortcut = shortcut_str.parse().map_err(|e| {
-        let err = format!("Invalid shortcut format '{}': {}", shortcut_str, e);
-        log::error!("{}", err);
-        err
-    })?;
+    let shot = parse_opt(screenshot_str)?;
+    let hud = parse_opt(hud_str)?;
 
-    // Unregister all first to be clean
     let _ = app.global_shortcut().unregister_all();
 
-    // Register new shortcut
-    log::info!("[Shortcut] Registering: {:?}", shortcut);
-    app.global_shortcut().register(shortcut).map_err(|e| {
-        let err = format!("Failed to register shortcut: {}", e);
-        log::error!("{}", err);
-        err
-    })?;
+    if let Some(s) = shot {
+        app.global_shortcut()
+            .register(s)
+            .map_err(|e| format!("Failed to register shortcut: {}", e))?;
+    }
+    if let Some(h) = hud {
+        if shot != Some(h) {
+            app.global_shortcut()
+                .register(h)
+                .map_err(|e| format!("Failed to register HUD shortcut: {}", e))?;
+        }
+    }
+    Ok(())
+}
 
-    log::info!("[Shortcut] Successfully updated to {}", shortcut_str);
+#[tauri::command]
+fn update_screenshot_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let prev = state
+        .screenshot_shortcut
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_else(|_| "F12".to_string());
+    let hud = state
+        .hud_shortcut
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_else(|_| "Alt+A".to_string());
+
+    if let Err(err) = register_all_shortcuts(&app, &shortcut_str, &hud) {
+        let _ = register_all_shortcuts(&app, &prev, &hud);
+        return Err(err);
+    }
+    if let Ok(mut guard) = state.screenshot_shortcut.lock() {
+        *guard = shortcut_str;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn update_hud_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let shot = state
+        .screenshot_shortcut
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_else(|_| "F12".to_string());
+    let prev = state
+        .hud_shortcut
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_else(|_| "Alt+A".to_string());
+
+    if let Err(err) = register_all_shortcuts(&app, &shot, &shortcut_str) {
+        let _ = register_all_shortcuts(&app, &shot, &prev);
+        return Err(err);
+    }
+    if let Ok(mut guard) = state.hud_shortcut.lock() {
+        *guard = shortcut_str;
+    }
     Ok(())
 }
 
@@ -557,15 +621,27 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        log::info!("[Shortcut] Native Triggered!");
-                        match screenshots::capture_screenshot(app, None, None, true) {
-                            Ok(filename) => {
-                                log::info!("[Shortcut] Manual screenshot captured: {}", filename);
-                                let _ = app.emit("screenshot-taken", filename);
+                        let hud_match = app
+                            .state::<AppState>()
+                            .hud_shortcut
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.trim().parse::<tauri_plugin_global_shortcut::Shortcut>().ok())
+                            .is_some_and(|h| &h == shortcut);
+
+                        if hud_match {
+                            let _ = app.emit_to("achievement-overlay", "toggle-hud", ());
+                        } else {
+                            log::info!("[Shortcut] Native Triggered!");
+                            match screenshots::capture_screenshot(app, None, None, true) {
+                                Ok(filename) => {
+                                    log::info!("[Shortcut] Manual screenshot captured: {}", filename);
+                                    let _ = app.emit("screenshot-taken", filename);
+                                }
+                                Err(e) => log::error!("[Shortcut] Manual screenshot failed: {}", e),
                             }
-                            Err(e) => log::error!("[Shortcut] Manual screenshot failed: {}", e),
                         }
                     }
                 })
@@ -661,10 +737,15 @@ pub fn run() {
                 ra_username: Mutex::new(String::new()),
                 ra_api_key: Mutex::new(String::new()),
                 language: Mutex::new("fr".to_string()),
+                running_game: Mutex::new(None),
+                screenshot_shortcut: Mutex::new("F12".to_string()),
+                hud_shortcut: Mutex::new("Alt+A".to_string()),
             });
 
             let app_handle = app.handle().clone();
             watcher::start(app_handle);
+            game_detector::start(app.handle().clone());
+            discord_rpc::start(app.handle().clone());
 
             if cfg!(debug_assertions) && !is_minimized {
                 app.handle().plugin(
@@ -699,7 +780,14 @@ pub fn run() {
             commands::delete_screenshot,
             commands::open_screenshots_dir,
             commands::auto_group_games,
+            commands::get_pinned_achievements,
+            commands::get_all_pinned_achievements,
+            commands::read_json_file,
+            commands::toggle_pinned_achievement,
+            commands::get_hud_data,
+            game_detector::get_running_game,
             update_screenshot_shortcut,
+            update_hud_shortcut,
             enable_autostart,
             disable_autostart
         ])
@@ -710,7 +798,9 @@ pub fn run() {
 pub mod achievements;
 pub mod color;
 pub mod commands;
+pub mod discord_rpc;
 pub mod emulators;
+pub mod game_detector;
 pub mod screenshots;
 pub mod user_data;
 pub mod watcher;

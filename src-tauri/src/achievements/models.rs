@@ -12,6 +12,13 @@ pub struct Achievement {
     pub completionpercentage: String,
     pub desc: String,
     pub hidden: bool,
+    /// Current value of a progress-based achievement (e.g. 37 for "Collect 100 items").
+    /// `None` when the emulator does not expose any progress for this achievement.
+    #[serde(default)]
+    pub progress: Option<f64>,
+    /// Target value of a progress-based achievement (e.g. 100). Always > 0 when set.
+    #[serde(default)]
+    pub max_progress: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]

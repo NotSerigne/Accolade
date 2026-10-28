@@ -31,6 +31,7 @@
 	let previewAudio = $state<HTMLAudioElement | null>(null);
 	let previewingSound = $state('');
 	let isRecordingShortcut = $state(false);
+	let isRecordingHudShortcut = $state(false);
 	let appVersion = $state('');
 
 	getVersion()
@@ -38,7 +39,7 @@
 		.catch(() => {});
 
 	function handleShortcutKeydown(e: KeyboardEvent) {
-		if (!isRecordingShortcut) return;
+		if (!isRecordingShortcut && !isRecordingHudShortcut) return;
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -62,7 +63,11 @@
 		if (key) parts.push(key);
 
 		if (parts.length > 0) {
-			draft.screenshotShortcut = parts.join('+');
+			if (isRecordingHudShortcut) {
+				draft.hudShortcut = parts.join('+');
+			} else {
+				draft.screenshotShortcut = parts.join('+');
+			}
 		}
 	}
 
@@ -237,6 +242,7 @@
 
 		try {
 			const previousShortcut = get(settings).screenshotShortcut;
+			const previousHudShortcut = get(settings).hudShortcut;
 			const next: AppSettings = {
 				steamId: draft.steamId,
 				steamApiKey: draft.steamApiKey,
@@ -255,7 +261,9 @@
 				launchOnStartup: draft.launchOnStartup,
 				startMinimized: draft.startMinimized,
 				minimizeToTray: draft.minimizeToTray,
-				screenshotShortcut: draft.screenshotShortcut
+				screenshotShortcut: draft.screenshotShortcut,
+				hudShortcut: draft.hudShortcut,
+				discordRpc: draft.discordRpc
 			};
 			await saveSettings(next);
 
@@ -265,6 +273,17 @@
 				console.error('Failed to update screenshot shortcut:', err);
 				draft.screenshotShortcut = previousShortcut;
 				await saveSettings({ ...next, screenshotShortcut: previousShortcut });
+				const details = err instanceof Error ? err.message : String(err);
+				saveError = get(i18n).t('settings.shortcutError', { details });
+				return;
+			}
+
+			try {
+				await invoke('update_hud_shortcut', { shortcutStr: next.hudShortcut });
+			} catch (err) {
+				console.error('Failed to update HUD shortcut:', err);
+				draft.hudShortcut = previousHudShortcut;
+				await saveSettings({ ...next, hudShortcut: previousHudShortcut });
 				const details = err instanceof Error ? err.message : String(err);
 				saveError = get(i18n).t('settings.shortcutError', { details });
 				return;
@@ -696,6 +715,56 @@
 					<input type="checkbox" bind:checked={draft.minimizeToTray} />
 					<span class="slider"></span>
 				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.discordRpc')}</div>
+					<div class="setting-desc">{$i18n.t('settings.discordRpcDesc')}</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.discordRpc} />
+					<span class="slider"></span>
+				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.hudShortcut')}</div>
+					<div class="setting-desc">{$i18n.t('settings.hudShortcutDesc')}</div>
+				</div>
+				<div class="shortcut-record-wrap">
+					<div class="shortcut-display" class:recording={isRecordingHudShortcut}>
+						{draft.hudShortcut}
+					</div>
+					<button
+						class="record-btn"
+						class:is-recording={isRecordingHudShortcut}
+						onclick={() => {
+							isRecordingShortcut = false;
+							isRecordingHudShortcut = !isRecordingHudShortcut;
+						}}
+						title={isRecordingHudShortcut ? 'Enregistrer' : 'Modifier'}
+					>
+						{#if isRecordingHudShortcut}
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+								<rect x="6" y="6" width="12" height="12" />
+							</svg>
+						{:else}
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+							</svg>
+						{/if}
+					</button>
+				</div>
 			</div>
 
 			<div class="setting-row" style="margin-top: 14px;">

@@ -1,9 +1,22 @@
 <script lang="ts">
 	// src/routes/(app)/journal/+page.svelte
+	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
+	import { listen } from '@tauri-apps/api/event';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { games, type Game, type Achievement } from '$lib/stores/Games.js';
+	import { selectedGameId } from '$lib/stores/selectedGame.js';
+	import { achievementJumpIntent } from '$lib/stores/ui.js';
 	import { i18n } from '$lib/stores/i18n.js';
 
 	let selectedFilter = $state('all');
+	let pinnedMap = $state<Record<string, string[]>>({});
+
+	type PinnedItem = {
+		game: Game;
+		achievement: Achievement;
+	};
 
 	type AchievementEvent = {
 		type: 'achievement';
@@ -19,6 +32,74 @@
 	};
 
 	type JournalEvent = AchievementEvent | CompletionEvent;
+
+	async function loadAllPins() {
+		try {
+			const res = await invoke<Record<string, string[]>>('get_all_pinned_achievements');
+			pinnedMap = res ?? {};
+		} catch {
+			pinnedMap = {};
+		}
+	}
+
+	async function unpinAchievement(gameId: string, achKey: string, event: MouseEvent) {
+		event.stopPropagation();
+		try {
+			const updated = await invoke<string[]>('toggle_pinned_achievement', {
+				gameId,
+				achKey
+			});
+			pinnedMap = { ...pinnedMap, [gameId]: updated };
+		} catch (e) {
+			console.error(e);
+		}
+	}
+
+	function jumpToAchievement(gameId: string, ach: Achievement) {
+		achievementJumpIntent.set({
+			gameId,
+			achievementKey: ach.key,
+			token: Date.now()
+		});
+		selectedGameId.set(gameId);
+		void goto(resolve('/(app)/games/[id]', { id: gameId }));
+	}
+
+	function formatProgressVal(v: number): string {
+		return Number.isInteger(v) ? String(v) : v.toFixed(1);
+	}
+
+	onMount(() => {
+		void loadAllPins();
+		let unlisten: (() => void) | null = null;
+		void listen<{ game_id: string; pins: string[] }>('pinned-achievements-updated', (ev) => {
+			if (ev.payload?.game_id) {
+				pinnedMap = { ...pinnedMap, [ev.payload.game_id]: ev.payload.pins ?? [] };
+			}
+		}).then((fn) => {
+			unlisten = fn;
+		});
+
+		return () => {
+			unlisten?.();
+		};
+	});
+
+	let pinnedAchievements = $derived.by((): PinnedItem[] => {
+		const list: PinnedItem[] = [];
+		for (const g of $games) {
+			if (selectedFilter !== 'all' && g.id !== selectedFilter) continue;
+			const keys = pinnedMap[g.id];
+			if (!keys || keys.length === 0) continue;
+			const wantedSet = new Set(keys.map((k) => k.trim().toLowerCase()));
+			for (const a of g.achievements ?? []) {
+				if (wantedSet.has(a.key.trim().toLowerCase())) {
+					list.push({ game: g, achievement: a });
+				}
+			}
+		}
+		return list;
+	});
 
 	let allEvents = $derived.by((): JournalEvent[] => {
 		const events: JournalEvent[] = [];
@@ -130,6 +211,125 @@
 	</header>
 
 	<div class="content scrollable">
+		{#if pinnedAchievements.length > 0}
+			<div class="day-group pinned-section">
+				<div class="day-header pinned-header">
+					<span class="date-label pinned-label">
+						<svg
+							width="13"
+							height="13"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<line x1="12" y1="17" x2="12" y2="22" />
+							<path
+								d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"
+							/>
+						</svg>
+						{$i18n.t('journal.pinnedSection')}
+					</span>
+					<span class="count">
+						{$i18n.t('journal.pinnedCount', { count: pinnedAchievements.length })}
+					</span>
+				</div>
+				<div class="events-list">
+					{#each pinnedAchievements as item (item.game.id + ':pin:' + item.achievement.key)}
+						{@const ach = item.achievement}
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="event-card pinned-card"
+							title={$i18n.t('journal.openGame')}
+							onclick={() => jumpToAchievement(item.game.id, ach)}
+						>
+							<img
+								src={getGameIcon(item.game)}
+								alt={item.game.name}
+								class="game-icon"
+								onerror={(e) => {
+									const t = e.target as HTMLImageElement;
+									if (item.game.steam_id && !t.src.includes('header.jpg')) {
+										t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${item.game.steam_id}/header.jpg`;
+									}
+								}}
+							/>
+							<div class="event-info">
+								<div class="achievement-row">
+									{#if ach.icon || ach.icon_gray}
+										<img
+											src={ach.unlocked ? ach.icon || ach.icon_gray : ach.icon_gray || ach.icon}
+											alt={ach.name}
+											class="achievement-icon"
+											class:is-locked={!ach.unlocked}
+											onerror={(e) => {
+												const t = e.target as HTMLImageElement;
+												t.style.display = 'none';
+											}}
+										/>
+									{:else}
+										<div class="achievement-icon achievement-icon-placeholder">🏆</div>
+									{/if}
+									<div class="text">
+										<span class="name">{ach.name || ach.key}</span>
+										<span class="game">
+											{item.game.name}
+											{#if ach.desc}
+												· <span class="pin-desc">{ach.desc}</span>
+											{/if}
+										</span>
+										{#if !ach.unlocked && ach.max_progress && ach.max_progress > 0}
+											{@const cur = ach.progress ?? 0}
+											{@const pct = Math.min(Math.max((cur / ach.max_progress) * 100, 0), 100)}
+											<div class="pin-progress-wrap">
+												<div class="pin-progress-track">
+													<div class="pin-progress-fill" style:width="{pct}%"></div>
+												</div>
+												<span class="pin-progress-txt">
+													{formatProgressVal(cur)} / {formatProgressVal(ach.max_progress)}
+												</span>
+											</div>
+										{/if}
+									</div>
+								</div>
+							</div>
+							<div class="event-meta pinned-meta">
+								{#if ach.completionpercentage}
+									<span class="rarity">
+										{parseFloat(ach.completionpercentage).toFixed(1)}%
+									</span>
+								{/if}
+								<button
+									class="unpin-btn"
+									onclick={(e) => unpinAchievement(item.game.id, ach.key, e)}
+								>
+									<svg
+										width="11"
+										height="11"
+										viewBox="0 0 24 24"
+										fill="currentColor"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									>
+										<line x1="12" y1="17" x2="12" y2="22" />
+										<path
+											d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"
+										/>
+									</svg>
+									{$i18n.t('hud.unpin')}
+								</button>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
 		{#each groupedEvents as group (group.dateLabel)}
 			<div class="day-group">
 				<div class="day-header">
@@ -195,7 +395,7 @@
 			</div>
 		{/each}
 
-		{#if groupedEvents.length === 0}
+		{#if groupedEvents.length === 0 && pinnedAchievements.length === 0}
 			<div class="empty-state">
 				<p>{$i18n.t('journal.empty')}</p>
 			</div>
@@ -277,11 +477,20 @@
 		border-bottom: 1px solid var(--border-soft);
 		margin-bottom: 16px;
 	}
+	.pinned-header {
+		border-bottom-color: rgba(200, 169, 110, 0.28);
+	}
 	.date-label {
 		font-size: 12px;
 		font-weight: 700;
 		color: var(--text-secondary);
 		letter-spacing: 0.05em;
+	}
+	.pinned-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		color: var(--accent, #c8a96e);
 	}
 	.day-header .count {
 		font-size: 11px;
@@ -306,6 +515,18 @@
 		background: rgba(200, 169, 110, 0.05);
 		border-color: rgba(200, 169, 110, 0.1);
 	}
+	.event-card.pinned-card {
+		border-color: rgba(200, 169, 110, 0.22);
+		background: linear-gradient(135deg, rgba(200, 169, 110, 0.07), var(--surface-1));
+		cursor: pointer;
+		transition:
+			transform 0.15s ease,
+			border-color 0.15s ease;
+	}
+	.event-card.pinned-card:hover {
+		border-color: var(--accent, #c8a96e);
+		transform: translateY(-1px);
+	}
 
 	.game-icon {
 		width: 32px;
@@ -328,6 +549,11 @@
 		width: 40px;
 		height: 40px;
 		border-radius: 8px;
+		flex-shrink: 0;
+	}
+	.achievement-icon.is-locked {
+		filter: grayscale(0.6);
+		opacity: 0.85;
 	}
 	.achievement-icon-placeholder {
 		background: rgba(200, 169, 110, 0.1);
@@ -352,6 +578,7 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		flex: 1;
 	}
 	.text .name {
 		font-size: 15px;
@@ -368,12 +595,46 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+	.pin-desc {
+		color: var(--text-muted);
+	}
+
+	.pin-progress-wrap {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 6px;
+		max-width: 280px;
+	}
+	.pin-progress-track {
+		flex: 1;
+		height: 4px;
+		background: rgba(255, 255, 255, 0.08);
+		border-radius: 99px;
+		overflow: hidden;
+	}
+	.pin-progress-fill {
+		height: 100%;
+		background: var(--accent, #c8a96e);
+		border-radius: 99px;
+	}
+	.pin-progress-txt {
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--accent, #c8a96e);
+		white-space: nowrap;
+	}
 
 	.event-meta {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
 		gap: 4px;
+	}
+	.pinned-meta {
+		flex-direction: row;
+		align-items: center;
+		gap: 10px;
 	}
 	.time {
 		font-size: 12px;
@@ -386,6 +647,28 @@
 		background: rgba(200, 169, 110, 0.05);
 		padding: 1px 6px;
 		border-radius: 4px;
+	}
+
+	.unpin-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 10px;
+		border-radius: 7px;
+		border: 1px solid rgba(200, 169, 110, 0.35);
+		background: rgba(200, 169, 110, 0.12);
+		color: var(--accent, #c8a96e);
+		font-size: 11px;
+		font-weight: 700;
+		cursor: pointer;
+		transition:
+			background 0.15s ease,
+			border-color 0.15s ease;
+	}
+	.unpin-btn:hover {
+		background: rgba(239, 68, 68, 0.15);
+		border-color: rgba(239, 68, 68, 0.45);
+		color: #f87171;
 	}
 
 	.empty-state {

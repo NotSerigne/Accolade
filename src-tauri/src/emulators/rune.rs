@@ -1,9 +1,9 @@
 // src-tauri/src/emulators/rune.rs
-use std::path::PathBuf;
-use ini::Ini;
-use serde::{Deserialize};
 use crate::achievements::models::{Achievement, Emulator};
-use crate::emulators::EmulatorParser;
+use crate::emulators::{ini_get_ci, parse_progress_str, EmulatorParser};
+use ini::Ini;
+use serde::Deserialize;
+use std::path::PathBuf;
 
 #[derive(Deserialize)]
 pub struct Parser;
@@ -20,16 +20,12 @@ fn parse_unlocked(raw: Option<&str>) -> bool {
 fn find_section<'a>(achievementfile: &'a Ini, name: &str) -> Option<&'a ini::Properties> {
     let wanted = normalize_section_name(name);
 
-    achievementfile
-        .section(Some(wanted.as_str()))
-        .or_else(|| {
-            achievementfile
-                .iter()
-                .find_map(|(sec, prop)| {
-                    sec.filter(|current| normalize_section_name(current).eq_ignore_ascii_case(&wanted))
-                        .map(|_| prop)
-                })
+    achievementfile.section(Some(wanted.as_str())).or_else(|| {
+        achievementfile.iter().find_map(|(sec, prop)| {
+            sec.filter(|current| normalize_section_name(current).eq_ignore_ascii_case(&wanted))
+                .map(|_| prop)
         })
+    })
 }
 
 impl EmulatorParser for Parser {
@@ -55,6 +51,10 @@ impl EmulatorParser for Parser {
                 .or_else(|| ach_section.get("achieved"));
             let unlock_time = ach_section.get("UnlockTime").unwrap_or("0");
             let unlocked_time = unlock_time.parse::<u64>().ok();
+            let (progress, max_progress) = parse_progress_str(
+                ini_get_ci(ach_section, &["CurProgress"]),
+                ini_get_ci(ach_section, &["MaxProgress"]),
+            );
             achievements.push(Achievement {
                 key: name.clone(),
                 name: name.clone(),
@@ -66,15 +66,18 @@ impl EmulatorParser for Parser {
                 completionpercentage: String::new(),
                 desc: String::new(),
                 hidden: false,
+                progress,
+                max_progress,
             });
         }
         achievements
     }
     fn known_locations(&self) -> Vec<PathBuf> {
         let public = std::env::var("PUBLIC").unwrap_or_default();
-        vec![
-            PathBuf::from(&public).join("Documents").join("Steam").join("RUNE"),
-        ]
+        vec![PathBuf::from(&public)
+            .join("Documents")
+            .join("Steam")
+            .join("RUNE")]
     }
     fn emulator(&self) -> Emulator {
         Emulator::Rune

@@ -26,6 +26,35 @@ pub struct AchievementNotifPayload {
     pub unlocked_time: Option<u64>,
     pub game_id: Option<String>,
     pub ach_key: Option<String>,
+    /// True when this notification reports a milestone on a progress-based achievement
+    /// (e.g. 25%, 50%, 75%) rather than a full unlock.
+    #[serde(default)]
+    pub is_progress: bool,
+    #[serde(default)]
+    pub progress_current: Option<f64>,
+    #[serde(default)]
+    pub progress_max: Option<f64>,
+}
+
+/// Returns a milestone bucket (`1..=3` for 25%, 50%, 75%; or step index when `max <= 10`)
+/// so intermediate notifications only fire when a new threshold is crossed.
+fn progress_milestone_bucket(current: f64, max: f64) -> u32 {
+    if !(current.is_finite() && max.is_finite() && max > 0.0 && current > 0.0 && current < max) {
+        return 0;
+    }
+    if max <= 10.0 {
+        return current.floor() as u32;
+    }
+    let ratio = current / max;
+    if ratio >= 0.75 {
+        3
+    } else if ratio >= 0.50 {
+        2
+    } else if ratio >= 0.25 {
+        1
+    } else {
+        0
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -63,6 +92,8 @@ fn merge_live_achievements(
 
             if let Some(live_ach) = live_map.get(&key) {
                 s.unlocked = live_ach.unlocked;
+                s.progress = live_ach.progress;
+                s.max_progress = live_ach.max_progress;
                 if live_ach.unlocked {
                     if let Some(t) = live_ach.unlocked_time {
                         if t > 0 {
@@ -283,6 +314,7 @@ pub fn start(app_handle: tauri::AppHandle) {
 
         let mut unlocked_by_game: HashMap<String, HashSet<String>> = HashMap::new();
         let mut live_keys_by_game: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut progress_bucket_by_game: HashMap<String, HashMap<String, u32>> = HashMap::new();
         let mut game_name_cache: HashMap<String, String> = HashMap::new();
         let mut api_lookup_attempted: HashSet<u32> = HashSet::new();
 
@@ -298,6 +330,19 @@ pub fn start(app_handle: tauri::AppHandle) {
                         .collect();
                     unlocked_by_game.insert(game.id.clone(), unlocked);
                     live_keys_by_game.insert(game.id.clone(), live_keys(&game.achievements));
+                    let buckets: HashMap<String, u32> = game
+                        .achievements
+                        .iter()
+                        .filter_map(|a| {
+                            let cur = a.progress?;
+                            let max = a.max_progress?;
+                            Some((
+                                a.key.trim().to_lowercase(),
+                                progress_milestone_bucket(cur, max),
+                            ))
+                        })
+                        .collect();
+                    progress_bucket_by_game.insert(game.id.clone(), buckets);
                 }
             }
         }
@@ -365,6 +410,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                     // Seed unlocked_by_game / live_keys_by_game from AppState if not yet seen.
                     if !unlocked_by_game.contains_key(&game.id)
                         || !live_keys_by_game.contains_key(&game.id)
+                        || !progress_bucket_by_game.contains_key(&game.id)
                     {
                         let stored_achs: Option<Vec<Achievement>> = {
                             let state = app_handle.state::<AppState>();
@@ -386,6 +432,20 @@ pub fn start(app_handle: tauri::AppHandle) {
                             if !live_keys_by_game.contains_key(&game.id) {
                                 live_keys_by_game.insert(game.id.clone(), live_keys(achs));
                             }
+                            if !progress_bucket_by_game.contains_key(&game.id) {
+                                let buckets: HashMap<String, u32> = achs
+                                    .iter()
+                                    .filter_map(|a| {
+                                        let cur = a.progress?;
+                                        let max = a.max_progress?;
+                                        Some((
+                                            a.key.trim().to_lowercase(),
+                                            progress_milestone_bucket(cur, max),
+                                        ))
+                                    })
+                                    .collect();
+                                progress_bucket_by_game.insert(game.id.clone(), buckets);
+                            }
                         }
                     }
 
@@ -394,6 +454,10 @@ pub fn start(app_handle: tauri::AppHandle) {
                         unlocked_by_game.get(&game.id).cloned().unwrap_or_default();
                     let snapshot_previous_live_keys: HashSet<String> =
                         live_keys_by_game.get(&game.id).cloned().unwrap_or_default();
+                    let mut game_progress_buckets: HashMap<String, u32> = progress_bucket_by_game
+                        .get(&game.id)
+                        .cloned()
+                        .unwrap_or_default();
 
                     let (ui_achievements, ui_total) = {
                         let state = app_handle.state::<AppState>();
@@ -522,6 +586,9 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 unlocked_time: ach.unlocked_time,
                                 game_id: Some(game.id.clone()),
                                 ach_key: Some(ach.key.clone()),
+                                is_progress: false,
+                                progress_current: None,
+                                progress_max: None,
                             };
 
                             let _ = app_handle.emit_to(
@@ -532,8 +599,71 @@ pub fn start(app_handle: tauri::AppHandle) {
                         }
                     }
 
+                    // Check for milestone crossings on still-locked progress achievements.
+                    let language = {
+                        let state = app_handle.state::<AppState>();
+                        state
+                            .language
+                            .lock()
+                            .map(|l| l.clone())
+                            .unwrap_or_else(|_| "fr".to_string())
+                    };
+                    for ach in &ui_achievements {
+                        let key = ach.key.trim().to_lowercase();
+                        if true_current_unlocked.contains(&key) {
+                            continue;
+                        }
+                        let (Some(cur), Some(max)) = (ach.progress, ach.max_progress) else {
+                            continue;
+                        };
+                        let new_bucket = progress_milestone_bucket(cur, max);
+                        let prev_bucket = game_progress_buckets.get(&key).copied().unwrap_or(0);
+                        game_progress_buckets.insert(key.clone(), new_bucket);
+                        if new_bucket > prev_bucket {
+                            let completion_pct: Option<f32> = ach
+                                .completionpercentage
+                                .parse::<f32>()
+                                .ok()
+                                .filter(|&p| p > 0.0);
+                            let icon = if !ach.icon_gray.is_empty() {
+                                Some(ach.icon_gray.clone())
+                            } else if !ach.icon.is_empty() {
+                                Some(ach.icon.clone())
+                            } else {
+                                None
+                            };
+                            let payload = AchievementNotifPayload {
+                                name: if ach.name.is_empty() {
+                                    ach.key.clone()
+                                } else {
+                                    ach.name.clone()
+                                },
+                                desc: ach.desc.clone(),
+                                icon,
+                                rarity: rarity_label(completion_pct, &language),
+                                completionpercentage: completion_pct,
+                                unlocked: true_current_unlocked.len() as u32,
+                                total: ui_total,
+                                test: false,
+                                is_platinum: false,
+                                unlocked_time: None,
+                                game_id: Some(game.id.clone()),
+                                ach_key: Some(ach.key.clone()),
+                                is_progress: true,
+                                progress_current: Some(cur),
+                                progress_max: Some(max),
+                            };
+                            let _ = app_handle.emit_to(
+                                "achievement-overlay",
+                                "achievement-notif",
+                                &payload,
+                            );
+                        }
+                    }
+
                     unlocked_by_game.insert(game.id.clone(), true_current_unlocked);
                     live_keys_by_game.insert(game.id.clone(), current_live_keys);
+                    progress_bucket_by_game.insert(game.id.clone(), game_progress_buckets);
 
                     let updated_payload = AchievementsUpdatedPayload {
                         game_id: game.id.clone(),
@@ -570,6 +700,9 @@ pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
         unlocked_time: Some(1714470000),
         game_id: None,
         ach_key: None,
+        is_progress: false,
+        progress_current: None,
+        progress_max: None,
     };
 
     let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);

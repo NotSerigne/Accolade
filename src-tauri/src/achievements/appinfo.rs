@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[cfg(target_os = "windows")]
-fn get_steam_path() -> Option<PathBuf> {
+pub(crate) fn get_steam_path() -> Option<PathBuf> {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -16,7 +16,7 @@ fn get_steam_path() -> Option<PathBuf> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn get_steam_path() -> Option<PathBuf> {
+pub(crate) fn get_steam_path() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     let candidates = [
         format!("{home}/.steam/steam"),

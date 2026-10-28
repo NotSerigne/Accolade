@@ -1,8 +1,8 @@
 // src-tauri/src/emulators/onlinefix.rs
-use std::path::PathBuf;
-use ini::Ini;
 use crate::achievements::models::{Achievement, Emulator};
-use crate::emulators::EmulatorParser;
+use crate::emulators::{ini_get_ci, parse_progress_str, EmulatorParser};
+use ini::Ini;
+use std::path::PathBuf;
 
 pub struct Parser;
 
@@ -35,6 +35,12 @@ impl EmulatorParser for Parser {
                         .or_else(|| prop.get("done")),
                 );
                 let unlocked_time = parse_unlock_time(prop);
+                // OnlineFix's progress format is not documented; accept the common
+                // key spellings used by other emulators. Absent keys => no progress.
+                let (progress, max_progress) = parse_progress_str(
+                    ini_get_ci(prop, &["progress", "CurProgress", "cur_progress"]),
+                    ini_get_ci(prop, &["max_progress", "MaxProgress", "maxprogress"]),
+                );
                 achievements.push(Achievement {
                     key: name.to_string(),
                     name: name.to_string(),
@@ -46,6 +52,8 @@ impl EmulatorParser for Parser {
                     completionpercentage: String::new(),
                     desc: String::new(),
                     hidden: false,
+                    progress,
+                    max_progress,
                 });
             }
         }
@@ -53,9 +61,7 @@ impl EmulatorParser for Parser {
     }
     fn known_locations(&self) -> Vec<PathBuf> {
         let public = std::env::var("PUBLIC").unwrap_or_default();
-        vec![
-            PathBuf::from(&public).join("Documents").join("OnlineFix"),
-        ]
+        vec![PathBuf::from(&public).join("Documents").join("OnlineFix")]
     }
     fn emulator(&self) -> Emulator {
         Emulator::OnlineFix

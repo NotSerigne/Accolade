@@ -16,6 +16,10 @@ export interface Achievement {
 	completionpercentage: string;
 	desc: string;
 	hidden?: boolean;
+	/** Current value of a progress-based achievement (null when not progress-based). */
+	progress?: number | null;
+	/** Target value of a progress-based achievement (always > 0 when set). */
+	max_progress?: number | null;
 }
 
 export type SourceType =

@@ -13,6 +13,7 @@
 		isSyncing
 	} from '$lib/stores/ui.js';
 	import { i18n } from '$lib/stores/i18n.js';
+	import { runningGame } from '$lib/stores/runningGame.js';
 
 	let inputEl: HTMLInputElement | null = null;
 	let searchWrapEl: HTMLDivElement | null = null;
@@ -180,6 +181,13 @@
 		}
 	}
 
+	function openRunningGame() {
+		const gameId = $runningGame?.game_id;
+		if (!gameId) return;
+		selectedGameId.set(gameId);
+		void goto(resolve('/(app)/games/[id]', { id: gameId }));
+	}
+
 	async function handleSync() {
 		if ($isSyncing) return;
 		await syncSteamMetadata();
@@ -288,6 +296,20 @@
 	</div>
 
 	<div class="topbar-right">
+		{#if $runningGame}
+			<button
+				class="playing-pill"
+				type="button"
+				onclick={openRunningGame}
+				disabled={!$runningGame.game_id}
+				title={$i18n.t('topbar.playingTitle', { name: $runningGame.name })}
+			>
+				<span class="playing-dot"></span>
+				<span class="playing-label">{$i18n.t('topbar.playing')}</span>
+				<span class="playing-name">{$runningGame.name}</span>
+			</button>
+		{/if}
+
 		<button
 			class="sync-btn"
 			class:syncing={$isSyncing}
@@ -553,6 +575,56 @@
 		}
 		to {
 			transform: rotate(360deg);
+		}
+	}
+
+	.playing-pill {
+		height: 32px;
+		max-width: 240px;
+		padding: 0 12px;
+		border-radius: 8px;
+		border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border-soft));
+		background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+		color: var(--text-primary);
+		font-size: 12px;
+		font-family: inherit;
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+	.playing-pill:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+	}
+	.playing-pill:disabled {
+		cursor: default;
+	}
+	.playing-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--accent);
+		flex-shrink: 0;
+		animation: playing-pulse 1.6s ease-in-out infinite;
+	}
+	.playing-label {
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+	.playing-name {
+		font-weight: 600;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	@keyframes playing-pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.35;
 		}
 	}
 

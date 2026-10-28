@@ -11,6 +11,9 @@
 		unlocked?: number;
 		total?: number;
 		unlocked_time?: number;
+		is_progress?: boolean;
+		progress_current?: number;
+		progress_max?: number;
 	}
 
 	type Position =
@@ -50,10 +53,17 @@
 	});
 
 	const ringDash = $derived(
-		achievement?.unlocked != null && achievement?.total
-			? (achievement.unlocked / achievement.total) * 94.25
-			: 0
+		achievement?.is_progress && achievement?.progress_current != null && achievement?.progress_max
+			? (achievement.progress_current / achievement.progress_max) * 94.25
+			: achievement?.unlocked != null && achievement?.total
+				? (achievement.unlocked / achievement.total) * 94.25
+				: 0
 	);
+
+	function fmtProg(n: number | undefined): string {
+		if (n == null) return '0';
+		return Number.isInteger(n) ? String(n) : n.toFixed(1);
+	}
 
 	const formattedDate = $derived(() => {
 		if (!achievement?.unlocked_time) return null;
@@ -93,7 +103,11 @@
 					? PLATINUM_GRADIENT
 					: rarityStyle().accent}; box-shadow: 0 0 12px 2px {rarityStyle().glow};"
 			>
-				{achievement.is_platinum ? $i18n.t('notif.platinum') : $i18n.t('notif.unlocked')}
+				{achievement.is_platinum
+					? $i18n.t('notif.platinum')
+					: achievement.is_progress
+						? $i18n.t('notif.progress')
+						: $i18n.t('notif.unlocked')}
 			</span>
 		</div>
 		{#key achievement}
@@ -120,9 +134,13 @@
 							{/if}
 						</div>
 					</div>
-					{#if achievement.unlocked != null && achievement.total != null}
+					{#if (achievement.is_progress && achievement.progress_max) || (achievement.unlocked != null && achievement.total != null)}
 						<div class="progress-wrap">
-							<div class="fraction">{achievement.unlocked}/{achievement.total}</div>
+							<div class="fraction">
+								{achievement.is_progress
+									? `${fmtProg(achievement.progress_current)}/${fmtProg(achievement.progress_max)}`
+									: `${achievement.unlocked}/${achievement.total}`}
+							</div>
 							<svg class="ring" viewBox="0 0 36 36">
 								<circle class="ring-bg" cx="18" cy="18" r="15" />
 								<circle

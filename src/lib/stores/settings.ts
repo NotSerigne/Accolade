@@ -27,6 +27,8 @@ export interface AppSettings {
 	startMinimized: boolean;
 	minimizeToTray: boolean;
 	screenshotShortcut: string;
+	hudShortcut: string;
+	discordRpc: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -47,7 +49,9 @@ const DEFAULTS: AppSettings = {
 	launchOnStartup: false,
 	startMinimized: false,
 	minimizeToTray: false,
-	screenshotShortcut: 'F12'
+	screenshotShortcut: 'F12',
+	hudShortcut: 'Alt+A',
+	discordRpc: true
 };
 
 const THEME_CACHE_KEY = 'accolade:theme:v1';

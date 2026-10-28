@@ -9,6 +9,9 @@ use tauri::{AppHandle, Manager};
 pub struct UserData {
     pub favorites: HashSet<String>,
     pub tags: HashMap<String, Vec<String>>,
+    /// Per-game ordered list of achievement keys pinned to the in-game HUD tracker.
+    #[serde(default)]
+    pub pinned_achievements: HashMap<String, Vec<String>>,
 }
 
 fn get_user_data_path(app_handle: &AppHandle) -> PathBuf {

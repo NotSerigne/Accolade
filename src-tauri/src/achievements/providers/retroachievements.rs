@@ -124,6 +124,7 @@ impl RetroAchievementsProvider {
                 completionpercentage: String::new(),
                 desc: ra_ach.description,
                 hidden: ra_ach.hidden == Some(1),
+                ..Default::default()
             });
         }
 

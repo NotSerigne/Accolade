@@ -1,9 +1,10 @@
 // src-tauri/src/emulators/empress.rs
-use std::path::PathBuf;
-use std::collections::HashMap;
-use serde::{Deserialize};
 use crate::achievements::models::{Achievement, Emulator};
-use crate::emulators::EmulatorParser;
+use crate::emulators::goldberg::json_number;
+use crate::emulators::{normalize_progress, EmulatorParser};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct Parser;
 
@@ -11,6 +12,10 @@ pub struct Parser;
 pub struct EmpressAchievement {
     pub earned: bool,
     pub earned_time: Option<u64>,
+    #[serde(default)]
+    pub progress: Option<serde_json::Value>,
+    #[serde(default)]
+    pub max_progress: Option<serde_json::Value>,
 }
 
 impl EmulatorParser for Parser {
@@ -23,26 +28,32 @@ impl EmulatorParser for Parser {
             Ok(data) => data,
             Err(_) => return Vec::new(),
         };
-        data.into_iter().map(|(key, value)| {
-            Achievement {
-                key: key.clone(),
-                name: key,
-                unlocked: value.earned,
-                icon: String::new(),
-                icon_gray: String::new(),
-                unlocked_time: value.earned_time,
-                rarity: String::new(),
-                completionpercentage: String::new(),
-                desc: String::new(),
-                hidden: false,
-            }
-        }).collect()
+        data.into_iter()
+            .map(|(key, value)| {
+                let (progress, max_progress) = normalize_progress(
+                    json_number(&value.progress),
+                    json_number(&value.max_progress),
+                );
+                Achievement {
+                    key: key.clone(),
+                    name: key,
+                    unlocked: value.earned,
+                    icon: String::new(),
+                    icon_gray: String::new(),
+                    unlocked_time: value.earned_time,
+                    rarity: String::new(),
+                    completionpercentage: String::new(),
+                    desc: String::new(),
+                    hidden: false,
+                    progress,
+                    max_progress,
+                }
+            })
+            .collect()
     }
     fn known_locations(&self) -> Vec<PathBuf> {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
-        vec![
-            PathBuf::from(&appdata).join("Empress-Emulator"),
-        ]
+        vec![PathBuf::from(&appdata).join("Empress-Emulator")]
     }
     fn emulator(&self) -> Emulator {
         Emulator::Empress
