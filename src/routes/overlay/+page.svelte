@@ -5,7 +5,7 @@
 	import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
 	import { LogicalPosition } from '@tauri-apps/api/dpi';
 	import { Store } from '@tauri-apps/plugin-store';
-	import { invoke } from '@tauri-apps/api/core';
+	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import AchievementNotif from '$lib/AchievementNotif.svelte';
 	import HudTracker from '$lib/HudTracker.svelte';
 
@@ -98,7 +98,10 @@
 
 	function playNotificationSound(filename: string, volume: number): void {
 		if (!filename || filename === 'none') return;
-		const audio = new Audio(`/sounds/${encodeURIComponent(filename)}`);
+		const src = filename.startsWith('custom:')
+			? convertFileSrc(filename.slice('custom:'.length))
+			: '/sounds/' + encodeURIComponent(filename);
+		const audio = new Audio(src);
 		audio.volume = volume;
 		audio.play().catch(() => {});
 	}

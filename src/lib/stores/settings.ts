@@ -29,6 +29,7 @@ export interface AppSettings {
 	screenshotShortcut: string;
 	hudShortcut: string;
 	discordRpc: boolean;
+	replayBuffer: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -51,7 +52,8 @@ const DEFAULTS: AppSettings = {
 	minimizeToTray: false,
 	screenshotShortcut: 'F12',
 	hudShortcut: 'Alt+A',
-	discordRpc: true
+	discordRpc: true,
+	replayBuffer: false
 };
 
 const THEME_CACHE_KEY = 'accolade:theme:v1';

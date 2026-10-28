@@ -871,3 +871,243 @@ pub fn read_json_file(path: String) -> Result<String, String> {
     }
     std::fs::read_to_string(trimmed).map_err(|e| e.to_string())
 }
+
+#[derive(serde::Serialize, Clone)]
+pub struct CustomSoundInfo {
+    pub filename: String,
+    pub path: String,
+}
+
+fn custom_sounds_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("sounds");
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(dir)
+}
+
+#[tauri::command]
+pub fn get_custom_sounds(app_handle: tauri::AppHandle) -> Vec<CustomSoundInfo> {
+    let Ok(dir) = custom_sounds_dir(&app_handle) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_file() {
+                continue;
+            }
+            let ext = p
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_ascii_lowercase());
+            if !matches!(ext.as_deref(), Some("mp3") | Some("wav") | Some("ogg") | Some("m4a")) {
+                continue;
+            }
+            let Some(fname) = p.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let path_str = p.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+            out.push(CustomSoundInfo {
+                filename: fname.to_string(),
+                path: path_str,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()));
+    out
+}
+
+#[tauri::command]
+pub fn import_custom_sound(
+    app_handle: tauri::AppHandle,
+    source_path: String,
+) -> Result<CustomSoundInfo, String> {
+    let src = std::path::Path::new(source_path.trim());
+    if !src.is_file() {
+        return Err("Source audio file not found".to_string());
+    }
+    let ext = src
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    if !matches!(ext.as_deref(), Some("mp3") | Some("wav") | Some("ogg") | Some("m4a")) {
+        return Err("Unsupported audio format (use .mp3, .wav, .ogg, or .m4a)".to_string());
+    }
+    let filename = src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "Invalid file name".to_string())?
+        .to_string();
+    let dest = custom_sounds_dir(&app_handle)?.join(&filename);
+    std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+    let path_str = dest.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    Ok(CustomSoundInfo {
+        filename,
+        path: path_str,
+    })
+}
+
+#[tauri::command]
+pub fn capture_replay_clip(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    crate::replay::flush_replay_gif(&app_handle, None, None)
+}
+
+#[tauri::command]
+pub fn create_backup_zip(app_handle: tauri::AppHandle, dest_path: String) -> Result<String, String> {
+    use std::io::{Read, Write};
+    let file = std::fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // 1. Add Accolade app_data_dir config/sounds/user_data
+    if let Ok(app_dir) = app_handle.path().app_data_dir() {
+        for fname in ["user_data.json", "settings.json", "steam_appdetails_cache.json"] {
+            let p = app_dir.join(fname);
+            if p.is_file() {
+                if let Ok(mut f) = std::fs::File::open(&p) {
+                    let mut buf = Vec::new();
+                    if f.read_to_end(&mut buf).is_ok() {
+                        let _ = zip.start_file(format!("accolade/{}", fname), options);
+                        let _ = zip.write_all(&buf);
+                    }
+                }
+            }
+        }
+        let sounds_dir = app_dir.join("sounds");
+        if sounds_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&sounds_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                            if let Ok(mut f) = std::fs::File::open(&p) {
+                                let mut buf = Vec::new();
+                                if f.read_to_end(&mut buf).is_ok() {
+                                    let _ = zip.start_file(format!("accolade/sounds/{}", name), options);
+                                    let _ = zip.write_all(&buf);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Add local emulator achievement folders
+    fn zip_dir_recursive<W: Write + std::io::Seek>(
+        zip: &mut zip::ZipWriter<W>,
+        base: &std::path::Path,
+        current: &std::path::Path,
+        prefix: &str,
+        options: zip::write::SimpleFileOptions,
+    ) {
+        let Ok(entries) = std::fs::read_dir(current) else { return };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                zip_dir_recursive(zip, base, &p, prefix, options);
+            } else if p.is_file() {
+                if let Ok(rel) = p.strip_prefix(base) {
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    if let Ok(mut f) = std::fs::File::open(&p) {
+                        let mut buf = Vec::new();
+                        if std::io::Read::read_to_end(&mut f, &mut buf).is_ok() {
+                            let _ = zip.start_file(format!("{}/{}", prefix, rel_str), options);
+                            let _ = zip.write_all(&buf);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let parsers = crate::emulators::default_parsers();
+    for (idx, parser) in parsers.iter().enumerate() {
+        let emu_name = format!("{:?}", parser.emulator());
+        for (loc_idx, loc) in parser.known_locations().into_iter().enumerate() {
+            if loc.is_dir() {
+                let prefix = format!("emulators/{}_{}_{}", emu_name, idx, loc_idx);
+                // Store origin path marker so restore knows where to put it back
+                let _ = zip.start_file(format!("{}/__origin_path.txt", prefix), options);
+                let _ = zip.write_all(loc.to_string_lossy().as_bytes());
+                zip_dir_recursive(&mut zip, &loc, &loc, &prefix, options);
+            }
+        }
+    }
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(dest_path)
+}
+
+#[tauri::command]
+pub fn restore_backup_zip(app_handle: tauri::AppHandle, zip_path: String) -> Result<u32, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+
+    // First pass: collect __origin_path.txt mappings for emulator folders
+    let mut origins: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else { continue };
+        let name = entry.name().replace('\\', "/");
+        if let Some(prefix) = name.strip_suffix("/__origin_path.txt") {
+            let mut s = String::new();
+            if entry.read_to_string(&mut s).is_ok() && !s.trim().is_empty() {
+                origins.insert(prefix.to_string(), std::path::PathBuf::from(s.trim()));
+            }
+        }
+    }
+
+    let mut restored_files = 0u32;
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else { continue };
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().replace('\\', "/");
+        if name.ends_with("/__origin_path.txt") || name.contains("..") {
+            continue;
+        }
+
+        let target_path = if let Some(rel) = name.strip_prefix("accolade/") {
+            Some(app_dir.join(rel))
+        } else if name.starts_with("emulators/") {
+            let parts: Vec<&str> = name.splitn(3, '/').collect();
+            if parts.len() == 3 {
+                let prefix = format!("{}/{}", parts[0], parts[1]);
+                origins.get(&prefix).map(|base| base.join(parts[2]))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(dest) = target_path {
+            if let Some(parent) = dest.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let mut buf = Vec::new();
+            if entry.read_to_end(&mut buf).is_ok() {
+                if std::fs::write(&dest, &buf).is_ok() {
+                    restored_files += 1;
+                }
+            }
+        }
+    }
+
+    Ok(restored_files)
+}

@@ -2,7 +2,8 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { get } from 'svelte/store';
-	import { games } from '$lib/stores/Games.js';
+	import { games, getAchievementPoints } from '$lib/stores/Games.js';
+	import { steamUser } from '$lib/stores/user.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { settings } from '$lib/stores/settings.js';
 	import { onMount } from 'svelte';
@@ -166,6 +167,144 @@
 		selectedScreenshot = screenshot;
 	}
 
+	let shareToast = $state('');
+
+	function loadImg(src: string): Promise<HTMLImageElement | null> {
+		return new Promise((resolve) => {
+			if (!src) return resolve(null);
+			const img = new Image();
+			img.crossOrigin = 'anonymous';
+			img.onload = () => resolve(img);
+			img.onerror = () => resolve(null);
+			img.src = src;
+		});
+	}
+
+	async function exportShareCard(screenshot: Screenshot) {
+		try {
+			const W = 1280;
+			const H = 720;
+			const canvas = document.createElement('canvas');
+			canvas.width = W;
+			canvas.height = H;
+			const ctx = canvas.getContext('2d');
+			if (!ctx) return;
+
+			const bgImg = await loadImg(convertFileSrc(screenshot.path));
+			if (bgImg) {
+				const scale = Math.max(W / bgImg.width, H / bgImg.height);
+				const dw = bgImg.width * scale;
+				const dh = bgImg.height * scale;
+				ctx.drawImage(bgImg, (W - dw) / 2, (H - dh) / 2, dw, dh);
+			} else {
+				ctx.fillStyle = '#121318';
+				ctx.fillRect(0, 0, W, H);
+			}
+
+			// Bottom cinematic gradient
+			const grad = ctx.createLinearGradient(0, H * 0.45, 0, H);
+			grad.addColorStop(0, 'rgba(10, 12, 16, 0)');
+			grad.addColorStop(0.55, 'rgba(10, 12, 16, 0.72)');
+			grad.addColorStop(1, 'rgba(10, 12, 16, 0.96)');
+			ctx.fillStyle = grad;
+			ctx.fillRect(0, 0, W, H);
+
+			const game = getGameData(screenshot.game_id);
+			const ach = getAchData(screenshot.game_id, screenshot.achievement_key);
+			const progress = getGameProgress(screenshot.game_id);
+			const user = get(steamUser);
+
+			// Card banner at bottom
+			const bx = 48;
+			const by = H - 156;
+			const bw = W - 96;
+			const bh = 114;
+
+			ctx.save();
+			ctx.fillStyle = 'rgba(22, 24, 30, 0.88)';
+			ctx.strokeStyle = 'rgba(200, 169, 110, 0.45)';
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			ctx.roundRect(bx, by, bw, bh, 18);
+			ctx.fill();
+			ctx.stroke();
+			ctx.restore();
+
+			// Achievement icon
+			let textX = bx + 24;
+			const achImg = ach?.icon ? await loadImg(ach.icon) : null;
+			if (achImg) {
+				ctx.save();
+				ctx.beginPath();
+				ctx.roundRect(bx + 20, by + 19, 76, 76, 12);
+				ctx.clip();
+				ctx.drawImage(achImg, bx + 20, by + 19, 76, 76);
+				ctx.restore();
+				textX = bx + 114;
+			}
+
+			// Game title + date
+			ctx.fillStyle = '#c8a96e';
+			ctx.font = '700 14px "Segoe UI", system-ui, sans-serif';
+			const headerLine = `${(game?.name || screenshot.game_id || 'ACCOLADE').toUpperCase()}  ·  ${formatDate(ach?.unlocked_time || screenshot.timestamp)}`;
+			ctx.fillText(headerLine, textX, by + 34);
+
+			// Achievement name
+			ctx.fillStyle = '#ffffff';
+			ctx.font = '800 24px "Segoe UI", system-ui, sans-serif';
+			const achTitle = ach ? ach.name || ach.key : 'Capture Accolade';
+			ctx.fillText(achTitle, textX, by + 65);
+
+			// Description & points
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.68)';
+			ctx.font = '500 15px "Segoe UI", system-ui, sans-serif';
+			const pts = ach ? `+${getAchievementPoints(ach)} G` : '';
+			const pct = ach?.completionpercentage ? `${parseFloat(ach.completionpercentage).toFixed(1)}%` : '';
+			const subLine = [ach?.desc || '', pct, pts].filter(Boolean).join('  ·  ');
+			ctx.fillText(subLine.slice(0, 95), textX, by + 92);
+
+			// Right side: player + game completion + Accolade watermark
+			ctx.textAlign = 'right';
+			ctx.fillStyle = '#ffffff';
+			ctx.font = '700 16px "Segoe UI", system-ui, sans-serif';
+			if (user?.personaname) {
+				ctx.fillText(user.personaname, bx + bw - 24, by + 40);
+			}
+			if (progress.total > 0) {
+				ctx.fillStyle = '#c8a96e';
+				ctx.font = '800 18px "Segoe UI", system-ui, sans-serif';
+				ctx.fillText(`${progress.unlocked}/${progress.total} (${Math.round((progress.unlocked / progress.total) * 100)}%)`, bx + bw - 24, by + 68);
+			}
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+			ctx.font = '700 12px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText('ACCOLADE', bx + bw - 24, by + 94);
+			ctx.textAlign = 'left';
+
+			canvas.toBlob(async (blob) => {
+				if (!blob) return;
+				let copied = false;
+				try {
+					if (navigator.clipboard && 'ClipboardItem' in window) {
+						await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+						copied = true;
+					}
+				} catch {
+					copied = false;
+				}
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `accolade-card-${screenshot.filename.replace(/\.(png|gif)$/i, '')}.png`;
+				a.click();
+				URL.revokeObjectURL(url);
+				shareToast = copied ? 'Carte copi\u00e9e et t\u00e9l\u00e9charg\u00e9e !' : 'Carte t\u00e9l\u00e9charg\u00e9e !';
+				setTimeout(() => (shareToast = ''), 3000);
+			}, 'image/png');
+		} catch (e) {
+			console.error('Failed to generate share card:', e);
+		}
+	}
+
 	function closeLightbox() {
 		selectedScreenshot = null;
 	}
@@ -240,6 +379,9 @@
 				>
 					<div class="image-wrapper">
 						<img src={convertFileSrc(screenshot.path)} alt={screenshot.filename} loading="lazy" />
+						{#if screenshot.filename.toLowerCase().endsWith('.gif')}
+							<span class="gif-badge">REPLAY GIF</span>
+						{/if}
 						<div class="overlay">
 							<button
 								class="delete-btn"
@@ -435,6 +577,12 @@
 						{/if}
 					</div>
 					<div class="lightbox-actions">
+						{#if shareToast}
+							<span class="share-toast">{shareToast}</span>
+						{/if}
+						<button class="secondary-btn share-btn" onclick={() => exportShareCard(selectedScreenshot!)}>
+							{$i18n.t('screenshots.shareCard')}
+						</button>
 						<button class="secondary-btn" onclick={closeLightbox}>Fermer</button>
 						<button
 							class="danger-btn"
@@ -1071,5 +1219,28 @@
 	.danger-btn:hover {
 		background: #ef4444;
 		color: white;
+	}
+	.gif-badge {
+		position: absolute;
+		top: 10px;
+		left: 10px;
+		padding: 3px 8px;
+		border-radius: 6px;
+		background: rgba(200, 169, 110, 0.92);
+		color: #111;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		z-index: 2;
+	}
+	.share-btn {
+		border-color: rgba(200, 169, 110, 0.45);
+		color: var(--accent, #c8a96e);
+	}
+	.share-toast {
+		font-size: 11px;
+		font-weight: 700;
+		color: #3ddc84;
+		align-self: center;
 	}
 </style>

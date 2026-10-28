@@ -746,6 +746,7 @@ pub fn run() {
             watcher::start(app_handle);
             game_detector::start(app.handle().clone());
             discord_rpc::start(app.handle().clone());
+            replay::start(app.handle().clone());
 
             if cfg!(debug_assertions) && !is_minimized {
                 app.handle().plugin(
@@ -783,6 +784,11 @@ pub fn run() {
             commands::get_pinned_achievements,
             commands::get_all_pinned_achievements,
             commands::read_json_file,
+            commands::get_custom_sounds,
+            commands::import_custom_sound,
+            commands::capture_replay_clip,
+            commands::create_backup_zip,
+            commands::restore_backup_zip,
             commands::toggle_pinned_achievement,
             commands::get_hud_data,
             game_detector::get_running_game,
@@ -800,6 +806,7 @@ pub mod color;
 pub mod commands;
 pub mod discord_rpc;
 pub mod emulators;
+pub mod replay;
 pub mod game_detector;
 pub mod screenshots;
 pub mod user_data;

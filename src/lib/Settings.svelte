@@ -1,11 +1,11 @@
 <script lang="ts">
 	// src/lib/Settings.svelte
 	import { get } from 'svelte/store';
-	import { invoke } from '@tauri-apps/api/core';
-	import { open } from '@tauri-apps/plugin-dialog';
+	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+	import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
 	import { settingsOpen } from '$lib/stores/ui.js';
-	import { syncSteamMetadata, games, totalCompletedGames } from '$lib/stores/Games.js';
+	import { syncSteamMetadata, loadGames, games, totalCompletedGames } from '$lib/stores/Games.js';
 	import { refreshSteamUser, steamUser } from '$lib/stores/user.js';
 	import {
 		exportProfile,
@@ -33,6 +33,69 @@
 	let isRecordingShortcut = $state(false);
 	let isRecordingHudShortcut = $state(false);
 	let appVersion = $state('');
+	let customSounds = $state<Array<{ filename: string; path: string }>>([]);
+
+	async function refreshCustomSounds() {
+		try {
+			customSounds = await invoke('get_custom_sounds');
+		} catch {
+			customSounds = [];
+		}
+	}
+
+	async function handleImportSound() {
+		try {
+			const selected = await open({
+				multiple: false,
+				filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'm4a'] }]
+			});
+			if (typeof selected === 'string') {
+				const imported = await invoke<{ filename: string; path: string }>('import_custom_sound', {
+					sourcePath: selected
+				});
+				await refreshCustomSounds();
+				draft.notificationSound = 'custom:' + imported.path;
+			}
+		} catch (e) {
+			console.error('Import sound failed:', e);
+		}
+	}
+
+	async function handleCreateBackup() {
+		try {
+			const dest = await saveDialog({
+				defaultPath: 'accolade-backup-' + new Date().toISOString().slice(0, 10) + '.zip',
+				filters: [{ name: 'ZIP Backup', extensions: ['zip'] }]
+			});
+			if (dest) {
+				const saved = await invoke<string>('create_backup_zip', { destPath: dest });
+				alert(saved);
+			}
+		} catch (e) {
+			console.error('Backup failed:', e);
+			alert(String(e));
+		}
+	}
+
+	async function handleRestoreBackup() {
+		try {
+			const src = await open({
+				multiple: false,
+				filters: [{ name: 'ZIP Backup', extensions: ['zip'] }]
+			});
+			if (typeof src === 'string') {
+				const count = await invoke<number>('restore_backup_zip', { zipPath: src });
+				await refreshCustomSounds();
+				await loadGames();
+				alert('Restauration termin\u00e9e (' + count + ' fichiers)');
+			}
+		} catch (e) {
+			console.error('Restore failed:', e);
+			alert(String(e));
+		}
+	}
+
+	void refreshCustomSounds();
 
 	getVersion()
 		.then((v) => (appVersion = v))
@@ -158,7 +221,10 @@
 			previewingSound = '';
 			return;
 		}
-		const audio = new Audio(`/sounds/${encodeURIComponent(filename)}`);
+		const src = filename.startsWith('custom:')
+			? convertFileSrc(filename.slice('custom:'.length))
+			: '/sounds/' + encodeURIComponent(filename);
+		const audio = new Audio(src);
 		audio.volume = draft.notificationVolume;
 		previewAudio = audio;
 		previewingSound = filename;
@@ -263,7 +329,8 @@
 				minimizeToTray: draft.minimizeToTray,
 				screenshotShortcut: draft.screenshotShortcut,
 				hudShortcut: draft.hudShortcut,
-				discordRpc: draft.discordRpc
+				discordRpc: draft.discordRpc,
+				replayBuffer: draft.replayBuffer
 			};
 			await saveSettings(next);
 
@@ -605,7 +672,20 @@
 								<option value={opt.value}>{opt.labelKey ? $i18n.t(opt.labelKey) : opt.label}</option
 								>
 							{/each}
+							{#each customSounds as cs (cs.path)}
+								<option value={"custom:" + cs.path}>🎵 {cs.filename}</option>
+							{/each}
 						</select>
+						<button
+							class="sound-preview-btn"
+							onclick={handleImportSound}
+							title={$i18n.t('settings.importSound')}
+						>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+								<line x1="12" y1="5" x2="12" y2="19" />
+								<line x1="5" y1="12" x2="19" y2="12" />
+							</svg>
+						</button>
 						<button
 							class="sound-preview-btn"
 							class:playing={previewingSound === draft.notificationSound &&
@@ -724,6 +804,28 @@
 				</div>
 				<label class="toggle-switch">
 					<input type="checkbox" bind:checked={draft.discordRpc} />
+					<span class="slider"></span>
+				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.replayBuffer')}</div>
+					<div class="setting-desc">{$i18n.t('settings.replayBufferDesc')}</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.replayBuffer} />
+					<span class="slider"></span>
+				</label>
+			</div>
+
+			<div class="setting-row" style="margin-top: 14px;">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.replayBuffer')}</div>
+					<div class="setting-desc">{$i18n.t('settings.replayBufferDesc')}</div>
+				</div>
+				<label class="toggle-switch">
+					<input type="checkbox" bind:checked={draft.replayBuffer} />
 					<span class="slider"></span>
 				</label>
 			</div>
@@ -1062,6 +1164,62 @@
 							/></svg
 						>
 						Dossier exports
+					</button>
+				</div>
+			</div>
+
+			<div
+				class="setting-row"
+				style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);"
+			>
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.backupSection')}</div>
+					<div class="setting-desc">{$i18n.t('settings.backupDesc')}</div>
+				</div>
+				<div class="profile-actions">
+					<button class="profile-btn secondary" onclick={handleCreateBackup}>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="7 10 12 15 17 10" />
+							<line x1="12" y1="15" x2="12" y2="3" />
+						</svg>
+						{$i18n.t('settings.backupCreate')}
+					</button>
+					<button class="profile-btn primary" onclick={handleRestoreBackup}>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="17 8 12 3 7 8" />
+							<line x1="12" y1="3" x2="12" y2="15" />
+						</svg>
+						{$i18n.t('settings.backupRestore')}
+					</button>
+				</div>
+			</div>
+
+			<div
+				class="setting-row"
+				style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);"
+			>
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.backupSection')}</div>
+					<div class="setting-desc">{$i18n.t('settings.backupDesc')}</div>
+				</div>
+				<div class="profile-actions">
+					<button class="profile-btn secondary" onclick={handleCreateBackup}>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="7 10 12 15 17 10" />
+							<line x1="12" y1="15" x2="12" y2="3" />
+						</svg>
+						{$i18n.t('settings.backupCreate')}
+					</button>
+					<button class="profile-btn primary" onclick={handleRestoreBackup}>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="17 8 12 3 7 8" />
+							<line x1="12" y1="3" x2="12" y2="15" />
+						</svg>
+						{$i18n.t('settings.backupRestore')}
 					</button>
 				</div>
 			</div>
