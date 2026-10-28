@@ -56,6 +56,64 @@ type AchievementsUpdatedPayload = {
 	achievements_total?: number;
 };
 
+/**
+ * Computes the Gamerscore (XP) value of a single achievement based on its global completion rate.
+ */
+export function getAchievementPoints(ach: Achievement): number {
+	const pct = parseFloat(ach.completionpercentage || '');
+	if (!Number.isFinite(pct) || pct <= 0) return 15;
+	if (pct <= 0.1) return 200;
+	if (pct <= 1.0) return 100;
+	if (pct <= 3.0) return 60;
+	if (pct <= 7.0) return 40;
+	if (pct <= 15.0) return 25;
+	if (pct <= 35.0) return 15;
+	return 10;
+}
+
+export interface ProfileRankInfo {
+	score: number;
+	level: number;
+	currentLevelXp: number;
+	nextLevelXp: number;
+	progressPct: number;
+}
+
+export function calculateProfileRank(gamesList: Game[]): ProfileRankInfo {
+	let score = 0;
+	for (const g of gamesList) {
+		const achs = g.achievements ?? [];
+		const total = g.achievements_total || achs.length || 0;
+		let unlockedCount = 0;
+		for (const a of achs) {
+			if (a.unlocked) {
+				unlockedCount++;
+				score += getAchievementPoints(a);
+			}
+		}
+		if (total > 0 && unlockedCount === total) {
+			score += 250; // Platinum / 100% completion bonus
+		}
+	}
+
+	// Level curve: L = floor(sqrt(score / 100)) + 1
+	// Level 1 starts at 0 XP, Level 2 at 100 XP, Level 3 at 400 XP, Level 4 at 900 XP, etc.
+	const rawLevel = Math.floor(Math.sqrt(score / 100)) + 1;
+	const levelFloorXp = (rawLevel - 1) * (rawLevel - 1) * 100;
+	const levelCeilXp = rawLevel * rawLevel * 100;
+	const span = Math.max(1, levelCeilXp - levelFloorXp);
+	const currentLevelXp = score - levelFloorXp;
+	const progressPct = Math.min(100, Math.max(0, Math.round((currentLevelXp / span) * 100)));
+
+	return {
+		score,
+		level: rawLevel,
+		currentLevelXp,
+		nextLevelXp: span,
+		progressPct
+	};
+}
+
 export const games = writable<Game[]>([]);
 let achievementsSyncInitialized = false;
 
@@ -73,6 +131,8 @@ export const totalCompletedGames = derived(
 			return unlocked === total;
 		}).length
 );
+
+export const profileRank = derived(games, ($games) => calculateProfileRank($games));
 
 export async function loadGames(): Promise<void> {
 	try {
@@ -99,19 +159,14 @@ export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): P
 		raUsername: s.raUsername
 	});
 
-	if (!effectiveApiKey) {
-		console.warn('Cannot sync: No Steam API Key provided');
-		return;
-	}
-
 	isSyncing.set(true);
 	try {
 		const result = await invoke<Game[]>('sync_steam_metadata', {
-			apiKey: effectiveApiKey,
-			steamId: s.steamId,
-			raUsername: s.raUsername,
-			raApiKey: s.raApiKey,
-			sgdbApiKey: effectiveSgdbApiKey,
+			apiKey: effectiveApiKey || '',
+			steamId: s.steamId || '',
+			raUsername: s.raUsername || '',
+			raApiKey: s.raApiKey || '',
+			sgdbApiKey: effectiveSgdbApiKey || '',
 			language: s.language
 		});
 
@@ -120,7 +175,7 @@ export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): P
 			games.set(result);
 		}
 	} catch (e) {
-		console.error('Failed to sync Steam metadata:', e);
+		console.error('Failed to sync metadata:', e);
 	} finally {
 		isSyncing.set(false);
 	}

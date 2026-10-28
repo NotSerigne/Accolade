@@ -29,6 +29,11 @@ pub enum Emulator {
     Codex,
     OnlineFix,
     Rune,
+    Tenoke,
+    Flt,
+    Ali213,
+    SmartSteamEmu,
+    CreamApi,
     Steam,
 }
 

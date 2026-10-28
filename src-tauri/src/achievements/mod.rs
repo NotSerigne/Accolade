@@ -1,11 +1,8 @@
 // src-tauri/src/achievements/mod.rs
 use crate::achievements::models::{Achievement, Game};
-use crate::emulators::codex;
-use crate::emulators::empress;
-use crate::emulators::goldberg;
-use crate::emulators::onlinefix;
-use crate::emulators::rune;
-use crate::emulators::EmulatorParser;
+use crate::emulators::{
+    ali213, codex, creamapi, empress, flt, goldberg, onlinefix, rune, sse, tenoke, EmulatorParser,
+};
 
 pub mod appinfo;
 pub mod models;
@@ -17,6 +14,9 @@ pub async fn get_achievements_for_game(game: Game, state: &crate::AppState) -> V
     match game.source {
         models::SourceType::Emulator(_) => match_emulator(game),
         models::SourceType::RetroAchievements => {
+            if !game.achievements.is_empty() {
+                return game.achievements;
+            }
             let username = state.ra_username.lock().unwrap().clone();
             let api_key = state.ra_api_key.lock().unwrap().clone();
             let provider =
@@ -45,6 +45,11 @@ pub fn match_emulator(game: Game) -> Vec<Achievement> {
             models::Emulator::Codex => codex::Parser.parse(&path),
             models::Emulator::OnlineFix => onlinefix::Parser.parse(&path),
             models::Emulator::Rune => rune::Parser.parse(&path),
+            models::Emulator::Tenoke => tenoke::Parser.parse(&path),
+            models::Emulator::Flt => flt::Parser.parse(&path),
+            models::Emulator::Ali213 => ali213::Parser.parse(&path),
+            models::Emulator::SmartSteamEmu => sse::Parser.parse(&path),
+            models::Emulator::CreamApi => creamapi::Parser.parse(&path),
             models::Emulator::Steam => Vec::new(),
         };
         stats_schema::enrich_from_sibling_stats(&mut achs, &path, game.steam_id);

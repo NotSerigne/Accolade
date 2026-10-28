@@ -5,16 +5,36 @@ use crate::achievements::models::Game;
 use crate::achievements::models::SourceType;
 use std::path::PathBuf;
 
+pub(crate) mod ali213;
 pub(crate) mod codex;
+pub(crate) mod creamapi;
 pub(crate) mod empress;
+pub(crate) mod flt;
 pub(crate) mod goldberg;
 pub(crate) mod onlinefix;
 pub(crate) mod rune;
+pub(crate) mod sse;
+pub(crate) mod tenoke;
 
 pub trait EmulatorParser {
     fn parse(&self, path: &str) -> Vec<Achievement>;
     fn known_locations(&self) -> Vec<PathBuf>;
     fn emulator(&self) -> Emulator;
+}
+
+pub fn default_parsers() -> Vec<Box<dyn EmulatorParser>> {
+    vec![
+        Box::new(goldberg::Parser),
+        Box::new(empress::Parser),
+        Box::new(onlinefix::Parser),
+        Box::new(rune::Parser),
+        Box::new(codex::Parser),
+        Box::new(tenoke::Parser),
+        Box::new(flt::Parser),
+        Box::new(ali213::Parser),
+        Box::new(sse::Parser),
+        Box::new(creamapi::Parser),
+    ]
 }
 
 /// Normalizes a raw (current, max) progress pair read from an emulator file.
@@ -114,19 +134,36 @@ fn is_achievements_file(path: &PathBuf) -> bool {
         return false;
     }
 
-    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
 
-    filename == "achievements.json"
-        || filename == "achievement.json"
-        || filename == "achievements.ini"
+    matches!(
+        filename.as_str(),
+        "achievements.json"
+            | "achievement.json"
+            | "achievements.ini"
+            | "user_stats.ini"
+            | "achievements.txt"
+    )
 }
 
 fn extract_steam_id_from_path(path: &str) -> u32 {
-    let parts: Vec<&str> = path.split('\\').collect();
+    let parts: Vec<&str> = path.split(['\\', '/']).collect();
 
     for part in parts.iter().rev() {
         if let Ok(id) = part.parse::<u32>() {
             return id;
+        }
+        // Also support `SteamUserID_2623190` or `AppID_2623190` folder conventions
+        for token in part.split(['_', '-', ' ']) {
+            if token.len() >= 3 {
+                if let Ok(id) = token.parse::<u32>() {
+                    return id;
+                }
+            }
         }
     }
 
@@ -167,5 +204,40 @@ mod tests {
             parse_progress_str(Some(" 2.5 "), Some("\"5\"")),
             (Some(2.5), Some(5.0))
         );
+    }
+
+    #[test]
+    fn tenoke_parses_user_stats_and_section_ini() {
+        let raw = r#"
+[ACHIEVEMENTS]
+"ACH_FIRST_BLOOD" = {unlocked = true, time = 1710000123}
+"ACH_LOCKED" = false
+"#;
+        let ini = ini::Ini::load_from_str(raw).unwrap();
+        let achs = tenoke::parse_tenoke_ini(&ini);
+        assert_eq!(achs.len(), 2);
+        let first = achs.iter().find(|a| a.key == "ACH_FIRST_BLOOD").unwrap();
+        assert!(first.unlocked);
+        assert_eq!(first.unlocked_time, Some(1710000123));
+        let second = achs.iter().find(|a| a.key == "ACH_LOCKED").unwrap();
+        assert!(!second.unlocked);
+    }
+
+    #[test]
+    fn ali213_parses_have_achieved_and_progress() {
+        let raw = r#"
+[ACH_COLLECTOR]
+HaveAchieved=1
+HaveAchievedTime=1700000555
+nCurProgress=42
+nMaxProgress=100
+"#;
+        let ini = ini::Ini::load_from_str(raw).unwrap();
+        let achs = ali213::parse_ali213_ini(&ini);
+        assert_eq!(achs.len(), 1);
+        assert!(achs[0].unlocked);
+        assert_eq!(achs[0].unlocked_time, Some(1700000555));
+        assert_eq!(achs[0].progress, Some(42.0));
+        assert_eq!(achs[0].max_progress, Some(100.0));
     }
 }

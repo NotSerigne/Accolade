@@ -143,7 +143,7 @@ fn is_technical_name(name: &str) -> bool {
             | "empress"
             | "rune"
             | "goldberg"
-            | "onlinefix"
+            | "onlinefix" | "tenoke" | "flt" | "ali213" | "valve" | "smartsteamemu" | "creamapi"
             | "steam_settings"
             | "achievements"
             | "remote"
@@ -291,13 +291,7 @@ pub fn start(app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut watcher = recommended_watcher(tx).unwrap();
 
-        let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
-            Box::new(crate::emulators::goldberg::Parser),
-            Box::new(crate::emulators::empress::Parser),
-            Box::new(crate::emulators::onlinefix::Parser),
-            Box::new(crate::emulators::rune::Parser),
-            Box::new(crate::emulators::codex::Parser),
-        ];
+        let parsers = crate::emulators::default_parsers();
 
         let mut watch_paths = HashSet::new();
         for parser in &parsers {

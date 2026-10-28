@@ -4,7 +4,7 @@
 	import { get } from 'svelte/store';
 	import { listen } from '@tauri-apps/api/event';
 	import { invoke } from '@tauri-apps/api/core';
-	import { loadAchievements, type Game, type Achievement, games } from '$lib/stores/Games.js';
+	import { loadAchievements, getAchievementPoints, type Game, type Achievement, games } from '$lib/stores/Games.js';
 	import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -852,7 +852,7 @@
 															>
 																{rarityLabel(ach.completionpercentage)} | {parseFloat(
 																	ach.completionpercentage
-																).toFixed(1)}%
+																).toFixed(1)}% · +{getAchievementPoints(ach)} G
 															</span>
 															<div class="rarity-progress-track">
 																<div

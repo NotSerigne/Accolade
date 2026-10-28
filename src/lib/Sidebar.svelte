@@ -5,6 +5,7 @@
 		loadGames,
 		totalUnlockedAchievements,
 		totalCompletedGames,
+		profileRank,
 		type Game
 	} from '$lib/stores/Games.js';
 	import { selectedGameId } from '$lib/stores/selectedGame.js';
@@ -383,12 +384,20 @@
 		{#if $steamUser}
 			<img class="avatar" src={$steamUser.avatarfull} alt={$steamUser.personaname} />
 			<div class="user-info">
-				<div class="user-name">{$steamUser.personaname}</div>
+				<div class="user-name-row">
+					<span class="user-name">{$steamUser.personaname}</span>
+					<span class="user-lvl-badge" title="{$profileRank.currentLevelXp}/{$profileRank.nextLevelXp} XP">
+						LVL {$profileRank.level}
+					</span>
+				</div>
 				<div class="user-meta">
 					{$i18n.t('sidebar.user.achievements', {
 						count: $totalUnlockedAchievements,
 						completed: $totalCompletedGames
-					})}
+					})} · <span class="user-gs">{$profileRank.score.toLocaleString()} G</span>
+				</div>
+				<div class="user-xp-track">
+					<div class="user-xp-fill" style="width: {$profileRank.progressPct}%"></div>
 				</div>
 			</div>
 		{:else}
@@ -661,5 +670,40 @@
 	}
 	.icon-btn.active {
 		color: var(--accent, #c8a96e);
+	}
+	.user-name-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+	.user-lvl-badge {
+		font-size: 10px;
+		font-weight: 800;
+		padding: 1px 6px;
+		border-radius: 99px;
+		background: color-mix(in srgb, var(--accent, #c8a96e) 18%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 45%, transparent);
+		color: var(--accent, #c8a96e);
+		letter-spacing: 0.04em;
+		flex-shrink: 0;
+	}
+	.user-gs {
+		color: var(--accent, #c8a96e);
+		font-weight: 700;
+	}
+	.user-xp-track {
+		width: 100%;
+		height: 3px;
+		background: rgba(255, 255, 255, 0.08);
+		border-radius: 99px;
+		margin-top: 5px;
+		overflow: hidden;
+	}
+	.user-xp-fill {
+		height: 100%;
+		background: var(--accent, #c8a96e);
+		border-radius: 99px;
+		transition: width 0.3s ease;
 	}
 </style>

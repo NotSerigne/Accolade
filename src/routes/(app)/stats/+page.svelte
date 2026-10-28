@@ -1,6 +1,6 @@
 <script lang="ts">
 	// src/routes/(app)/stats/+page.svelte
-	import { games, totalUnlockedAchievements, type Achievement } from '$lib/stores/Games.js';
+	import { games, totalUnlockedAchievements, profileRank, type Achievement } from '$lib/stores/Games.js';
 	import { SvelteDate, SvelteMap } from 'svelte/reactivity';
 	import { get } from 'svelte/store';
 	import { i18n } from '$lib/stores/i18n.js';
@@ -597,6 +597,58 @@
 					</div>
 				</div>
 
+				<div class="card stat-summary gamerscore-card">
+					<div class="icon-circle gamerscore">
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+						</svg>
+					</div>
+					<div class="card-info">
+						<span class="label">{$i18n.t('stats.gamerscore')}</span>
+						<span class="value">{$profileRank.score.toLocaleString()} G</span>
+						<span class="sub">
+							{$i18n.t('stats.levelSub', {
+								level: $profileRank.level,
+								xp: $profileRank.currentLevelXp,
+								next: $profileRank.nextLevelXp
+							})}
+						</span>
+					</div>
+				</div>
+
+				<div class="card stat-summary gamerscore-card">
+					<div class="icon-circle gamerscore">
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+						</svg>
+					</div>
+					<div class="card-info">
+						<span class="label">{$i18n.t('stats.gamerscore')}</span>
+						<span class="value">{$profileRank.score.toLocaleString()} G</span>
+						<span class="sub">
+							{$i18n.t('stats.levelSub', {
+								level: $profileRank.level,
+								xp: $profileRank.currentLevelXp,
+								next: $profileRank.nextLevelXp
+							})}
+						</span>
+					</div>
+				</div>
+
 				<!-- Main Grid Row -->
 				<div class="card top-games">
 					<div class="card-header">
@@ -604,7 +656,7 @@
 						<span class="count">{$i18n.t('stats.gamesCount', { count: $games.length })}</span>
 					</div>
 					<div class="games-progress-list">
-						{#each topGames as game (game.steam_id)}
+						{#each topGames as game (game.id)}
 							<div class="game-progress-row">
 								<div class="game-info">
 									<span class="name">{game.name}</span>
@@ -654,7 +706,7 @@
 					<div class="card podium">
 						<h2>{$i18n.t('stats.podium')}</h2>
 						<div class="podium-list">
-							{#each podium as game, i (game.steam_id)}
+							{#each podium as game, i (game.id)}
 								<div class="podium-item">
 									<div class="rank">{i + 1}</div>
 									<span class="name">{game.name}</span>
@@ -1042,7 +1094,7 @@
 
 	.grid-overview {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(5, 1fr);
 		grid-template-rows: auto 1fr;
 		gap: 16px;
 	}
@@ -1082,6 +1134,10 @@
 		color: #a855f7;
 		background: rgba(168, 85, 247, 0.1);
 	}
+	.icon-circle.gamerscore {
+		color: var(--accent, #c8a96e);
+		background: rgba(200, 169, 110, 0.14);
+	}
 	.icon-circle.remaining {
 		color: #f4b860;
 		background: rgba(244, 184, 96, 0.1);
@@ -1109,7 +1165,7 @@
 	}
 
 	.top-games {
-		grid-column: 1 / 4;
+		grid-column: 1 / 5;
 	}
 	.card-header {
 		display: flex;
