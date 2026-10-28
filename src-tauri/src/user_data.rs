@@ -5,6 +5,12 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct ManualAchievementOverride {
+    pub unlocked: bool,
+    pub unlocked_time: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct UserData {
     pub favorites: HashSet<String>,
@@ -12,6 +18,12 @@ pub struct UserData {
     /// Per-game ordered list of achievement keys pinned to the in-game HUD tracker.
     #[serde(default)]
     pub pinned_achievements: HashMap<String, Vec<String>>,
+    /// Per-game tracked playtime in seconds.
+    #[serde(default)]
+    pub playtime_seconds: HashMap<String, u64>,
+    /// Per-game manual achievement unlock/date overrides (game_id -> ach_key_lowercase -> override).
+    #[serde(default)]
+    pub manual_achievements: HashMap<String, HashMap<String, ManualAchievementOverride>>,
 }
 
 fn get_user_data_path(app_handle: &AppHandle) -> PathBuf {

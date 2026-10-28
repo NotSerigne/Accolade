@@ -4,7 +4,15 @@
 	import { get } from 'svelte/store';
 	import { listen } from '@tauri-apps/api/event';
 	import { invoke } from '@tauri-apps/api/core';
-	import { loadAchievements, getAchievementPoints, type Game, type Achievement, games } from '$lib/stores/Games.js';
+	import {
+		loadAchievements,
+		getAchievementPoints,
+		formatPlaytime,
+		type Game,
+		type Achievement,
+		type HltbData,
+		games
+	} from '$lib/stores/Games.js';
 	import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -48,6 +56,191 @@
 	let currentIndex = $derived($games.findIndex((g) => g.id === game?.id));
 	let prevGame = $derived(currentIndex > 0 ? $games[currentIndex - 1] : null);
 	let nextGame = $derived(currentIndex < $games.length - 1 ? $games[currentIndex + 1] : null);
+
+	// Live playtime reactive to store updates
+	let gamePlaytimeSeconds = $derived(
+		$games.find((g) => g.id === game?.id)?.playtime_seconds ?? game?.playtime_seconds ?? 0
+	);
+	let editingPlaytime = $state(false);
+	let editPlaytimeHours = $state(0);
+	let editPlaytimeMins = $state(0);
+
+	function openPlaytimeEditor() {
+		const secs = gamePlaytimeSeconds;
+		editPlaytimeHours = Math.floor(secs / 3600);
+		editPlaytimeMins = Math.floor((secs % 3600) / 60);
+		editingPlaytime = true;
+	}
+
+	async function saveManualPlaytime() {
+		if (!game) return;
+		const totalSecs =
+			Math.max(0, Math.floor(Number(editPlaytimeHours) || 0)) * 3600 +
+			Math.max(0, Math.floor(Number(editPlaytimeMins) || 0)) * 60;
+		try {
+			await invoke('set_manual_playtime', {
+				gameId: game.id,
+				playtimeSeconds: totalSecs
+			});
+			games.update((list) =>
+				list.map((g) => (g.id === game.id ? { ...g, playtime_seconds: totalSecs } : g))
+			);
+			editingPlaytime = false;
+		} catch (e) {
+			console.error('Failed to save playtime:', e);
+		}
+	}
+
+	// HowLongToBeat (HLTB) state
+	let hltbData = $state<HltbData | null>(null);
+	let hltbLoading = $state(false);
+	let editingHltb = $state(false);
+	let customHltbMain = $state('');
+	let customHltbExtra = $state('');
+	let customHltb100 = $state('');
+
+	$effect(() => {
+		const gid = game?.id;
+		const gname = game?.name;
+		editingHltb = false;
+		editingPlaytime = false;
+		editingAchKey = null;
+		if (!gid || !gname) {
+			hltbData = null;
+			return;
+		}
+		hltbLoading = true;
+		void invoke<HltbData>('get_hltb_data', {
+			gameId: gid,
+			gameName: gname,
+			forceRefresh: false
+		})
+			.then((res) => {
+				if (game?.id === gid) {
+					hltbData = res;
+				}
+			})
+			.catch((e) => console.error('HLTB error:', e))
+			.finally(() => {
+				if (game?.id === gid) hltbLoading = false;
+			});
+	});
+
+	async function refreshHltb() {
+		if (!game) return;
+		hltbLoading = true;
+		try {
+			hltbData = await invoke<HltbData>('get_hltb_data', {
+				gameId: game.id,
+				gameName: game.name,
+				forceRefresh: true
+			});
+		} catch (e) {
+			console.error('HLTB refresh error:', e);
+		} finally {
+			hltbLoading = false;
+		}
+	}
+
+	function openHltbEditor() {
+		customHltbMain = hltbData?.main_hours ? String(hltbData.main_hours) : '';
+		customHltbExtra = hltbData?.main_extra_hours ? String(hltbData.main_extra_hours) : '';
+		customHltb100 = hltbData?.completionist_hours ? String(hltbData.completionist_hours) : '';
+		editingHltb = true;
+	}
+
+	async function saveCustomHltb() {
+		if (!game) return;
+		const parseOpt = (val: string): number | null => {
+			const n = parseFloat(String(val).replace(',', '.'));
+			return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : null;
+		};
+		try {
+			hltbData = await invoke<HltbData>('set_custom_hltb_data', {
+				gameId: game.id,
+				gameName: game.name,
+				mainHours: parseOpt(customHltbMain),
+				mainExtraHours: parseOpt(customHltbExtra),
+				completionistHours: parseOpt(customHltb100)
+			});
+			editingHltb = false;
+		} catch (e) {
+			console.error('Failed to save custom HLTB:', e);
+		}
+	}
+
+	function hltbProgressPct(targetHours: number | null | undefined): number {
+		if (!targetHours || targetHours <= 0) return 0;
+		const playedHours = gamePlaytimeSeconds / 3600;
+		return Math.min(100, Math.max(0, Math.round((playedHours / targetHours) * 100)));
+	}
+
+	// Manual Achievement Editor state
+	let editingAchKey = $state<string | null>(null);
+	let editAchUnlocked = $state(true);
+	let editAchDateTime = $state('');
+	let savingAchEdit = $state(false);
+
+	function unixToLocalDatetimeInput(unixSecs: number | null | undefined): string {
+		const d = unixSecs && unixSecs > 0 ? new Date(unixSecs * 1000) : new Date();
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	}
+
+	function openAchievementEditor(ach: Achievement) {
+		if (editingAchKey === ach.key) {
+			editingAchKey = null;
+			return;
+		}
+		editingAchKey = ach.key;
+		editAchUnlocked = ach.unlocked || Boolean(ach.unlocked_time);
+		editAchDateTime = unixToLocalDatetimeInput(ach.unlocked_time);
+	}
+
+	function setEditDateTimeNow() {
+		editAchDateTime = unixToLocalDatetimeInput(Math.floor(Date.now() / 1000));
+	}
+
+	async function saveAchievementEdit(achKey: string) {
+		if (!game || savingAchEdit) return;
+		savingAchEdit = true;
+		try {
+			let unlockedTime: number | null = null;
+			if (editAchUnlocked) {
+				const parsedMs = editAchDateTime ? new Date(editAchDateTime).getTime() : Date.now();
+				unlockedTime = Number.isFinite(parsedMs)
+					? Math.floor(parsedMs / 1000)
+					: Math.floor(Date.now() / 1000);
+			}
+
+			const updated = await invoke<Achievement[]>('set_achievement_state', {
+				gameId: game.id,
+				achKey,
+				unlocked: editAchUnlocked,
+				unlockedTime
+			});
+
+			if (updated && updated.length > 0) {
+				achievements = updated;
+				games.update((list) =>
+					list.map((g) => (g.id === game.id ? { ...g, achievements: updated } : g))
+				);
+			} else {
+				// Update locally in case game wasn't found in state
+				const norm = achKey.trim().toLowerCase();
+				achievements = achievements.map((a) =>
+					a.key.trim().toLowerCase() === norm
+						? { ...a, unlocked: editAchUnlocked, unlocked_time: unlockedTime }
+						: a
+				);
+			}
+			editingAchKey = null;
+		} catch (e) {
+			console.error('Failed to update achievement state:', e);
+		} finally {
+			savingAchEdit = false;
+		}
+	}
 
 	function goToGame(id: string) {
 		void goto(resolve('/(app)/games/[id]', { id }));
@@ -223,7 +416,7 @@
 			return {
 				...s,
 				unlocked: live?.unlocked ?? s.unlocked ?? false,
-				unlocked_time: live?.unlocked_time ?? s.unlocked_time ?? null,
+				unlocked_time: live?.unlocked_time !== undefined ? live.unlocked_time : (s.unlocked_time ?? null),
 				rarity: live?.rarity || s.rarity || '',
 				completionpercentage: live?.completionpercentage || s.completionpercentage || '',
 				desc: live?.desc || s.desc || ''
@@ -282,16 +475,16 @@
 		const unlocked = merged
 			.filter((achievement) => achievement.unlocked || Boolean(achievement.unlocked_time))
 			.sort((a, b) => (a.unlocked_time ?? 0) - (b.unlocked_time ?? 0));
-		const locked = merged.filter(
-			(achievement) => !achievement.unlocked && !achievement.unlocked_time
-		).sort((a, b) => {
-			const rarityA = parseFloat(a.completionpercentage);
-			const rarityB = parseFloat(b.completionpercentage);
-			const normalizedA = Number.isFinite(rarityA) ? rarityA : Number.POSITIVE_INFINITY;
-			const normalizedB = Number.isFinite(rarityB) ? rarityB : Number.POSITIVE_INFINITY;
+		const locked = merged
+			.filter((achievement) => !achievement.unlocked && !achievement.unlocked_time)
+			.sort((a, b) => {
+				const rarityA = parseFloat(a.completionpercentage);
+				const rarityB = parseFloat(b.completionpercentage);
+				const normalizedA = Number.isFinite(rarityA) ? rarityA : Number.POSITIVE_INFINITY;
+				const normalizedB = Number.isFinite(rarityB) ? rarityB : Number.POSITIVE_INFINITY;
 
-			return normalizedB - normalizedA || a.name.localeCompare(b.name);
-		});
+				return normalizedB - normalizedA || a.name.localeCompare(b.name);
+			});
 		return [...unlocked, ...locked];
 	});
 
@@ -384,7 +577,9 @@
 		return new Date(ts * 1000).toLocaleDateString('fr-FR', {
 			day: '2-digit',
 			month: '2-digit',
-			year: 'numeric'
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
 		});
 	}
 
@@ -596,7 +791,143 @@
 									<span class="stat-label">{$i18n.t('game.unlocked')}</span>
 									<span class="stat-value highlight">{unlockedCount}</span>
 								</div>
+								<div class="stat-item playtime-stat">
+									<div class="stat-label-row">
+										<span class="stat-label">TEMPS DE JEU</span>
+										<button
+											class="mini-edit-icon"
+											onclick={() => (editingPlaytime ? (editingPlaytime = false) : openPlaytimeEditor())}
+											title="Modifier le temps de jeu"
+										>
+											✎
+										</button>
+									</div>
+									{#if editingPlaytime}
+										<div class="playtime-inline-edit">
+											<input
+												type="number"
+												min="0"
+												bind:value={editPlaytimeHours}
+												class="pt-input"
+												title="Heures"
+											/>
+											<span>h</span>
+											<input
+												type="number"
+												min="0"
+												max="59"
+												bind:value={editPlaytimeMins}
+												class="pt-input"
+												title="Minutes"
+											/>
+											<span>m</span>
+											<button class="pt-save-btn" onclick={saveManualPlaytime}>✓</button>
+										</div>
+									{:else}
+										<span class="stat-value playtime-val">{formatPlaytime(gamePlaytimeSeconds)}</span>
+									{/if}
+								</div>
 							</div>
+						</div>
+
+						<!-- HowLongToBeat Bar -->
+						<div class="hltb-bar">
+							<div class="hltb-brand">
+								<span class="hltb-badge">HLTB</span>
+								<span class="hltb-sub">HowLongToBeat</span>
+							</div>
+
+							{#if editingHltb}
+								<div class="hltb-edit-row">
+									<label>
+										<span>Histoire (h)</span>
+										<input type="number" step="0.5" min="0" bind:value={customHltbMain} placeholder="ex: 15" />
+									</label>
+									<label>
+										<span>+ Extras (h)</span>
+										<input type="number" step="0.5" min="0" bind:value={customHltbExtra} placeholder="ex: 28" />
+									</label>
+									<label>
+										<span>100% (h)</span>
+										<input type="number" step="0.5" min="0" bind:value={customHltb100} placeholder="ex: 45" />
+									</label>
+									<button class="hltb-btn primary" onclick={saveCustomHltb}>Enregistrer</button>
+									<button class="hltb-btn" onclick={() => (editingHltb = false)}>Annuler</button>
+								</div>
+							{:else}
+								<div class="hltb-metrics">
+									<div class="hltb-metric">
+										<div class="hltb-metric-top">
+											<span class="hltb-label">Histoire principale</span>
+											<strong class="hltb-hours">
+												{hltbLoading ? '...' : hltbData?.main_hours ? `${hltbData.main_hours}h` : '—'}
+											</strong>
+										</div>
+										<div class="hltb-track">
+											<div
+												class="hltb-fill"
+												style:width="{hltbProgressPct(hltbData?.main_hours)}%"
+											></div>
+										</div>
+									</div>
+
+									<div class="hltb-metric">
+										<div class="hltb-metric-top">
+											<span class="hltb-label">Histoire + Extras</span>
+											<strong class="hltb-hours">
+												{hltbLoading
+													? '...'
+													: hltbData?.main_extra_hours
+														? `${hltbData.main_extra_hours}h`
+														: '—'}
+											</strong>
+										</div>
+										<div class="hltb-track">
+											<div
+												class="hltb-fill extra"
+												style:width="{hltbProgressPct(hltbData?.main_extra_hours)}%"
+											></div>
+										</div>
+									</div>
+
+									<div class="hltb-metric">
+										<div class="hltb-metric-top">
+											<span class="hltb-label">Complétionniste 100%</span>
+											<strong class="hltb-hours">
+												{hltbLoading
+													? '...'
+													: hltbData?.completionist_hours
+														? `${hltbData.completionist_hours}h`
+														: '—'}
+											</strong>
+										</div>
+										<div class="hltb-track">
+											<div
+												class="hltb-fill comp"
+												style:width="{hltbProgressPct(hltbData?.completionist_hours)}%"
+											></div>
+										</div>
+									</div>
+								</div>
+
+								<div class="hltb-actions">
+									<button
+										class="hltb-icon-btn"
+										onclick={openHltbEditor}
+										title="Définir ou modifier les durées HLTB manuellement"
+									>
+										✎
+									</button>
+									<button
+										class="hltb-icon-btn"
+										disabled={hltbLoading}
+										onclick={refreshHltb}
+										title="Actualiser depuis HowLongToBeat"
+									>
+										↻
+									</button>
+								</div>
+							{/if}
 						</div>
 
 						<div class="tags-section">
@@ -807,7 +1138,7 @@
 												{:else}
 													<span class="ach-placeholder">🏆</span>
 												{/if}
-												</div>
+											</div>
 
 											<div class="ach-details">
 												<div class="ach-header-row">
@@ -865,6 +1196,27 @@
 													{/if}
 
 													<div class="ach-actions">
+														<button
+															class="action-btn"
+															class:is-copied={editingAchKey === ach.key}
+															onclick={() => openAchievementEditor(ach)}
+															title="Modifier l'état ou la date de déblocage"
+														>
+															<svg
+																width="11"
+																height="11"
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																stroke-width="2.5"
+																stroke-linecap="round"
+																stroke-linejoin="round"
+															>
+																<path d="M12 20h9" />
+																<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+															</svg>
+															Éditer
+														</button>
 														<button
 															class="action-btn"
 															class:is-copied={isPinned(ach.key)}
@@ -945,6 +1297,57 @@
 												</div>
 											</div>
 										</div>
+
+										{#if editingAchKey === ach.key}
+											<div class="ach-editor-panel">
+												<div class="ach-editor-left">
+													<button
+														type="button"
+														class="ach-state-toggle"
+														class:unlocked={editAchUnlocked}
+														onclick={() => (editAchUnlocked = !editAchUnlocked)}
+													>
+														{editAchUnlocked ? '✓ Débloqué' : '🔒 Verrouillé'}
+													</button>
+
+													{#if editAchUnlocked}
+														<div class="ach-dt-group">
+															<span class="ach-dt-label">Date & heure :</span>
+															<input
+																type="datetime-local"
+																class="ach-dt-input"
+																bind:value={editAchDateTime}
+															/>
+															<button
+																type="button"
+																class="ach-dt-now"
+																onclick={setEditDateTimeNow}
+															>
+																Maintenant
+															</button>
+														</div>
+													{/if}
+												</div>
+
+												<div class="ach-editor-right">
+													<button
+														type="button"
+														class="ach-save-btn"
+														disabled={savingAchEdit}
+														onclick={() => saveAchievementEdit(ach.key)}
+													>
+														{savingAchEdit ? '...' : 'Enregistrer'}
+													</button>
+													<button
+														type="button"
+														class="ach-cancel-btn"
+														onclick={() => (editingAchKey = null)}
+													>
+														Annuler
+													</button>
+												</div>
+											</div>
+										{/if}
 									</div>
 								{/each}
 							</div>
@@ -1203,7 +1606,7 @@
 	.progress-card-container {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 14px;
 	}
 
 	.progress-card {
@@ -1215,6 +1618,291 @@
 		gap: 48px;
 		backdrop-filter: blur(12px);
 		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+	}
+
+	.stat-label-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.mini-edit-icon {
+		background: transparent;
+		border: none;
+		color: #6a7080;
+		font-size: 11px;
+		cursor: pointer;
+		padding: 0 2px;
+		line-height: 1;
+		transition: color 0.15s;
+	}
+	.mini-edit-icon:hover {
+		color: var(--accent, #c8a96e);
+	}
+	.playtime-val {
+		color: #4ac8ff !important;
+	}
+	.playtime-inline-edit {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 12px;
+		color: #9ca3af;
+	}
+	.pt-input {
+		width: 48px;
+		background: rgba(0, 0, 0, 0.45);
+		border: 1px solid rgba(255, 255, 255, 0.15);
+		border-radius: 6px;
+		color: #fff;
+		font-size: 12px;
+		font-weight: 700;
+		padding: 3px 6px;
+		outline: none;
+	}
+	.pt-save-btn {
+		background: var(--accent, #c8a96e);
+		color: #080a0f;
+		border: none;
+		border-radius: 6px;
+		padding: 3px 8px;
+		font-size: 11px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	/* HowLongToBeat Bar */
+	.hltb-bar {
+		background: rgba(13, 20, 28, 0.75);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		border-radius: 14px;
+		padding: 12px 20px;
+		display: flex;
+		align-items: center;
+		gap: 24px;
+		backdrop-filter: blur(10px);
+	}
+	.hltb-brand {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-shrink: 0;
+	}
+	.hltb-badge {
+		background: rgba(74, 200, 255, 0.15);
+		border: 1px solid rgba(74, 200, 255, 0.35);
+		color: #4ac8ff;
+		font-size: 10px;
+		font-weight: 900;
+		padding: 3px 8px;
+		border-radius: 6px;
+		letter-spacing: 0.08em;
+	}
+	.hltb-sub {
+		font-size: 11px;
+		font-weight: 700;
+		color: #6a7080;
+	}
+	.hltb-metrics {
+		flex: 1;
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 20px;
+	}
+	.hltb-metric {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+	}
+	.hltb-metric-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+	}
+	.hltb-label {
+		font-size: 11px;
+		color: #8f97a8;
+		font-weight: 600;
+	}
+	.hltb-hours {
+		font-size: 13px;
+		font-weight: 800;
+		color: #fff;
+		font-variant-numeric: tabular-nums;
+	}
+	.hltb-track {
+		height: 4px;
+		background: rgba(255, 255, 255, 0.06);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+	.hltb-fill {
+		height: 100%;
+		background: #4ac8ff;
+		border-radius: 3px;
+		transition: width 0.4s ease;
+	}
+	.hltb-fill.extra {
+		background: #a855f7;
+	}
+	.hltb-fill.comp {
+		background: var(--accent, #c8a96e);
+	}
+	.hltb-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+	}
+	.hltb-icon-btn {
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		color: #8f97a8;
+		width: 26px;
+		height: 26px;
+		border-radius: 6px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 12px;
+		transition: all 0.15s;
+	}
+	.hltb-icon-btn:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.1);
+		color: #fff;
+	}
+	.hltb-edit-row {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.hltb-edit-row label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11px;
+		color: #9ca3af;
+	}
+	.hltb-edit-row input {
+		width: 68px;
+		background: rgba(0, 0, 0, 0.4);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 6px;
+		padding: 4px 8px;
+		color: #fff;
+		font-size: 12px;
+		outline: none;
+	}
+	.hltb-btn {
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		color: #ccc;
+		border-radius: 6px;
+		padding: 5px 10px;
+		font-size: 11px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.hltb-btn.primary {
+		background: var(--accent, #c8a96e);
+		border-color: var(--accent, #c8a96e);
+		color: #080a0f;
+	}
+
+	/* Manual Achievement Editor Panel */
+	.ach-editor-panel {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 16px;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+		background: rgba(0, 0, 0, 0.35);
+		border-radius: 0 0 14px 14px;
+		flex-wrap: wrap;
+	}
+	.ach-editor-left {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		flex-wrap: wrap;
+	}
+	.ach-state-toggle {
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		color: #9ca3af;
+		border-radius: 8px;
+		padding: 5px 12px;
+		font-size: 11px;
+		font-weight: 800;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.ach-state-toggle.unlocked {
+		background: rgba(61, 220, 132, 0.15);
+		border-color: rgba(61, 220, 132, 0.4);
+		color: #3ddc84;
+	}
+	.ach-dt-group {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.ach-dt-label {
+		font-size: 11px;
+		color: #8f97a8;
+		font-weight: 600;
+	}
+	.ach-dt-input {
+		background: rgba(13, 20, 28, 0.9);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		border-radius: 6px;
+		padding: 4px 8px;
+		color: #fff;
+		font-size: 11px;
+		color-scheme: dark;
+		outline: none;
+	}
+	.ach-dt-now {
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		color: #ccc;
+		border-radius: 6px;
+		padding: 4px 8px;
+		font-size: 10px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.ach-dt-now:hover {
+		background: rgba(255, 255, 255, 0.12);
+		color: #fff;
+	}
+	.ach-editor-right {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.ach-save-btn {
+		background: var(--accent, #c8a96e);
+		border: none;
+		color: #080a0f;
+		border-radius: 6px;
+		padding: 5px 12px;
+		font-size: 11px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+	.ach-cancel-btn {
+		background: transparent;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		color: #9ca3af;
+		border-radius: 6px;
+		padding: 5px 10px;
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
 	}
 
 	.tags-section {
@@ -1790,6 +2478,7 @@
 		padding: 10px 16px;
 		height: 88px;
 		box-sizing: border-box;
+		position: relative;
 	}
 
 	.ach-icon-box {
@@ -1852,7 +2541,7 @@
 	}
 	.ach-date {
 		font-size: 10px;
-		color: #333;
+		color: #6a7080;
 		font-weight: 700;
 		letter-spacing: 0.5px;
 	}

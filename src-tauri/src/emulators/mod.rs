@@ -119,6 +119,7 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                     genres: Vec::new(),
                     is_favorite: false,
                     tags: Vec::new(),
+                    playtime_seconds: 0,
                 });
             } else if entry_path.is_dir() {
                 games.extend(find_achievements(&entry_path, parser));

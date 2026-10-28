@@ -1,6 +1,13 @@
 <script lang="ts">
 	// src/routes/(app)/stats/+page.svelte
-	import { games, totalUnlockedAchievements, profileRank, type Achievement } from '$lib/stores/Games.js';
+	import {
+		games,
+		totalUnlockedAchievements,
+		totalPlaytimeSeconds,
+		formatPlaytime,
+		profileRank,
+		type Achievement
+	} from '$lib/stores/Games.js';
 	import { SvelteDate, SvelteMap } from 'svelte/reactivity';
 	import { get } from 'svelte/store';
 	import { i18n } from '$lib/stores/i18n.js';
@@ -492,7 +499,6 @@
 					type="button"
 					class:active={activeTab === 'overview'}
 					onclick={() => {
-						console.log('Switching to overview');
 						activeTab = 'overview';
 					}}
 				>
@@ -502,7 +508,6 @@
 					type="button"
 					class:active={activeTab === 'activity'}
 					onclick={() => {
-						console.log('Switching to activity');
 						activeTab = 'activity';
 					}}
 				>
@@ -623,8 +628,8 @@
 					</div>
 				</div>
 
-				<div class="card stat-summary gamerscore-card">
-					<div class="icon-circle gamerscore">
+				<div class="card stat-summary playtime-card">
+					<div class="icon-circle playtime">
 						<svg
 							width="16"
 							height="16"
@@ -633,19 +638,14 @@
 							stroke="currentColor"
 							stroke-width="2"
 						>
-							<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+							<circle cx="12" cy="12" r="10" />
+							<polyline points="12 6 12 12 16 14" />
 						</svg>
 					</div>
 					<div class="card-info">
-						<span class="label">{$i18n.t('stats.gamerscore')}</span>
-						<span class="value">{$profileRank.score.toLocaleString()} G</span>
-						<span class="sub">
-							{$i18n.t('stats.levelSub', {
-								level: $profileRank.level,
-								xp: $profileRank.currentLevelXp,
-								next: $profileRank.nextLevelXp
-							})}
-						</span>
+						<span class="label">TEMPS DE JEU</span>
+						<span class="value">{formatPlaytime($totalPlaytimeSeconds)}</span>
+						<span class="sub">Cumulé sur tous les jeux</span>
 					</div>
 				</div>
 
@@ -883,7 +883,7 @@
 										onclick={() => {
 											cumulativeTimeframe = 'all';
 											currentWindowOffset = 0;
-									}}>{$i18n.t('stats.all')}</button
+										}}>{$i18n.t('stats.all')}</button
 									>
 									<button
 										class:active={cumulativeTimeframe === '1y'}
@@ -1094,7 +1094,7 @@
 
 	.grid-overview {
 		display: grid;
-		grid-template-columns: repeat(5, 1fr);
+		grid-template-columns: repeat(6, 1fr);
 		grid-template-rows: auto 1fr;
 		gap: 16px;
 	}
@@ -1138,6 +1138,10 @@
 		color: var(--accent, #c8a96e);
 		background: rgba(200, 169, 110, 0.14);
 	}
+	.icon-circle.playtime {
+		color: #4ac8ff;
+		background: rgba(74, 200, 255, 0.12);
+	}
 	.icon-circle.remaining {
 		color: #f4b860;
 		background: rgba(244, 184, 96, 0.1);
@@ -1165,7 +1169,7 @@
 	}
 
 	.top-games {
-		grid-column: 1 / 5;
+		grid-column: 1 / 6;
 	}
 	.card-header {
 		display: flex;

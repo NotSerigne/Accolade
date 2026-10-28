@@ -47,6 +47,9 @@ pub struct OwnedGame {
     pub appid: u32,
     pub name: Option<String>,
     pub img_icon_url: Option<String>,
+    /// Total playtime in minutes as reported by Steam IPlayerService/GetOwnedGames.
+    #[serde(default)]
+    pub playtime_forever: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]

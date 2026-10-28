@@ -11,6 +11,7 @@
 //! Results are cached per executable path, so the filesystem is only probed the
 //! first time a given executable is seen.
 
+use crate::user_data::{load_user_data, save_user_data};
 use crate::AppState;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ const EXE_CACHE_LIMIT: usize = 4096;
 const MANIFEST_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub const RUNNING_GAME_EVENT: &str = "running-game-changed";
+pub const PLAYTIME_UPDATED_EVENT: &str = "playtime-updated";
 
 /// Processes that live next to a game (or in Steam) but are never the game itself.
 const IGNORED_PROCESS_NAMES: &[&str] = &[
@@ -243,7 +245,7 @@ fn split_steam_library_path(exe: &Path) -> Option<(PathBuf, String)> {
     None
 }
 
-/// Extracts `value` from a VDF line such as `"installdir"		"Elden Ring"`.
+/// Extracts `value` from a VDF line such as `"installdir"\t\t"Elden Ring"`.
 fn acf_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let parts: Vec<&str> = line.trim().split('"').collect();
     if parts.len() >= 4 && parts[1].eq_ignore_ascii_case(key) {
@@ -578,20 +580,96 @@ impl Detector {
     }
 }
 
+fn flush_playtime(app_handle: &tauri::AppHandle, game_id: &str, app_id: u32, delta_secs: u64) {
+    if delta_secs == 0 {
+        return;
+    }
+    let mut user_data = load_user_data(app_handle);
+    let mut in_mem_total = 0u64;
+
+    if let Ok(mut games) = app_handle.state::<AppState>().games.lock() {
+        if let Some(g) = games
+            .iter_mut()
+            .find(|g| g.id == game_id || g.steam_id == Some(app_id))
+        {
+            g.playtime_seconds = g.playtime_seconds.saturating_add(delta_secs);
+            in_mem_total = g.playtime_seconds;
+        }
+    }
+
+    let entry = user_data
+        .playtime_seconds
+        .entry(game_id.to_string())
+        .or_insert(0);
+    *entry = entry.saturating_add(delta_secs).max(in_mem_total);
+    let total = *entry;
+
+    if let Ok(mut games) = app_handle.state::<AppState>().games.lock() {
+        if let Some(g) = games
+            .iter_mut()
+            .find(|g| g.id == game_id || g.steam_id == Some(app_id))
+        {
+            g.playtime_seconds = total;
+        }
+    }
+
+    let _ = save_user_data(app_handle, &user_data);
+    let _ = app_handle.emit(
+        PLAYTIME_UPDATED_EVENT,
+        serde_json::json!({
+            "game_id": game_id,
+            "playtime_seconds": total
+        }),
+    );
+}
+
 pub fn start(app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut detector = Detector::new();
+        let mut last_tick = Instant::now();
+        let mut unsaved_secs = 0u64;
+        let mut active_game_key: Option<(String, u32)> = None;
+
         loop {
+            let elapsed = last_tick.elapsed().as_secs();
+            last_tick = Instant::now();
+
+            if let Some((ref prev_id, prev_appid)) = active_game_key {
+                unsaved_secs = unsaved_secs.saturating_add(elapsed);
+                if unsaved_secs >= 15 {
+                    flush_playtime(&app_handle, prev_id, prev_appid, unsaved_secs);
+                    unsaved_secs = 0;
+                }
+            }
+
             if let Some(next) = detector.scan(&app_handle) {
+                // Flush any remaining seconds for the previous running game before switching
+                if let Some((ref prev_id, prev_appid)) = active_game_key {
+                    if unsaved_secs > 0 {
+                        flush_playtime(&app_handle, prev_id, prev_appid, unsaved_secs);
+                        unsaved_secs = 0;
+                    }
+                }
+
                 match &next {
-                    Some(game) => log::info!(
-                        "[game-detector] Running: '{}' (AppID {}, pid {}, via {})",
-                        game.name,
-                        game.app_id,
-                        game.pid,
-                        game.detected_via
-                    ),
-                    None => log::info!("[game-detector] No game running"),
+                    Some(game) => {
+                        log::info!(
+                            "[game-detector] Running: '{}' (AppID {}, pid {}, via {})",
+                            game.name,
+                            game.app_id,
+                            game.pid,
+                            game.detected_via
+                        );
+                        let gid = game
+                            .game_id
+                            .clone()
+                            .unwrap_or_else(|| format!("steam_{}", game.app_id));
+                        active_game_key = Some((gid, game.app_id));
+                    }
+                    None => {
+                        log::info!("[game-detector] No game running");
+                        active_game_key = None;
+                    }
                 }
                 if let Ok(mut current) = app_handle.state::<AppState>().running_game.lock() {
                     *current = next.clone();

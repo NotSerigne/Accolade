@@ -628,7 +628,11 @@ pub fn run() {
                             .hud_shortcut
                             .lock()
                             .ok()
-                            .and_then(|s| s.trim().parse::<tauri_plugin_global_shortcut::Shortcut>().ok())
+                            .and_then(|s| {
+                                s.trim()
+                                    .parse::<tauri_plugin_global_shortcut::Shortcut>()
+                                    .ok()
+                            })
                             .is_some_and(|h| &h == shortcut);
 
                         if hud_match {
@@ -637,7 +641,10 @@ pub fn run() {
                             log::info!("[Shortcut] Native Triggered!");
                             match screenshots::capture_screenshot(app, None, None, true) {
                                 Ok(filename) => {
-                                    log::info!("[Shortcut] Manual screenshot captured: {}", filename);
+                                    log::info!(
+                                        "[Shortcut] Manual screenshot captured: {}",
+                                        filename
+                                    );
                                     let _ = app.emit("screenshot-taken", filename);
                                 }
                                 Err(e) => log::error!("[Shortcut] Manual screenshot failed: {}", e),
@@ -789,6 +796,10 @@ pub fn run() {
             commands::capture_replay_clip,
             commands::create_backup_zip,
             commands::restore_backup_zip,
+            commands::set_manual_playtime,
+            commands::set_achievement_state,
+            hltb::get_hltb_data,
+            hltb::set_custom_hltb_data,
             commands::toggle_pinned_achievement,
             commands::get_hud_data,
             game_detector::get_running_game,
@@ -806,8 +817,9 @@ pub mod color;
 pub mod commands;
 pub mod discord_rpc;
 pub mod emulators;
-pub mod replay;
 pub mod game_detector;
+pub mod hltb;
+pub mod replay;
 pub mod screenshots;
 pub mod user_data;
 pub mod watcher;

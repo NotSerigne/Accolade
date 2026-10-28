@@ -42,19 +42,47 @@ export interface Game {
 	genres: string[];
 	is_favorite: boolean;
 	tags: string[];
+	playtime_seconds?: number;
 }
 
 export interface OwnedGame {
 	appid: number;
 	name?: string;
 	img_icon_url?: string;
+	playtime_forever?: number;
+}
+
+export interface HltbData {
+	game_id: string;
+	title: string;
+	main_hours: number | null;
+	main_extra_hours: number | null;
+	completionist_hours: number | null;
+	source: string;
+	fetched_at: number;
 }
 
 type AchievementsUpdatedPayload = {
-	game_id: string;
-	achievements: Achievement[];
+	game_id?: string;
+	achievements?: Achievement[];
 	achievements_total?: number;
 };
+
+type PlaytimeUpdatedPayload = {
+	game_id: string;
+	playtime_seconds: number;
+};
+
+export function formatPlaytime(seconds?: number): string {
+	const s = Math.max(0, Math.floor(seconds || 0));
+	if (s === 0) return '0m';
+	if (s < 60) return '< 1m';
+	const hours = Math.floor(s / 3600);
+	const mins = Math.floor((s % 3600) / 60);
+	if (hours === 0) return `${mins}m`;
+	if (mins === 0) return `${hours}h`;
+	return `${hours}h ${mins}m`;
+}
 
 /**
  * Computes the Gamerscore (XP) value of a single achievement based on its global completion rate.
@@ -132,6 +160,10 @@ export const totalCompletedGames = derived(
 		}).length
 );
 
+export const totalPlaytimeSeconds = derived(games, ($games) =>
+	$games.reduce((acc, g) => acc + (g.playtime_seconds || 0), 0)
+);
+
 export const profileRank = derived(games, ($games) => calculateProfileRank($games));
 
 export async function loadGames(): Promise<void> {
@@ -195,19 +227,33 @@ export function setupAchievementsRealtimeSync(): void {
 	achievementsSyncInitialized = true;
 
 	void listen<AchievementsUpdatedPayload>('achievements-updated', ({ payload }) => {
-		if (!payload || !Array.isArray(payload.achievements)) return;
+		if (!payload || !payload.game_id || !Array.isArray(payload.achievements)) {
+			void loadGames();
+			return;
+		}
 
 		games.update((currentGames) =>
 			currentGames.map((game) => {
 				if (game.id !== payload.game_id) return game;
 
-				const total = payload.achievements_total ?? payload.achievements.length;
+				const total = payload.achievements_total ?? payload.achievements!.length;
 				return {
 					...game,
-					achievements: payload.achievements,
+					achievements: payload.achievements!,
 					achievements_total: total
 				};
 			})
+		);
+	});
+
+	void listen<PlaytimeUpdatedPayload>('playtime-updated', ({ payload }) => {
+		if (!payload || !payload.game_id) return;
+		games.update((currentGames) =>
+			currentGames.map((game) =>
+				game.id === payload.game_id
+					? { ...game, playtime_seconds: payload.playtime_seconds }
+					: game
+			)
 		);
 	});
 }

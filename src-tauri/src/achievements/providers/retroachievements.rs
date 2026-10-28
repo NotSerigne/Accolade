@@ -157,6 +157,7 @@ impl AchievementProvider for RetroAchievementsProvider {
                 genres,
                 is_favorite: false,
                 tags: vec!["RetroAchievements".to_string()],
+                playtime_seconds: 0,
             }
         }))
         .buffer_unordered(4)

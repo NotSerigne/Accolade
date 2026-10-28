@@ -65,4 +65,7 @@ pub struct Game {
     pub is_favorite: bool,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Total tracked playtime in seconds (local detector + Steam playtime).
+    #[serde(default)]
+    pub playtime_seconds: u64,
 }

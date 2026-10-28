@@ -4,6 +4,7 @@ use crate::achievements::steam::{
     fetch_owned_games, fetch_recently_played_games, fetch_steam_user, get_local_steam_appids,
     OwnedGame, SteamUser,
 };
+use crate::user_data::{load_user_data, save_user_data, ManualAchievementOverride, UserData};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
 use std::collections::HashSet;
 use tauri::Manager;
@@ -13,15 +14,34 @@ pub fn test_achievement_notif(app_handle: tauri::AppHandle) {
     crate::watcher::emit_test_notification(&app_handle);
 }
 
+fn apply_manual_overrides_to_list(
+    game_id: &str,
+    achievements: &mut [Achievement],
+    user_data: &UserData,
+) {
+    if let Some(overrides) = user_data.manual_achievements.get(game_id) {
+        for ach in achievements.iter_mut() {
+            let key_lower = ach.key.trim().to_lowercase();
+            if let Some(ov) = overrides.get(&key_lower) {
+                ach.unlocked = ov.unlocked;
+                ach.unlocked_time = if ov.unlocked { ov.unlocked_time } else { None };
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn get_achievements(
     game: Game,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<Vec<Achievement>, String> {
-    Ok(crate::achievements::get_achievements_for_game(game, &state).await)
+    let game_id = game.id.clone();
+    let mut achs = crate::achievements::get_achievements_for_game(game, &state).await;
+    let user_data = load_user_data(&app_handle);
+    apply_manual_overrides_to_list(&game_id, &mut achs, &user_data);
+    Ok(achs)
 }
-
-use crate::user_data::{load_user_data, save_user_data, UserData};
 
 fn enrich_games_with_user_data(games: &mut [Game], user_data: &UserData) {
     for game in games.iter_mut() {
@@ -29,6 +49,10 @@ fn enrich_games_with_user_data(games: &mut [Game], user_data: &UserData) {
         if let Some(tags) = user_data.tags.get(&game.id) {
             game.tags = tags.clone();
         }
+        if let Some(&secs) = user_data.playtime_seconds.get(&game.id) {
+            game.playtime_seconds = game.playtime_seconds.max(secs);
+        }
+        apply_manual_overrides_to_list(&game.id, &mut game.achievements, user_data);
     }
 }
 
@@ -82,7 +106,7 @@ pub fn add_game_tag(
     }
 
     if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
-        game.tags = user_data.tags.get(&game_id).cloned().unwrap_or_default();
+        game.tags = user_data.tags.get(&game.id).cloned().unwrap_or_default();
     }
 
     save_user_data(&app_handle, &user_data)?;
@@ -107,7 +131,7 @@ pub fn remove_game_tag(
     }
 
     if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
-        game.tags = user_data.tags.get(&game_id).cloned().unwrap_or_default();
+        game.tags = user_data.tags.get(&game.id).cloned().unwrap_or_default();
     }
 
     save_user_data(&app_handle, &user_data)?;
@@ -133,6 +157,7 @@ pub fn get_all_games(state: tauri::State<'_, AppState>, app_handle: tauri::AppHa
     log::debug!("[cmd] get_all_games returning {} games", games.len());
     games
 }
+
 #[tauri::command]
 pub async fn get_steam_user(
     api_key: String,
@@ -491,14 +516,7 @@ pub(crate) async fn sync_steam_metadata(
     log::debug!("[sync] Initial state has {} games", cloned_games.len());
 
     let local_games = tauri::async_runtime::spawn_blocking(|| {
-        let parsers: Vec<Box<dyn crate::emulators::EmulatorParser>> = vec![
-            Box::new(crate::emulators::goldberg::Parser),
-            Box::new(crate::emulators::empress::Parser),
-            Box::new(crate::emulators::onlinefix::Parser),
-            Box::new(crate::emulators::rune::Parser),
-            Box::new(crate::emulators::codex::Parser),
-        ];
-        crate::emulators::game_scanner(parsers)
+        crate::emulators::game_scanner(crate::emulators::default_parsers())
     })
     .await
     .unwrap_or_default();
@@ -578,6 +596,7 @@ pub(crate) async fn sync_steam_metadata(
                         appid,
                         name: None,
                         img_icon_url: None,
+                        playtime_forever: None,
                     });
                 }
             }
@@ -591,6 +610,8 @@ pub(crate) async fn sync_steam_metadata(
             let mut added_count = 0;
             for og in all_owned {
                 let game_id = format!("steam_{}", og.appid);
+                let steam_playtime_secs = og.playtime_forever.unwrap_or(0).saturating_mul(60);
+
                 if !existing_ids.contains(&game_id) {
                     cloned_games.push(Game {
                         name: og.name.clone().unwrap_or_else(|| format!("AppID {}", og.appid)),
@@ -610,10 +631,16 @@ pub(crate) async fn sync_steam_metadata(
                         genres: Vec::new(),
                         is_favorite: false,
                         tags: Vec::new(),
-                        });
+                        playtime_seconds: steam_playtime_secs,
+                    });
                     existing_ids.insert(game_id);
                     added_count += 1;
                     added_steam_games = true;
+                } else if steam_playtime_secs > 0 {
+                    if let Some(existing) = cloned_games.iter_mut().find(|g| g.id == game_id) {
+                        existing.playtime_seconds =
+                            existing.playtime_seconds.max(steam_playtime_secs);
+                    }
                 }
             }
             log::info!("[sync] Added {} new Steam games for {}", added_count, s_id);
@@ -683,7 +710,21 @@ pub(crate) async fn sync_steam_metadata(
         .filter(|g| !g.id.is_empty() && g.achievements_total > 0)
         .collect();
 
-    let user_data = load_user_data(&app_handle);
+    let mut user_data = load_user_data(&app_handle);
+    let mut user_data_dirty = false;
+    for g in &filtered_games {
+        if g.playtime_seconds > 0 {
+            let entry = user_data.playtime_seconds.entry(g.id.clone()).or_insert(0);
+            if g.playtime_seconds > *entry {
+                *entry = g.playtime_seconds;
+                user_data_dirty = true;
+            }
+        }
+    }
+    if user_data_dirty {
+        let _ = save_user_data(&app_handle, &user_data);
+    }
+
     enrich_games_with_user_data(&mut filtered_games, &user_data);
 
     {
@@ -906,7 +947,10 @@ pub fn get_custom_sounds(app_handle: tauri::AppHandle) -> Vec<CustomSoundInfo> {
                 .extension()
                 .and_then(|s| s.to_str())
                 .map(|s| s.to_ascii_lowercase());
-            if !matches!(ext.as_deref(), Some("mp3") | Some("wav") | Some("ogg") | Some("m4a")) {
+            if !matches!(
+                ext.as_deref(),
+                Some("mp3") | Some("wav") | Some("ogg") | Some("m4a")
+            ) {
                 continue;
             }
             let Some(fname) = p.file_name().and_then(|s| s.to_str()) else {
@@ -936,7 +980,10 @@ pub fn import_custom_sound(
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
-    if !matches!(ext.as_deref(), Some("mp3") | Some("wav") | Some("ogg") | Some("m4a")) {
+    if !matches!(
+        ext.as_deref(),
+        Some("mp3") | Some("wav") | Some("ogg") | Some("m4a")
+    ) {
         return Err("Unsupported audio format (use .mp3, .wav, .ogg, or .m4a)".to_string());
     }
     let filename = src
@@ -946,7 +993,10 @@ pub fn import_custom_sound(
         .to_string();
     let dest = custom_sounds_dir(&app_handle)?.join(&filename);
     std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
-    let path_str = dest.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let path_str = dest
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .to_string();
     Ok(CustomSoundInfo {
         filename,
         path: path_str,
@@ -959,7 +1009,10 @@ pub fn capture_replay_clip(app_handle: tauri::AppHandle) -> Result<Option<String
 }
 
 #[tauri::command]
-pub fn create_backup_zip(app_handle: tauri::AppHandle, dest_path: String) -> Result<String, String> {
+pub fn create_backup_zip(
+    app_handle: tauri::AppHandle,
+    dest_path: String,
+) -> Result<String, String> {
     use std::io::{Read, Write};
     let file = std::fs::File::create(&dest_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
@@ -968,7 +1021,12 @@ pub fn create_backup_zip(app_handle: tauri::AppHandle, dest_path: String) -> Res
 
     // 1. Add Accolade app_data_dir config/sounds/user_data
     if let Ok(app_dir) = app_handle.path().app_data_dir() {
-        for fname in ["user_data.json", "settings.json", "steam_appdetails_cache.json"] {
+        for fname in [
+            "user_data.json",
+            "settings.json",
+            "steam_appdetails_cache.json",
+            "hltb_cache.json",
+        ] {
             let p = app_dir.join(fname);
             if p.is_file() {
                 if let Ok(mut f) = std::fs::File::open(&p) {
@@ -990,7 +1048,8 @@ pub fn create_backup_zip(app_handle: tauri::AppHandle, dest_path: String) -> Res
                             if let Ok(mut f) = std::fs::File::open(&p) {
                                 let mut buf = Vec::new();
                                 if f.read_to_end(&mut buf).is_ok() {
-                                    let _ = zip.start_file(format!("accolade/sounds/{}", name), options);
+                                    let _ = zip
+                                        .start_file(format!("accolade/sounds/{}", name), options);
                                     let _ = zip.write_all(&buf);
                                 }
                             }
@@ -1009,7 +1068,9 @@ pub fn create_backup_zip(app_handle: tauri::AppHandle, dest_path: String) -> Res
         prefix: &str,
         options: zip::write::SimpleFileOptions,
     ) {
-        let Ok(entries) = std::fs::read_dir(current) else { return };
+        let Ok(entries) = std::fs::read_dir(current) else {
+            return;
+        };
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_dir() {
@@ -1061,7 +1122,9 @@ pub fn restore_backup_zip(app_handle: tauri::AppHandle, zip_path: String) -> Res
     let mut origins: std::collections::HashMap<String, std::path::PathBuf> =
         std::collections::HashMap::new();
     for i in 0..archive.len() {
-        let Ok(mut entry) = archive.by_index(i) else { continue };
+        let Ok(mut entry) = archive.by_index(i) else {
+            continue;
+        };
         let name = entry.name().replace('\\', "/");
         if let Some(prefix) = name.strip_suffix("/__origin_path.txt") {
             let mut s = String::new();
@@ -1073,7 +1136,9 @@ pub fn restore_backup_zip(app_handle: tauri::AppHandle, zip_path: String) -> Res
 
     let mut restored_files = 0u32;
     for i in 0..archive.len() {
-        let Ok(mut entry) = archive.by_index(i) else { continue };
+        let Ok(mut entry) = archive.by_index(i) else {
+            continue;
+        };
         if entry.is_dir() {
             continue;
         }
@@ -1110,4 +1175,256 @@ pub fn restore_backup_zip(app_handle: tauri::AppHandle, zip_path: String) -> Res
     }
 
     Ok(restored_files)
+}
+
+#[tauri::command]
+pub fn set_manual_playtime(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+    playtime_seconds: u64,
+) -> Result<u64, String> {
+    let mut user_data = load_user_data(&app_handle);
+    user_data
+        .playtime_seconds
+        .insert(game_id.clone(), playtime_seconds);
+    save_user_data(&app_handle, &user_data)?;
+
+    if let Ok(mut games) = state.games.lock() {
+        if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
+            game.playtime_seconds = playtime_seconds;
+        }
+    }
+
+    let _ = tauri::Emitter::emit(
+        &app_handle,
+        "playtime-updated",
+        serde_json::json!({
+            "game_id": game_id,
+            "playtime_seconds": playtime_seconds
+        }),
+    );
+
+    Ok(playtime_seconds)
+}
+
+/// Writes an achievement's unlocked state and timestamp back to the local emulator file on disk
+/// (`achievements.json`, `achievement.json`, `achievements.ini`, `user_stats.ini`, or `achievements.txt`).
+pub(crate) fn write_achievement_to_emulator_file(
+    path_buf: &str,
+    ach_key: &str,
+    unlocked: bool,
+    unlocked_time: Option<u64>,
+) -> Result<(), String> {
+    let path = std::path::Path::new(path_buf.trim());
+    if !path.is_file() {
+        return Ok(());
+    }
+
+    let ts = if unlocked {
+        unlocked_time.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        })
+    } else {
+        0
+    };
+
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if ext == "json" {
+        let content = std::fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
+        let mut root: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
+
+        if let Some(obj) = root.as_object_mut() {
+            let target_key = obj
+                .keys()
+                .find(|k| k.trim().eq_ignore_ascii_case(ach_key.trim()))
+                .cloned()
+                .unwrap_or_else(|| ach_key.trim().to_string());
+
+            let entry = obj
+                .entry(target_key)
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(ach_obj) = entry.as_object_mut() {
+                ach_obj.insert("earned".to_string(), serde_json::Value::Bool(unlocked));
+                ach_obj.insert("earned_time".to_string(), serde_json::json!(ts));
+            } else {
+                *entry = serde_json::json!({
+                    "earned": unlocked,
+                    "earned_time": ts
+                });
+            }
+
+            let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+            std::fs::write(path, pretty).map_err(|e| e.to_string())?;
+        }
+    } else if ext == "txt" {
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let wanted = ach_key.trim().to_lowercase();
+        let mut lines: Vec<String> = Vec::new();
+        let mut found = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let key_part = trimmed
+                .split_once(['=', ':', ' ', '\t'])
+                .map(|(k, _)| k.trim())
+                .unwrap_or(trimmed);
+            if key_part.to_lowercase() == wanted {
+                found = true;
+                if unlocked {
+                    lines.push(format!("{}={}", ach_key.trim(), ts));
+                }
+            } else {
+                lines.push(line.to_string());
+            }
+        }
+        if unlocked && !found {
+            lines.push(format!("{}={}", ach_key.trim(), ts));
+        }
+        std::fs::write(path, lines.join("\n")).map_err(|e| e.to_string())?;
+    } else if ext == "ini" {
+        let mut ini = ini::Ini::load_from_file(path).unwrap_or_default();
+        let wanted = ach_key.trim();
+
+        // 1. Check TENOKE [ACHIEVEMENTS] section
+        let has_tenoke_sec = ini
+            .iter()
+            .any(|(sec, _)| sec.is_some_and(|s| s.trim().eq_ignore_ascii_case("ACHIEVEMENTS")));
+
+        if has_tenoke_sec {
+            let val = if unlocked {
+                format!("{{unlocked = true, time = {}}}", ts)
+            } else {
+                "false".to_string()
+            };
+            ini.with_section(Some("ACHIEVEMENTS")).set(wanted, val);
+        } else {
+            // 2. Ensure indexed in [SteamAchievements] if present (CODEX / RUNE)
+            if let Some(steam_achs) = ini.section(Some("SteamAchievements")) {
+                let already_indexed = steam_achs
+                    .iter()
+                    .any(|(_, v)| v.trim().trim_matches('"').eq_ignore_ascii_case(wanted));
+                if !already_indexed {
+                    let count = steam_achs.len();
+                    let idx_key = format!("{:05}", count);
+                    ini.with_section(Some("SteamAchievements"))
+                        .set(idx_key, wanted);
+                }
+            }
+
+            // Find matching section name (preserving case)
+            let sec_name = ini
+                .iter()
+                .find_map(|(sec, _)| {
+                    sec.filter(|s| s.trim().trim_matches('"').eq_ignore_ascii_case(wanted))
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_else(|| wanted.to_string());
+
+            let uses_have_achieved = ini
+                .section(Some(&sec_name))
+                .is_some_and(|p| p.get("HaveAchieved").is_some());
+            let uses_lower_achieved = ini
+                .section(Some(&sec_name))
+                .is_some_and(|p| p.get("achieved").is_some() && p.get("Achieved").is_none());
+
+            let mut sec = ini.with_section(Some(sec_name));
+            if uses_have_achieved {
+                sec.set("HaveAchieved", if unlocked { "1" } else { "0" });
+                sec.set("HaveAchievedTime", ts.to_string());
+            } else if uses_lower_achieved {
+                sec.set("achieved", if unlocked { "true" } else { "false" });
+                sec.set("timestamp", ts.to_string());
+                sec.set("UnlockTime", ts.to_string());
+            } else {
+                sec.set("Achieved", if unlocked { "1" } else { "0" });
+                sec.set("UnlockTime", ts.to_string());
+            }
+        }
+
+        ini.write_to_file(path).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_achievement_state(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+    ach_key: String,
+    unlocked: bool,
+    unlocked_time: Option<u64>,
+) -> Result<Vec<Achievement>, String> {
+    let effective_time = if unlocked {
+        Some(unlocked_time.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        }))
+    } else {
+        None
+    };
+
+    // 1. Persist override in user_data.json
+    let mut user_data = load_user_data(&app_handle);
+    let key_lower = ach_key.trim().to_lowercase();
+    user_data
+        .manual_achievements
+        .entry(game_id.clone())
+        .or_default()
+        .insert(
+            key_lower.clone(),
+            ManualAchievementOverride {
+                unlocked,
+                unlocked_time: effective_time,
+            },
+        );
+    save_user_data(&app_handle, &user_data)?;
+
+    // 2. Update in-memory AppState.games and write back to emulator file if path_buf exists
+    let mut updated_achievements = Vec::new();
+    let mut emulator_path: Option<String> = None;
+
+    if let Ok(mut games) = state.games.lock() {
+        if let Some(game) = games.iter_mut().find(|g| g.id == game_id) {
+            emulator_path = game.path_buf.clone();
+            for ach in game.achievements.iter_mut() {
+                if ach.key.trim().to_lowercase() == key_lower {
+                    ach.unlocked = unlocked;
+                    ach.unlocked_time = effective_time;
+                }
+            }
+            updated_achievements = game.achievements.clone();
+        }
+    }
+
+    if let Some(ref path_buf) = emulator_path {
+        if let Err(e) =
+            write_achievement_to_emulator_file(path_buf, &ach_key, unlocked, effective_time)
+        {
+            log::warn!(
+                "[set_achievement_state] Could not write to emulator file '{}': {}",
+                path_buf,
+                e
+            );
+        }
+    }
+
+    let _ = tauri::Emitter::emit(&app_handle, "achievements-updated", ());
+    Ok(updated_achievements)
 }
