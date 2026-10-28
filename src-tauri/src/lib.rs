@@ -1,35 +1,32 @@
 // src-tauri/src/lib.rs
 use crate::achievements::models::{Achievement, Game, SourceType};
-use crate::achievements::steam::{fetch_player_achievements, fetch_steam_metadata_with_client};
+use crate::achievements::steam::{
+    fetch_player_achievements, fetch_steam_metadata_with_client, is_valid_game_name,
+};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{window::Color, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 /// Last known-good Steam store metadata for a given AppID, persisted to disk.
-///
-/// The Steam store `appdetails` endpoint is strictly rate-limited and frequently
-/// returns `success: false` when too many requests are made in a short window
-/// (which happens easily with large libraries, or repeated syncs during dev/testing).
-/// Without this cache, a rate-limited fetch leaves a game permanently unnamed/imageless
-/// (falling back to a raw `steam_<appid>` id) until a later sync happens to succeed.
 #[derive(Serialize, Deserialize, Clone, Default)]
-struct CachedAppDetails {
-    name: String,
-    header_image_url: String,
-    background_image_url: String,
-    game_icon_url: String,
-    genres: Vec<String>,
+pub(crate) struct CachedAppDetails {
+    pub name: String,
+    pub header_image_url: String,
+    pub background_image_url: String,
+    pub game_icon_url: String,
+    pub genres: Vec<String>,
     #[serde(default)]
-    achievements: Vec<Achievement>,
-    fetched_at: u64,
+    pub achievements: Vec<Achievement>,
+    pub fetched_at: u64,
 }
 
-fn appdetails_cache_path(app_handle: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn appdetails_cache_path(app_handle: &tauri::AppHandle) -> PathBuf {
     let mut path = app_handle
         .path()
         .app_data_dir()
@@ -38,19 +35,55 @@ fn appdetails_cache_path(app_handle: &tauri::AppHandle) -> PathBuf {
     path
 }
 
-fn load_appdetails_cache(path: &Path) -> HashMap<u32, CachedAppDetails> {
-    std::fs::read_to_string(path)
+pub(crate) fn load_appdetails_cache(path: &Path) -> HashMap<u32, CachedAppDetails> {
+    let mut map: HashMap<u32, CachedAppDetails> = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // Heal any previously poisoned fallback names ("AppID 12345") in the disk cache
+    for entry in map.values_mut() {
+        if !is_valid_game_name(&entry.name) {
+            entry.name.clear();
+        }
+    }
+    map
 }
 
-fn save_appdetails_cache(path: &Path, cache: &HashMap<u32, CachedAppDetails>) {
+pub(crate) fn save_appdetails_cache(path: &Path, cache: &HashMap<u32, CachedAppDetails>) {
     if let Ok(json) = serde_json::to_string(cache) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let _ = std::fs::write(path, json);
+    }
+}
+
+/// Reads the disk cache to find a valid game name for `steam_id`.
+pub(crate) fn lookup_cached_game_name(
+    app_handle: &tauri::AppHandle,
+    steam_id: u32,
+) -> Option<String> {
+    let cache = load_appdetails_cache(&appdetails_cache_path(app_handle));
+    cache
+        .get(&steam_id)
+        .map(|c| c.name.trim().to_string())
+        .filter(|n| is_valid_game_name(n))
+}
+
+/// Saves a newly resolved game name into the on-disk `steam_appdetails_cache.json`
+/// without overwriting any existing valid name or metadata.
+pub(crate) fn cache_resolved_game_name(app_handle: &tauri::AppHandle, steam_id: u32, name: &str) {
+    if !is_valid_game_name(name) {
+        return;
+    }
+    let path = appdetails_cache_path(app_handle);
+    let mut cache = load_appdetails_cache(&path);
+    let entry = cache.entry(steam_id).or_default();
+    if !is_valid_game_name(&entry.name) {
+        entry.name = name.trim().to_string();
+        entry.fetched_at = now_unix();
+        save_appdetails_cache(&path, &cache);
     }
 }
 
@@ -64,12 +97,14 @@ fn now_unix() -> u64 {
 pub struct AppState {
     pub(crate) games: Mutex<Vec<Game>>,
     pub(crate) steam_api_key: Mutex<String>,
+    pub(crate) sgdb_api_key: Mutex<String>,
     pub(crate) ra_username: Mutex<String>,
     pub(crate) ra_api_key: Mutex<String>,
     pub(crate) language: Mutex<String>,
     pub(crate) running_game: Mutex<Option<game_detector::RunningGame>>,
     pub(crate) screenshot_shortcut: Mutex<String>,
     pub(crate) hud_shortcut: Mutex<String>,
+    pub(crate) is_syncing: AtomicBool,
 }
 
 fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> Vec<Achievement> {
@@ -136,6 +171,38 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
     merged
 }
 
+/// Plan B: Queries SteamGridDB (`GET /api/v2/games/steam/{steam_id}`) to retrieve the official
+/// game title when Steam `appdetails` is rate-limited or unavailable.
+pub async fn fetch_sgdb_game_name(
+    client: &reqwest::Client,
+    steam_id: u32,
+    api_key: &str,
+) -> Option<String> {
+    if api_key.trim().is_empty() {
+        return None;
+    }
+    let url = format!(
+        "https://www.steamgriddb.com/api/v2/games/steam/{}",
+        steam_id
+    );
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json = resp.json::<serde_json::Value>().await.ok()?;
+    let name = json["data"]["name"].as_str()?.trim();
+    if is_valid_game_name(name) {
+        Some(name.to_string())
+    } else {
+        None
+    }
+}
+
 pub(crate) async fn enrich_games_with_steam(
     games: &mut Vec<Game>,
     api_key: &str,
@@ -151,48 +218,69 @@ pub(crate) async fn enrich_games_with_steam(
     let mut appdetails_cache = load_appdetails_cache(&cache_path);
     let mut cache_dirty = false;
 
-    const STEAM_METADATA_CONCURRENCY: usize = 6;
+    // Limit concurrent Steam metadata tasks to 2 so we never burst-flood Steam endpoints
+    const STEAM_METADATA_CONCURRENCY: usize = 2;
 
     let client = reqwest::Client::new();
     let api_key_str = api_key.to_string();
     let steam_id_str = steam_id.to_string();
     let language_str = language.to_string();
 
-    let jobs: Vec<(u32, SourceType, Vec<Achievement>)> = games
+    let jobs: Vec<(u32, SourceType, Vec<Achievement>, bool)> = games
         .iter()
         .filter_map(|game| {
-            game.steam_id
-                .map(|sid| (sid, game.source.clone(), game.achievements.clone()))
+            let sid = game.steam_id?;
+            let has_cached_name = appdetails_cache
+                .get(&sid)
+                .is_some_and(|c| is_valid_game_name(&c.name));
+            // Only query `store.steampowered.com/api/appdetails` when we do not yet have
+            // a valid cached name on disk!
+            let need_appdetails = !has_cached_name;
+            Some((
+                sid,
+                game.source.clone(),
+                game.achievements.clone(),
+                need_appdetails,
+            ))
         })
         .collect();
 
-    let updates = stream::iter(jobs.into_iter().map(|(steam_id, source, local_state)| {
-        let client = client.clone();
-        let api_key = api_key_str.clone();
-        let steam_id_inner = steam_id_str.clone();
-        let language = language_str.clone();
-        async move {
-            let metadata = fetch_steam_metadata_with_client(&client, steam_id, &api_key, &language)
+    let updates = stream::iter(jobs.into_iter().map(
+        |(steam_id, source, local_state, need_appdetails)| {
+            let client = client.clone();
+            let api_key = api_key_str.clone();
+            let steam_id_inner = steam_id_str.clone();
+            let language = language_str.clone();
+            async move {
+                let metadata = fetch_steam_metadata_with_client(
+                    &client,
+                    steam_id,
+                    &api_key,
+                    &language,
+                    need_appdetails,
+                )
                 .await
                 .ok();
 
-            let player_achievements_res = if !steam_id_inner.is_empty() {
-                Some(
-                    fetch_player_achievements(&api_key, &steam_id_inner, steam_id, &language).await,
-                )
-            } else {
-                None
-            };
+                let player_achievements_res = if !steam_id_inner.is_empty() {
+                    Some(
+                        fetch_player_achievements(&api_key, &steam_id_inner, steam_id, &language)
+                            .await,
+                    )
+                } else {
+                    None
+                };
 
-            (
-                steam_id,
-                source,
-                local_state,
-                metadata,
-                player_achievements_res,
-            )
-        }
-    }))
+                (
+                    steam_id,
+                    source,
+                    local_state,
+                    metadata,
+                    player_achievements_res,
+                )
+            }
+        },
+    ))
     .buffer_unordered(STEAM_METADATA_CONCURRENCY)
     .collect::<Vec<_>>()
     .await;
@@ -224,11 +312,6 @@ pub(crate) async fn enrich_games_with_steam(
             }
         }
 
-        // The achievements schema fetch (icons/descriptions/localized names) can fail or be
-        // rate-limited independently from the rest of the metadata. Fall back to the last
-        // known-good cached schema instead of wiping out achievement data for games that have
-        // no local backup (i.e. legitimately-owned Steam games, as opposed to cracked games
-        // which keep their own local unlocker files).
         let live_achievements = metadata
             .as_ref()
             .map(|m| m.achievements.clone())
@@ -257,7 +340,6 @@ pub(crate) async fn enrich_games_with_steam(
                         ach.desc = info.description.clone();
                     }
                 } else {
-                    // Achievement exists in player stats but not in metadata
                     merged_achievements.push(Achievement {
                         key: key.clone(),
                         name: if info.name.is_empty() {
@@ -277,18 +359,23 @@ pub(crate) async fn enrich_games_with_steam(
         game.achievements = merged_achievements;
         game.achievements_total = game.achievements.len() as u32;
 
-        // `name`/images (appdetails) and `achievements` (GetGameAchievements) are fetched via
-        // separate HTTP requests and can succeed or fail independently, so each is cached and
-        // merged separately below rather than treating a partial failure as a total one.
         let mut cache_entry = appdetails_cache.get(&steam_id).cloned().unwrap_or_default();
         let mut entry_dirty = false;
 
+        // If `game.name` already has a valid name (e.g. from GetOwnedGames) and cache doesn't,
+        // seed the cache immediately so we never lose it!
+        if is_valid_game_name(&game.name) && !is_valid_game_name(&cache_entry.name) {
+            cache_entry.name = game.name.trim().to_string();
+            entry_dirty = true;
+        }
+
         if let Some(meta) = metadata {
-            if !meta.name.is_empty() {
-                // Successful appdetails fetch: use fresh data and refresh the on-disk cache
-                // so future rate-limited fetches for this game can still fall back to it.
+            if is_valid_game_name(&meta.name) {
                 game.name = meta.name.clone();
-                game.genres = meta.genres.clone();
+                if !meta.genres.is_empty() {
+                    game.genres = meta.genres.clone();
+                    cache_entry.genres = meta.genres.clone();
+                }
                 game.header_image_url = if !meta.header_image_url.is_empty() {
                     meta.header_image_url.clone()
                 } else {
@@ -299,6 +386,7 @@ pub(crate) async fn enrich_games_with_steam(
                 };
                 if !meta.game_icon_url.is_empty() {
                     game.game_icon = meta.game_icon_url.clone();
+                    cache_entry.game_icon_url = meta.game_icon_url.clone();
                 }
                 game.background_image_url = if !meta.background_image_url.is_empty() {
                     meta.background_image_url.clone()
@@ -310,19 +398,19 @@ pub(crate) async fn enrich_games_with_steam(
                 };
 
                 cache_entry.name = meta.name.clone();
-                cache_entry.header_image_url = meta.header_image_url.clone();
-                cache_entry.background_image_url = meta.background_image_url.clone();
-                cache_entry.game_icon_url = meta.game_icon_url.clone();
-                cache_entry.genres = meta.genres.clone();
+                if !meta.header_image_url.is_empty() {
+                    cache_entry.header_image_url = meta.header_image_url.clone();
+                }
+                if !meta.background_image_url.is_empty() {
+                    cache_entry.background_image_url = meta.background_image_url.clone();
+                }
                 entry_dirty = true;
-            } else if !cache_entry.name.is_empty() {
-                // appdetails likely failed or was rate-limited (success:false) - fall back
-                // to the last known-good cached metadata instead of leaving the game
-                // permanently unnamed/imageless (e.g. showing a raw "steam_<appid>" id).
-                if game.name.is_empty() {
+            } else if is_valid_game_name(&cache_entry.name) {
+                // Never overwrite a valid game.name with a fallback, and restore from cache if needed
+                if !is_valid_game_name(&game.name) {
                     game.name = cache_entry.name.clone();
                 }
-                if game.genres.is_empty() {
+                if game.genres.is_empty() && !cache_entry.genres.is_empty() {
                     game.genres = cache_entry.genres.clone();
                 }
                 if game.header_image_url.is_empty() {
@@ -348,20 +436,25 @@ pub(crate) async fn enrich_games_with_steam(
                         )
                     };
                 }
-            } else if game.header_image_url.is_empty() {
-                game.header_image_url = format!(
-                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
-                    steam_id
-                );
             }
 
             if !meta.achievements.is_empty() {
                 cache_entry.achievements = meta.achievements.clone();
                 entry_dirty = true;
             }
-        } else if game.header_image_url.is_empty() {
+        } else if is_valid_game_name(&cache_entry.name) && !is_valid_game_name(&game.name) {
+            game.name = cache_entry.name.clone();
+        }
+
+        if game.header_image_url.is_empty() {
             game.header_image_url = format!(
                 "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
+                steam_id
+            );
+        }
+        if game.background_image_url.is_empty() {
+            game.background_image_url = format!(
+                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
                 steam_id
             );
         }
@@ -373,7 +466,7 @@ pub(crate) async fn enrich_games_with_steam(
         }
 
         log::info!(
-            "[enrich] {} (AppID: {}) — {} achievements",
+            "[enrich] '{}' (AppID: {}) — {} achievements",
             game.name,
             steam_id,
             game.achievements_total
@@ -419,42 +512,105 @@ async fn fetch_sgdb_icon(
     }
 }
 
-pub async fn apply_steamgriddb_icons(games: &mut [Game], api_key: &str) {
+pub async fn apply_steamgriddb_icons(
+    games: &mut [Game],
+    api_key: &str,
+    app_handle: &tauri::AppHandle,
+) {
     if api_key.trim().is_empty() || games.is_empty() {
         return;
     }
 
-    const SGDB_CONCURRENCY: usize = 8;
+    const SGDB_CONCURRENCY: usize = 6;
 
     let client = reqwest::Client::new();
-    let api_key = api_key.to_string();
+    let api_key = api_key.trim().to_string();
 
-    let steam_games: Vec<(u32, usize)> = games
+    let steam_games: Vec<(u32, usize, bool, bool)> = games
         .iter()
         .enumerate()
-        .filter_map(|(idx, game)| game.steam_id.map(|sid| (sid, idx)))
+        .filter_map(|(idx, game)| {
+            let sid = game.steam_id?;
+            let need_icon = game.steamgrid_icon_url.trim().is_empty();
+            let need_name = !is_valid_game_name(&game.name);
+            if need_icon || need_name {
+                Some((sid, idx, need_icon, need_name))
+            } else {
+                None
+            }
+        })
         .collect();
 
-    let updates = stream::iter(steam_games.into_iter().map(|(steam_id, index)| {
-        let client = client.clone();
-        let api_key = api_key.clone();
-        async move {
-            let official = fetch_sgdb_icon(&client, steam_id, &api_key, "official").await;
-            let icon_url = if official.is_some() {
-                official
-            } else {
-                fetch_sgdb_icon(&client, steam_id, &api_key, "").await
-            };
-            (index, icon_url)
-        }
-    }))
+    let updates = stream::iter(steam_games.into_iter().map(
+        |(steam_id, index, need_icon, need_name)| {
+            let client = client.clone();
+            let api_key = api_key.clone();
+            async move {
+                let icon_url = if need_icon {
+                    let official = fetch_sgdb_icon(&client, steam_id, &api_key, "official").await;
+                    if official.is_some() {
+                        official
+                    } else {
+                        fetch_sgdb_icon(&client, steam_id, &api_key, "").await
+                    }
+                } else {
+                    None
+                };
+
+                // Plan B: fetch game title from SteamGridDB if Steam appdetails failed/rate-limited
+                let sgdb_name = if need_name {
+                    fetch_sgdb_game_name(&client, steam_id, &api_key).await
+                } else {
+                    None
+                };
+
+                (index, steam_id, icon_url, sgdb_name)
+            }
+        },
+    ))
     .buffer_unordered(SGDB_CONCURRENCY)
     .collect::<Vec<_>>()
     .await;
 
-    for (index, icon_url) in updates {
+    let cache_path = appdetails_cache_path(app_handle);
+    let mut appdetails_cache = load_appdetails_cache(&cache_path);
+    let mut cache_dirty = false;
+
+    for (index, steam_id, icon_url, sgdb_name) in updates {
         if let Some(url) = icon_url {
             games[index].steamgrid_icon_url = url;
+        }
+        if let Some(name) = sgdb_name {
+            if !is_valid_game_name(&games[index].name) {
+                log::info!(
+                    "[SGDB Plan B] Resolved game name for AppID {} -> '{}'",
+                    steam_id,
+                    name
+                );
+                games[index].name = name.clone();
+            }
+            let entry = appdetails_cache.entry(steam_id).or_default();
+            if !is_valid_game_name(&entry.name) {
+                entry.name = name;
+                entry.fetched_at = now_unix();
+                cache_dirty = true;
+            }
+        }
+    }
+
+    if cache_dirty {
+        save_appdetails_cache(&cache_path, &appdetails_cache);
+    }
+
+    // Final safety fallback: if any game still has an empty name (both Steam & SGDB failed),
+    // display "AppID <id>" in memory ONLY without ever saving that placeholder to disk cache.
+    for game in games.iter_mut() {
+        if game.name.trim().is_empty() {
+            if let Some(sid) = game.steam_id {
+                game.name = format!("AppID {}", sid);
+            } else {
+                game.name = game.id.clone();
+            }
         }
     }
 }
@@ -549,8 +705,6 @@ fn update_hud_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<()
 async fn enable_autostart(_app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
-        // Refuse to register a debug binary in the registry — it would open a CMD
-        // window and try to load localhost:5173 on every system boot.
         if cfg!(debug_assertions) {
             return Err("Cannot enable autostart from a debug build. Use a release build (cargo tauri build).".to_string());
         }
@@ -668,9 +822,8 @@ pub fn run() {
             dotenv::dotenv().ok();
 
             let api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
+            let sgdb_key = std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default();
 
-            // In debug mode with --minimized (autostart), the Vite dev server is not running,
-            // so we must fall back to the production path to avoid a blank overlay window.
             let overlay_url = if cfg!(debug_assertions) && !is_minimized {
                 "http://localhost:5173/overlay"
             } else {
@@ -741,12 +894,14 @@ pub fn run() {
             app.manage(AppState {
                 games: Mutex::new(Vec::new()),
                 steam_api_key: Mutex::new(api_key),
+                sgdb_api_key: Mutex::new(sgdb_key),
                 ra_username: Mutex::new(String::new()),
                 ra_api_key: Mutex::new(String::new()),
                 language: Mutex::new("fr".to_string()),
                 running_game: Mutex::new(None),
                 screenshot_shortcut: Mutex::new("F12".to_string()),
                 hud_shortcut: Mutex::new("Alt+A".to_string()),
+                is_syncing: AtomicBool::new(false),
             });
 
             let app_handle = app.handle().clone();

@@ -1,7 +1,7 @@
 // src-tauri/src/watcher/mod.rs
 use crate::achievements::match_emulator;
 use crate::achievements::models::{Achievement, Game};
-use crate::achievements::steam::fetch_app_name_by_appid;
+use crate::achievements::steam::{fetch_app_name_by_appid, is_valid_game_name};
 use crate::AppState;
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -143,7 +143,13 @@ fn is_technical_name(name: &str) -> bool {
             | "empress"
             | "rune"
             | "goldberg"
-            | "onlinefix" | "tenoke" | "flt" | "ali213" | "valve" | "smartsteamemu" | "creamapi"
+            | "onlinefix"
+            | "tenoke"
+            | "flt"
+            | "ali213"
+            | "valve"
+            | "smartsteamemu"
+            | "creamapi"
             | "steam_settings"
             | "achievements"
             | "remote"
@@ -176,24 +182,59 @@ fn display_game_name(
     name_cache: &mut HashMap<String, String>,
     api_lookup_attempted: &mut HashSet<u32>,
     language: &str,
+    app_handle: &tauri::AppHandle,
 ) -> String {
     let direct_name = game.name.trim();
-    if !direct_name.is_empty() && !is_technical_name(direct_name) {
+    if is_valid_game_name(direct_name) && !is_technical_name(direct_name) {
         return direct_name.to_string();
     }
 
     if let Some(cached) = name_cache.get(&game.id) {
-        return cached.clone();
+        if is_valid_game_name(cached) {
+            return cached.clone();
+        }
     }
 
     if let Some(steam_id) = game.steam_id {
+        if steam_id > 0 {
+            if let Some(disk_name) = crate::lookup_cached_game_name(app_handle, steam_id) {
+                name_cache.insert(game.id.clone(), disk_name.clone());
+                return disk_name;
+            }
+        }
+
         if steam_id > 0 && api_lookup_attempted.insert(steam_id) {
             let api_res =
                 tauri::async_runtime::block_on(fetch_app_name_by_appid(steam_id, language));
             if let Ok(Some(api_name)) = api_res {
-                if !is_technical_name(&api_name) {
+                if is_valid_game_name(&api_name) && !is_technical_name(&api_name) {
+                    crate::cache_resolved_game_name(app_handle, steam_id, &api_name);
                     name_cache.insert(game.id.clone(), api_name.clone());
                     return api_name;
+                }
+            }
+
+            // Plan B: fallback to SteamGridDB if configured
+            let sgdb_key = app_handle
+                .state::<AppState>()
+                .sgdb_api_key
+                .lock()
+                .map(|k| k.clone())
+                .unwrap_or_default();
+            if !sgdb_key.trim().is_empty() {
+                let sgdb_res = tauri::async_runtime::block_on(async {
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(10))
+                        .build()
+                        .ok()?;
+                    crate::fetch_sgdb_game_name(&client, steam_id, &sgdb_key).await
+                });
+                if let Some(sgdb_name) = sgdb_res {
+                    if is_valid_game_name(&sgdb_name) && !is_technical_name(&sgdb_name) {
+                        crate::cache_resolved_game_name(app_handle, steam_id, &sgdb_name);
+                        name_cache.insert(game.id.clone(), sgdb_name.clone());
+                        return sgdb_name;
+                    }
                 }
             }
         }
@@ -518,6 +559,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                             &mut game_name_cache,
                             &mut api_lookup_attempted,
                             &language,
+                            &app_handle,
                         );
                         let enriched_game_achievements: Vec<Achievement> = ui_achievements.clone();
 

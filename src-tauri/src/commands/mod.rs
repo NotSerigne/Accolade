@@ -2,12 +2,20 @@
 use crate::achievements::models::{Achievement, Emulator, Game};
 use crate::achievements::steam::{
     fetch_owned_games, fetch_recently_played_games, fetch_steam_user, get_local_steam_appids,
-    OwnedGame, SteamUser,
+    is_valid_game_name, OwnedGame, SteamUser,
 };
 use crate::user_data::{load_user_data, save_user_data, ManualAchievementOverride, UserData};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
+
+struct SyncGuard<'a>(&'a AtomicBool);
+impl<'a> Drop for SyncGuard<'a> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
 #[tauri::command]
 pub fn test_achievement_notif(app_handle: tauri::AppHandle) {
@@ -462,18 +470,34 @@ pub(crate) async fn sync_steam_metadata(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<Game>, String> {
+    if state
+        .is_syncing
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        log::info!("[sync] Sync already in progress — skipping duplicate call");
+        return Ok(get_all_games(state, app_handle));
+    }
+    let _sync_guard = SyncGuard(&state.is_syncing);
+
     dotenv::dotenv().ok();
     let mut effective_api_key = api_key.trim().to_string();
     if effective_api_key.is_empty() {
         effective_api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
     }
 
+    let sgdb_key = if !sgdb_api_key.trim().is_empty() {
+        sgdb_api_key.trim().to_string()
+    } else {
+        std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default()
+    };
+
     log::info!(
         "[sync] Start. steam_id='{}', language='{}', api_key_len={}, sgdb_key_len={}",
         steam_id,
         language,
         effective_api_key.len(),
-        sgdb_api_key.len()
+        sgdb_key.len()
     );
 
     if effective_api_key.is_empty() {
@@ -486,6 +510,12 @@ pub(crate) async fn sync_steam_metadata(
             .lock()
             .map_err(|_| String::from("Impossible d'acceder a la cle API"))?;
         *key = effective_api_key.clone();
+
+        let mut sgdb = state
+            .sgdb_api_key
+            .lock()
+            .map_err(|_| String::from("Impossible d'acceder a la cle API SGDB"))?;
+        *sgdb = sgdb_key.clone();
 
         let mut ra_u = state
             .ra_username
@@ -611,10 +641,16 @@ pub(crate) async fn sync_steam_metadata(
             for og in all_owned {
                 let game_id = format!("steam_{}", og.appid);
                 let steam_playtime_secs = og.playtime_forever.unwrap_or(0).saturating_mul(60);
+                let clean_og_name = og
+                    .name
+                    .as_deref()
+                    .filter(|n| is_valid_game_name(n))
+                    .map(|n| n.to_string())
+                    .unwrap_or_default();
 
                 if !existing_ids.contains(&game_id) {
                     cloned_games.push(Game {
-                        name: og.name.clone().unwrap_or_else(|| format!("AppID {}", og.appid)),
+                        name: clean_og_name,
                         id: game_id.clone(),
                         steam_id: Some(og.appid),
                         game_icon: og.img_icon_url.clone().unwrap_or_default(),
@@ -636,10 +672,15 @@ pub(crate) async fn sync_steam_metadata(
                     existing_ids.insert(game_id);
                     added_count += 1;
                     added_steam_games = true;
-                } else if steam_playtime_secs > 0 {
+                } else {
                     if let Some(existing) = cloned_games.iter_mut().find(|g| g.id == game_id) {
-                        existing.playtime_seconds =
-                            existing.playtime_seconds.max(steam_playtime_secs);
+                        if steam_playtime_secs > 0 {
+                            existing.playtime_seconds =
+                                existing.playtime_seconds.max(steam_playtime_secs);
+                        }
+                        if !is_valid_game_name(&existing.name) && !clean_og_name.is_empty() {
+                            existing.name = clean_og_name;
+                        }
                     }
                 }
             }
@@ -692,17 +733,23 @@ pub(crate) async fn sync_steam_metadata(
         .await;
     }
 
-    let sgdb_key = if !sgdb_api_key.trim().is_empty() {
-        sgdb_api_key
-    } else {
-        std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default()
-    };
     if !sgdb_key.is_empty() {
         log::info!(
             "[sync] Enriching with SteamGridDB (key len: {})",
             sgdb_key.len()
         );
-        apply_steamgriddb_icons(&mut cloned_games, &sgdb_key).await;
+        apply_steamgriddb_icons(&mut cloned_games, &sgdb_key, &app_handle).await;
+    }
+
+    // Ensure every game has a displayable in-memory fallback name if all sources failed
+    for g in cloned_games.iter_mut() {
+        if !is_valid_game_name(&g.name) {
+            if let Some(sid) = g.steam_id {
+                g.name = format!("AppID {}", sid);
+            } else if g.name.trim().is_empty() {
+                g.name = g.id.clone();
+            }
+        }
     }
 
     let mut filtered_games: Vec<Game> = cloned_games

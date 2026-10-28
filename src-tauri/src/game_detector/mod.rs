@@ -11,6 +11,7 @@
 //! Results are cached per executable path, so the filesystem is only probed the
 //! first time a given executable is seen.
 
+use crate::achievements::steam::is_valid_game_name;
 use crate::user_data::{load_user_data, save_user_data};
 use crate::AppState;
 use serde::Serialize;
@@ -479,22 +480,54 @@ impl Detector {
         library_name: Option<String>,
         root_dir: &Path,
         language: &str,
+        app_handle: &tauri::AppHandle,
     ) -> String {
-        if let Some(name) = library_name.filter(|n| !n.trim().is_empty()) {
+        if let Some(name) = library_name.filter(|n| is_valid_game_name(n)) {
             self.name_cache.insert(app_id, name.clone());
             return name;
         }
         if let Some(name) = self.name_cache.get(&app_id) {
-            return name.clone();
+            if is_valid_game_name(name) {
+                return name.clone();
+            }
+        }
+        if let Some(disk_name) = crate::lookup_cached_game_name(app_handle, app_id) {
+            self.name_cache.insert(app_id, disk_name.clone());
+            return disk_name;
         }
         if self.api_lookup_attempted.insert(app_id) {
             let res = tauri::async_runtime::block_on(
                 crate::achievements::steam::fetch_app_name_by_appid(app_id, language),
             );
             if let Ok(Some(name)) = res {
-                if !name.trim().is_empty() {
+                if is_valid_game_name(&name) {
+                    crate::cache_resolved_game_name(app_handle, app_id, &name);
                     self.name_cache.insert(app_id, name.clone());
                     return name;
+                }
+            }
+
+            // Plan B: fallback to SteamGridDB if configured
+            let sgdb_key = app_handle
+                .state::<AppState>()
+                .sgdb_api_key
+                .lock()
+                .map(|k| k.clone())
+                .unwrap_or_default();
+            if !sgdb_key.trim().is_empty() {
+                let sgdb_res = tauri::async_runtime::block_on(async {
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(10))
+                        .build()
+                        .ok()?;
+                    crate::fetch_sgdb_game_name(&client, app_id, &sgdb_key).await
+                });
+                if let Some(sgdb_name) = sgdb_res {
+                    if is_valid_game_name(&sgdb_name) {
+                        crate::cache_resolved_game_name(app_handle, app_id, &sgdb_name);
+                        self.name_cache.insert(app_id, sgdb_name.clone());
+                        return sgdb_name;
+                    }
                 }
             }
         }
@@ -559,6 +592,7 @@ impl Detector {
                 library_entry.as_ref().map(|(_, n)| n.clone()),
                 &c.detection.root_dir,
                 &language,
+                app_handle,
             );
             RunningGame {
                 app_id,

@@ -144,6 +144,7 @@ export function calculateProfileRank(gamesList: Game[]): ProfileRankInfo {
 
 export const games = writable<Game[]>([]);
 let achievementsSyncInitialized = false;
+let activeSyncPromise: Promise<void> | null = null;
 
 export const totalUnlockedAchievements = derived(games, ($games) =>
 	$games.reduce((acc, g) => acc + (g.achievements?.filter((a) => a.unlocked).length ?? 0), 0)
@@ -181,36 +182,47 @@ export async function loadGames(): Promise<void> {
 }
 
 export async function syncSteamMetadata(apiKey?: string, sgdbApiKey?: string): Promise<void> {
-	const s = get(settings);
-	const effectiveApiKey = apiKey || s.steamApiKey;
-	const effectiveSgdbApiKey = sgdbApiKey || s.steamGridDbApiKey;
+	if (activeSyncPromise) {
+		console.log('[syncSteamMetadata] Sync already in flight — reusing active promise');
+		return activeSyncPromise;
+	}
 
-	console.log('[DEBUG][syncSteamMetadata] Keys:', {
-		effectiveApiKeyLen: effectiveApiKey?.length,
-		effectiveSgdbApiKeyLen: effectiveSgdbApiKey?.length,
-		raUsername: s.raUsername
-	});
+	const run = async () => {
+		const s = get(settings);
+		const effectiveApiKey = apiKey || s.steamApiKey;
+		const effectiveSgdbApiKey = sgdbApiKey || s.steamGridDbApiKey;
 
-	isSyncing.set(true);
-	try {
-		const result = await invoke<Game[]>('sync_steam_metadata', {
-			apiKey: effectiveApiKey || '',
-			steamId: s.steamId || '',
-			raUsername: s.raUsername || '',
-			raApiKey: s.raApiKey || '',
-			sgdbApiKey: effectiveSgdbApiKey || '',
-			language: s.language
+		console.log('[DEBUG][syncSteamMetadata] Keys:', {
+			effectiveApiKeyLen: effectiveApiKey?.length,
+			effectiveSgdbApiKeyLen: effectiveSgdbApiKey?.length,
+			raUsername: s.raUsername
 		});
 
-		if (result) {
-			result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-			games.set(result);
+		isSyncing.set(true);
+		try {
+			const result = await invoke<Game[]>('sync_steam_metadata', {
+				apiKey: effectiveApiKey || '',
+				steamId: s.steamId || '',
+				raUsername: s.raUsername || '',
+				raApiKey: s.raApiKey || '',
+				sgdbApiKey: effectiveSgdbApiKey || '',
+				language: s.language
+			});
+
+			if (result) {
+				result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+				games.set(result);
+			}
+		} catch (e) {
+			console.error('Failed to sync metadata:', e);
+		} finally {
+			isSyncing.set(false);
+			activeSyncPromise = null;
 		}
-	} catch (e) {
-		console.error('Failed to sync metadata:', e);
-	} finally {
-		isSyncing.set(false);
-	}
+	};
+
+	activeSyncPromise = run();
+	return activeSyncPromise;
 }
 
 export async function loadAchievements(game: Game): Promise<Achievement[]> {

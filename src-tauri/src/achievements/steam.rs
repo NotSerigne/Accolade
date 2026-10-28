@@ -2,6 +2,48 @@
 use crate::achievements::models::Achievement;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+/// Returns `true` only when `name` is a real game title and not a placeholder
+/// like `"AppID 12345"`, `"steam_12345"`, or empty.
+pub fn is_valid_game_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    !lower.starts_with("appid ")
+        && !lower.starts_with("steam_")
+        && !lower.starts_with("id ")
+        && !lower.starts_with("jeu inconnu")
+        && !lower.starts_with("unknown game")
+}
+
+/// Global throttle for `store.steampowered.com/api/appdetails` so we never exceed
+/// 1 request at a time and enforce at least 1.2s between consecutive Store requests.
+static APPDETAILS_THROTTLE: OnceLock<futures::lock::Mutex<Instant>> = OnceLock::new();
+
+const APPDETAILS_MIN_GAP: Duration = Duration::from_millis(1200);
+const APPDETAILS_MAX_RETRIES: u32 = 3;
+
+async fn async_sleep(dur: Duration) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(dur);
+    })
+    .await;
+}
+
+async fn wait_appdetails_slot() {
+    let lock = APPDETAILS_THROTTLE
+        .get_or_init(|| futures::lock::Mutex::new(Instant::now() - APPDETAILS_MIN_GAP));
+    let mut last_req = lock.lock().await;
+    let elapsed = last_req.elapsed();
+    if elapsed < APPDETAILS_MIN_GAP {
+        async_sleep(APPDETAILS_MIN_GAP - elapsed).await;
+    }
+    *last_req = Instant::now();
+}
 
 #[derive(Clone)]
 pub struct SteamMetadata {
@@ -82,13 +124,13 @@ pub struct PlayerAchievementInfo {
     pub description: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct AppDetailsEnvelope {
     success: bool,
     data: Option<AppDetailsData>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct AppDetailsData {
     #[serde(default)]
     name: String,
@@ -104,7 +146,7 @@ struct AppDetailsData {
     genres: Vec<SteamGenre>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct SteamGenre {
     description: String,
 }
@@ -200,6 +242,79 @@ fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
     }
 
     achievements
+}
+
+/// Fetches `store.steampowered.com/api/appdetails` with:
+/// - Global rate limiting (1 request at a time, >= 1.2s gap)
+/// - Exponential backoff retry on HTTP 403 / 429 (2s, 4s, 8s)
+async fn fetch_appdetails_throttled(
+    client: &reqwest::Client,
+    steam_id: u32,
+    steam_language: &str,
+) -> Option<AppDetailsData> {
+    let details_url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={steam_id}&l={steam_language}"
+    );
+
+    for attempt in 0..=APPDETAILS_MAX_RETRIES {
+        wait_appdetails_slot().await;
+
+        match client.get(&details_url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.as_u16() == 429 || status.as_u16() == 403 {
+                    if attempt < APPDETAILS_MAX_RETRIES {
+                        let backoff_secs = 2u64 << attempt; // 2s, 4s, 8s
+                        log::warn!(
+                            "[steam appdetails] HTTP {} for AppID {} (attempt {}/{}), retrying in {}s...",
+                            status,
+                            steam_id,
+                            attempt + 1,
+                            APPDETAILS_MAX_RETRIES + 1,
+                            backoff_secs
+                        );
+                        async_sleep(Duration::from_secs(backoff_secs)).await;
+                        continue;
+                    } else {
+                        log::warn!(
+                            "[steam appdetails] HTTP {} for AppID {} — exhausted retries",
+                            status,
+                            steam_id
+                        );
+                        return None;
+                    }
+                }
+
+                if !status.is_success() {
+                    log::warn!("[steam appdetails] HTTP {} for AppID {}", status, steam_id);
+                    return None;
+                }
+
+                let details_map = resp
+                    .json::<HashMap<String, AppDetailsEnvelope>>()
+                    .await
+                    .unwrap_or_default();
+
+                return details_map.get(&steam_id.to_string()).and_then(|e| {
+                    if e.success {
+                        e.data.clone()
+                    } else {
+                        None
+                    }
+                });
+            }
+            Err(e) => {
+                log::warn!(
+                    "[steam appdetails] request failed for AppID {}: {}",
+                    steam_id,
+                    e
+                );
+                return None;
+            }
+        }
+    }
+
+    None
 }
 
 pub async fn fetch_steam_user(
@@ -366,20 +481,10 @@ pub async fn fetch_app_name_by_appid_with_client(
         _ => "english",
     };
 
-    let details_map = client
-        .get(format!(
-            "https://store.steampowered.com/api/appdetails?appids={steam_id}&l={steam_language}"
-        ))
-        .send()
-        .await?
-        .json::<HashMap<String, AppDetailsEnvelope>>()
-        .await?;
-
-    let app_name = details_map
-        .get(&steam_id.to_string())
-        .and_then(|e| if e.success { e.data.as_ref() } else { None })
+    let app_name = fetch_appdetails_throttled(client, steam_id, steam_language)
+        .await
         .map(|d| d.name.trim().to_string())
-        .filter(|n| !n.is_empty());
+        .filter(|n| is_valid_game_name(n));
 
     Ok(app_name)
 }
@@ -397,6 +502,7 @@ pub async fn fetch_steam_metadata_with_client(
     steam_id: u32,
     api_key: &str,
     language: &str,
+    need_appdetails: bool,
 ) -> Result<SteamMetadata, reqwest::Error> {
     let steam_language = match language {
         "fr" => "french",
@@ -413,15 +519,11 @@ pub async fn fetch_steam_metadata_with_client(
     let en_url = format!(
         "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
     );
-    let details_url = format!(
-        "https://store.steampowered.com/api/appdetails?appids={steam_id}&l={steam_language}"
-    );
 
     let lang_req = client.get(lang_url).send();
     let en_req = client.get(en_url).send();
-    let details_req = client.get(details_url).send();
 
-    let (lang_res, en_res, details_res) = futures::join!(lang_req, en_req, details_req);
+    let (lang_res, en_res) = futures::join!(lang_req, en_req);
 
     let mut achievements_lang = Vec::new();
     match lang_res {
@@ -463,27 +565,10 @@ pub async fn fetch_steam_metadata_with_client(
         ),
     }
 
-    let details_map = match details_res {
-        Ok(r) if r.status().is_success() => r
-            .json::<HashMap<String, AppDetailsEnvelope>>()
-            .await
-            .unwrap_or_default(),
-        Ok(r) => {
-            log::warn!(
-                "[steam metadata] appdetails HTTP {} for AppID {}",
-                r.status(),
-                steam_id
-            );
-            HashMap::new()
-        }
-        Err(e) => {
-            log::warn!(
-                "[steam metadata] appdetails request failed for AppID {}: {}",
-                steam_id,
-                e
-            );
-            HashMap::new()
-        }
+    let details = if need_appdetails {
+        fetch_appdetails_throttled(client, steam_id, steam_language).await
+    } else {
+        None
     };
 
     let en_map: HashMap<String, &RawAchievement> = achievements_en
@@ -540,22 +625,19 @@ pub async fn fetch_steam_metadata_with_client(
         })
         .collect();
 
-    let details = details_map.get(&steam_id.to_string()).and_then(|e| {
-        if e.success {
-            e.data.as_ref()
-        } else {
-            None
-        }
-    });
-
     let game_icon_url = details
+        .as_ref()
         .map(|d| d.capsule_imagev5.clone())
         .filter(|s| !s.is_empty())
         .unwrap_or_default();
 
-    let header_image_url = details.map(|d| d.header_image.clone()).unwrap_or_default();
+    let header_image_url = details
+        .as_ref()
+        .map(|d| d.header_image.clone())
+        .unwrap_or_default();
 
     let background_image_url = details
+        .as_ref()
         .map(|d| {
             if !d.background_raw.is_empty() {
                 d.background_raw.clone()
@@ -565,10 +647,16 @@ pub async fn fetch_steam_metadata_with_client(
         })
         .unwrap_or_default();
 
-    let game_name = details.map(|d| d.name.clone()).filter(|s| !s.is_empty());
+    // IMPORTANT: Never return "AppID X" as `name` here — return an empty string if appdetails
+    // was skipped or failed, so the caller preserves its cached/existing name or falls back to Plan B.
+    let game_name = details
+        .as_ref()
+        .map(|d| d.name.trim().to_string())
+        .filter(|s| is_valid_game_name(s))
+        .unwrap_or_default();
 
     Ok(SteamMetadata {
-        name: game_name.unwrap_or_else(|| format!("AppID {}", steam_id)),
+        name: game_name,
         game_icon_url,
         header_image_url,
         background_image_url,
@@ -577,4 +665,22 @@ pub async fn fetch_steam_metadata_with_client(
             .map(|d| d.genres.iter().map(|g| g.description.clone()).collect())
             .unwrap_or_default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_game_names_against_placeholders() {
+        assert!(!is_valid_game_name(""));
+        assert!(!is_valid_game_name("   "));
+        assert!(!is_valid_game_name("AppID 1245620"));
+        assert!(!is_valid_game_name("appid 480"));
+        assert!(!is_valid_game_name("steam_1245620"));
+        assert!(!is_valid_game_name("Jeu inconnu (AppID 1245620)"));
+        assert!(!is_valid_game_name("Unknown Game (AppID 1245620)"));
+        assert!(is_valid_game_name("ELDEN RING"));
+        assert!(is_valid_game_name("Jurassic World Evolution 3"));
+    }
 }
