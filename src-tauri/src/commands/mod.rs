@@ -788,7 +788,7 @@ pub(crate) async fn sync_steam_metadata(
 }
 
 #[tauri::command]
-pub fn capture_automatic_screenshot(
+pub async fn capture_automatic_screenshot(
     app_handle: tauri::AppHandle,
     game_id: String,
     ach_key: String,
@@ -798,34 +798,41 @@ pub fn capture_automatic_screenshot(
         game_id,
         ach_key
     );
-    match crate::screenshots::capture_screenshot(&app_handle, Some(&game_id), Some(&ach_key), true)
-    {
-        Ok(filename) => {
-            log::info!("[Command] Automatic screenshot captured: {}", filename);
-            let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
-            Ok(filename)
+    tauri::async_runtime::spawn_blocking(move || {
+        match crate::screenshots::capture_screenshot(&app_handle, Some(&game_id), Some(&ach_key)) {
+            Ok(filename) => {
+                log::info!("[Command] Automatic screenshot captured: {}", filename);
+                let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
+                Ok(filename)
+            }
+            Err(e) => {
+                log::error!("[Command] Automatic screenshot failed: {}", e);
+                Err(e)
+            }
         }
-        Err(e) => {
-            log::error!("[Command] Automatic screenshot failed: {}", e);
-            Err(e)
-        }
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn capture_manual_screenshot(app_handle: tauri::AppHandle) -> Result<String, String> {
+pub async fn capture_manual_screenshot(app_handle: tauri::AppHandle) -> Result<String, String> {
     log::info!("[Command] Manual screenshot requested via button");
-    match crate::screenshots::capture_screenshot(&app_handle, None, None, true) {
-        Ok(filename) => {
-            log::info!("[Command] Manual screenshot captured: {}", filename);
-            let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
-            Ok(filename)
+    tauri::async_runtime::spawn_blocking(move || {
+        match crate::screenshots::capture_screenshot(&app_handle, None, None) {
+            Ok(filename) => {
+                log::info!("[Command] Manual screenshot captured: {}", filename);
+                let _ = tauri::Emitter::emit(&app_handle, "screenshot-taken", filename.clone());
+                Ok(filename)
+            }
+            Err(e) => {
+                log::error!("[Command] Manual screenshot failed: {}", e);
+                Err(e)
+            }
         }
-        Err(e) => {
-            log::error!("[Command] Manual screenshot failed: {}", e);
-            Err(e)
-        }
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1051,8 +1058,12 @@ pub fn import_custom_sound(
 }
 
 #[tauri::command]
-pub fn capture_replay_clip(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
-    crate::replay::flush_replay_gif(&app_handle, None, None)
+pub async fn capture_replay_clip(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::replay::flush_replay_gif(&app_handle, None, None)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

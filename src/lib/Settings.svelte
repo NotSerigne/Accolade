@@ -821,17 +821,6 @@
 
 			<div class="setting-row" style="margin-top: 14px;">
 				<div class="setting-info">
-					<div class="setting-name">{$i18n.t('settings.replayBuffer')}</div>
-					<div class="setting-desc">{$i18n.t('settings.replayBufferDesc')}</div>
-				</div>
-				<label class="toggle-switch">
-					<input type="checkbox" bind:checked={draft.replayBuffer} />
-					<span class="slider"></span>
-				</label>
-			</div>
-
-			<div class="setting-row" style="margin-top: 14px;">
-				<div class="setting-info">
 					<div class="setting-name">{$i18n.t('settings.hudShortcut')}</div>
 					<div class="setting-desc">{$i18n.t('settings.hudShortcutDesc')}</div>
 				</div>

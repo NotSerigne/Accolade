@@ -790,19 +790,26 @@ pub fn run() {
                             .is_some_and(|h| &h == shortcut);
 
                         if hud_match {
-                            let _ = app.emit_to("achievement-overlay", "toggle-hud", ());
+                            overlay::raise(app);
+                            let _ = app.emit_to(overlay::OVERLAY_LABEL, "toggle-hud", ());
                         } else {
                             log::info!("[Shortcut] Native Triggered!");
-                            match screenshots::capture_screenshot(app, None, None, true) {
-                                Ok(filename) => {
-                                    log::info!(
-                                        "[Shortcut] Manual screenshot captured: {}",
-                                        filename
-                                    );
-                                    let _ = app.emit("screenshot-taken", filename);
+                            // Capture off the event loop so the UI/overlay never stalls
+                            let app = app.clone();
+                            std::thread::spawn(move || {
+                                match screenshots::capture_screenshot(&app, None, None) {
+                                    Ok(filename) => {
+                                        log::info!(
+                                            "[Shortcut] Manual screenshot captured: {}",
+                                            filename
+                                        );
+                                        let _ = app.emit("screenshot-taken", filename);
+                                    }
+                                    Err(e) => {
+                                        log::error!("[Shortcut] Manual screenshot failed: {}", e)
+                                    }
                                 }
-                                Err(e) => log::error!("[Shortcut] Manual screenshot failed: {}", e),
-                            }
+                            });
                         }
                     }
                 })
@@ -832,9 +839,11 @@ pub fn run() {
 
             let overlay_win = tauri::WebviewWindowBuilder::new(
                 app,
-                "achievement-overlay",
+                overlay::OVERLAY_LABEL,
                 tauri::WebviewUrl::App(overlay_url.into()),
             )
+            // Must match the main window's `additionalBrowserArgs` (shared WebView2 environment)
+            .additional_browser_args(overlay::WEBVIEW_BROWSER_ARGS)
             .title("")
             .inner_size(460.0, 260.0)
             .position(30.0, 30.0)
@@ -844,6 +853,9 @@ pub fn run() {
             .background_color(Color(0, 0, 0, 0))
             .always_on_top(true)
             .skip_taskbar(true)
+            // Never take focus: activating a window over an exclusive-fullscreen game minimises it
+            .focused(false)
+            .focusable(false)
             .visible(true)
             .build()?;
 
@@ -956,6 +968,7 @@ pub fn run() {
             hltb::get_hltb_data,
             hltb::set_custom_hltb_data,
             commands::toggle_pinned_achievement,
+            overlay::raise_overlay,
             commands::get_hud_data,
             game_detector::get_running_game,
             update_screenshot_shortcut,
@@ -968,12 +981,14 @@ pub fn run() {
 }
 
 pub mod achievements;
+pub mod capture;
 pub mod color;
 pub mod commands;
 pub mod discord_rpc;
 pub mod emulators;
 pub mod game_detector;
 pub mod hltb;
+pub mod overlay;
 pub mod replay;
 pub mod screenshots;
 pub mod user_data;

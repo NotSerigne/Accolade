@@ -627,11 +627,20 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 progress_max: None,
                             };
 
+                            crate::overlay::raise(&app_handle);
                             let _ = app_handle.emit_to(
-                                "achievement-overlay",
+                                crate::overlay::OVERLAY_LABEL,
                                 "achievement-notif",
                                 &payload,
                             );
+                            // Only flush once per unlock batch so simultaneous unlocks share one clip
+                            if idx == num_new - 1 {
+                                crate::replay::schedule_flush(
+                                    app_handle.clone(),
+                                    game.id.clone(),
+                                    ach.key.clone(),
+                                );
+                            }
                         }
                     }
 
@@ -689,8 +698,9 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 progress_current: Some(cur),
                                 progress_max: Some(max),
                             };
+                            crate::overlay::raise(&app_handle);
                             let _ = app_handle.emit_to(
-                                "achievement-overlay",
+                                crate::overlay::OVERLAY_LABEL,
                                 "achievement-notif",
                                 &payload,
                             );
@@ -741,5 +751,6 @@ pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
         progress_max: None,
     };
 
-    let _ = app_handle.emit_to("achievement-overlay", "achievement-notif", &payload);
+    crate::overlay::raise(app_handle);
+    let _ = app_handle.emit_to(crate::overlay::OVERLAY_LABEL, "achievement-notif", &payload);
 }

@@ -150,6 +150,8 @@
 		}
 
 		await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+		// Re-assert HWND_TOPMOST after moving so fullscreen games don't cover the overlay
+		await invoke('raise_overlay').catch(() => {});
 		return pos;
 	}
 
