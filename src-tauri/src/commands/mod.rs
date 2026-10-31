@@ -45,7 +45,46 @@ pub async fn get_achievements(
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<Achievement>, String> {
     let game_id = game.id.clone();
+    let steam_id = game.steam_id;
+    let fallback_schema = game.achievements.clone();
     let mut achs = crate::achievements::get_achievements_for_game(game, &state).await;
+
+    if let Some(sid) = steam_id.filter(|&id| id > 0) {
+        let stored_schema = state
+            .games
+            .lock()
+            .ok()
+            .and_then(|gs| {
+                gs.iter()
+                    .find(|g| g.id == game_id)
+                    .map(|g| g.achievements.clone())
+            })
+            .unwrap_or(fallback_schema);
+
+        if crate::needs_achievement_schema_refresh(&stored_schema, &achs) {
+            log::info!(
+                "[get_achievements] New or icon-missing achievements detected for '{}' (AppID {}) — refreshing Steam schema",
+                game_id,
+                sid
+            );
+            let refreshed = crate::refresh_game_achievements_schema(&app_handle, sid).await;
+            let base_schema = if !refreshed.is_empty() {
+                refreshed
+            } else {
+                stored_schema
+            };
+            achs = crate::merge_schema_with_local(base_schema, &achs);
+            if let Ok(mut gs) = state.games.lock() {
+                if let Some(stored_game) = gs.iter_mut().find(|g| g.id == game_id) {
+                    stored_game.achievements = achs.clone();
+                    stored_game.achievements_total = achs.len() as u32;
+                }
+            }
+        } else if !stored_schema.is_empty() {
+            achs = crate::merge_schema_with_local(stored_schema, &achs);
+        }
+    }
+
     let user_data = load_user_data(&app_handle);
     apply_manual_overrides_to_list(&game_id, &mut achs, &user_data);
     Ok(achs)
@@ -559,6 +598,11 @@ pub(crate) async fn sync_steam_metadata(
             cloned_games.push(lg.clone());
             existing_ids.insert(lg.id.clone());
             added_local += 1;
+        } else if let Some(existing) = cloned_games.iter_mut().find(|g| g.id == lg.id) {
+            let merged =
+                crate::merge_schema_with_local(existing.achievements.clone(), &lg.achievements);
+            existing.achievements_total = merged.len() as u32;
+            existing.achievements = merged;
         }
     }
     if added_local > 0 {

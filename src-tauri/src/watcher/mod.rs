@@ -1,7 +1,9 @@
 // src-tauri/src/watcher/mod.rs
 use crate::achievements::match_emulator;
 use crate::achievements::models::{Achievement, Game};
-use crate::achievements::steam::{fetch_app_name_by_appid, is_valid_game_name};
+use crate::achievements::steam::{
+    fetch_app_name_by_appid, is_valid_game_name, normalize_steam_icon_url,
+};
 use crate::AppState;
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -10,6 +12,8 @@ use std::path::Path;
 use std::time::Duration;
 use tauri::Emitter;
 use tauri::Manager;
+
+const SCHEMA_REFRESH_INTERVAL_ITERS: u32 = 10;
 
 #[derive(Serialize, Clone)]
 pub struct AchievementNotifPayload {
@@ -90,6 +94,13 @@ fn merge_live_achievements(
             let key = s.key.trim().to_lowercase();
             seen_schema_keys.insert(key.clone());
 
+            if !s.icon.is_empty() {
+                s.icon = normalize_steam_icon_url(&s.icon);
+            }
+            if !s.icon_gray.is_empty() {
+                s.icon_gray = normalize_steam_icon_url(&s.icon_gray);
+            }
+
             if let Some(live_ach) = live_map.get(&key) {
                 s.unlocked = live_ach.unlocked;
                 s.progress = live_ach.progress;
@@ -115,7 +126,10 @@ fn merge_live_achievements(
                     s.desc = live_ach.desc.clone();
                 }
                 if s.icon.is_empty() && !live_ach.icon.is_empty() {
-                    s.icon = live_ach.icon.clone();
+                    s.icon = normalize_steam_icon_url(&live_ach.icon);
+                }
+                if s.icon_gray.is_empty() && !live_ach.icon_gray.is_empty() {
+                    s.icon_gray = normalize_steam_icon_url(&live_ach.icon_gray);
                 }
             } else if previous_live_keys.contains(&key) && !current_live_keys.contains(&key) {
                 s.unlocked = false;
@@ -129,7 +143,14 @@ fn merge_live_achievements(
     for ach in live {
         let key = ach.key.trim().to_lowercase();
         if !seen_schema_keys.contains(&key) {
-            merged.push(ach.clone());
+            let mut cloned = ach.clone();
+            if !cloned.icon.is_empty() {
+                cloned.icon = normalize_steam_icon_url(&cloned.icon);
+            }
+            if !cloned.icon_gray.is_empty() {
+                cloned.icon_gray = normalize_steam_icon_url(&cloned.icon_gray);
+            }
+            merged.push(cloned);
         }
     }
 
@@ -350,6 +371,7 @@ pub fn start(app_handle: tauri::AppHandle) {
         let mut unlocked_by_game: HashMap<String, HashSet<String>> = HashMap::new();
         let mut live_keys_by_game: HashMap<String, HashSet<String>> = HashMap::new();
         let mut progress_bucket_by_game: HashMap<String, HashMap<String, u32>> = HashMap::new();
+        let mut iter_count_by_game: HashMap<String, u32> = HashMap::new();
         let mut game_name_cache: HashMap<String, String> = HashMap::new();
         let mut api_lookup_attempted: HashSet<u32> = HashSet::new();
 
@@ -493,6 +515,68 @@ pub fn start(app_handle: tauri::AppHandle) {
                         .get(&game.id)
                         .cloned()
                         .unwrap_or_default();
+
+                    let iter_count = {
+                        let entry = iter_count_by_game.entry(game.id.clone()).or_insert(0);
+                        *entry = entry.wrapping_add(1);
+                        *entry
+                    };
+
+                    // Refresh Steam achievement schema/icons when:
+                    // 1. New achievement keys are added to the game (e.g. a new DLC is added, even if locked),
+                    // 2. Any achievement is missing its icon, OR
+                    // 3. Every `SCHEMA_REFRESH_INTERVAL_ITERS` watcher iterations.
+                    if let Some(steam_id) = game.steam_id.filter(|&id| id > 0) {
+                        let stored_schema_snapshot: Vec<Achievement> = {
+                            let state = app_handle.state::<AppState>();
+                            state
+                                .games
+                                .lock()
+                                .ok()
+                                .and_then(|gs| {
+                                    gs.iter()
+                                        .find(|g| g.id == game.id)
+                                        .map(|g| g.achievements.clone())
+                                })
+                                .unwrap_or_else(|| game.achievements.clone())
+                        };
+
+                        let has_new_live_keys = current_live_keys
+                            .iter()
+                            .any(|k| !snapshot_previous_live_keys.contains(k));
+                        let needs_schema_refresh = crate::needs_achievement_schema_refresh(
+                            &stored_schema_snapshot,
+                            &achievements,
+                        );
+                        let periodic_refresh = iter_count % SCHEMA_REFRESH_INTERVAL_ITERS == 0;
+
+                        if has_new_live_keys || needs_schema_refresh || periodic_refresh {
+                            log::info!(
+                                "[watcher] Refreshing achievement schema/icons for game '{}' (AppID {}, new_keys={}, missing_icons={}, periodic={})",
+                                game.id,
+                                steam_id,
+                                has_new_live_keys,
+                                needs_schema_refresh,
+                                periodic_refresh
+                            );
+                            let refreshed_schema = tauri::async_runtime::block_on(
+                                crate::refresh_game_achievements_schema(&app_handle, steam_id),
+                            );
+                            if !refreshed_schema.is_empty() {
+                                let state = app_handle.state::<AppState>();
+                                if let Ok(mut gs) = state.games.lock() {
+                                    if let Some(stored) = gs.iter_mut().find(|g| g.id == game.id) {
+                                        stored.achievements = crate::merge_schema_with_local(
+                                            refreshed_schema,
+                                            &stored.achievements,
+                                        );
+                                        stored.achievements_total =
+                                            stored.achievements.len() as u32;
+                                    }
+                                };
+                            }
+                        }
+                    }
 
                     let (ui_achievements, ui_total) = {
                         let state = app_handle.state::<AppState>();

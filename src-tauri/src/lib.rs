@@ -2,6 +2,7 @@
 use crate::achievements::models::{Achievement, Game, SourceType};
 use crate::achievements::steam::{
     fetch_player_achievements, fetch_steam_metadata_with_client, is_valid_game_name,
+    normalize_steam_icon_url,
 };
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -41,11 +42,29 @@ pub(crate) fn load_appdetails_cache(path: &Path) -> HashMap<u32, CachedAppDetail
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
+    let mut healed = false;
     // Heal any previously poisoned fallback names ("AppID 12345") in the disk cache
+    // and migrate legacy Steam CDN achievement icon URLs to the current community_assets CDN.
     for entry in map.values_mut() {
-        if !is_valid_game_name(&entry.name) {
+        if !is_valid_game_name(&entry.name) && !entry.name.is_empty() {
             entry.name.clear();
+            healed = true;
         }
+        for ach in &mut entry.achievements {
+            let new_icon = normalize_steam_icon_url(&ach.icon);
+            if new_icon != ach.icon {
+                ach.icon = new_icon;
+                healed = true;
+            }
+            let new_gray = normalize_steam_icon_url(&ach.icon_gray);
+            if new_gray != ach.icon_gray {
+                ach.icon_gray = new_gray;
+                healed = true;
+            }
+        }
+    }
+    if healed {
+        save_appdetails_cache(path, &map);
     }
     map
 }
@@ -107,7 +126,103 @@ pub struct AppState {
     pub(crate) is_syncing: AtomicBool,
 }
 
-fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> Vec<Achievement> {
+/// Returns `true` when the game's achievement schema/icons need to be refreshed from Steam:
+/// - New achievements were added to the game in `live_achievements` that aren't in `stored_schema`, or
+/// - Any achievement in `stored_schema` is missing its icon URL.
+pub(crate) fn needs_achievement_schema_refresh(
+    stored_schema: &[Achievement],
+    live_achievements: &[Achievement],
+) -> bool {
+    if stored_schema.is_empty() && !live_achievements.is_empty() {
+        return true;
+    }
+    let schema_icons_by_key: HashMap<String, bool> = stored_schema
+        .iter()
+        .map(|a| (a.key.trim().to_lowercase(), !a.icon.trim().is_empty()))
+        .collect();
+
+    if schema_icons_by_key.values().any(|&has_icon| !has_icon) {
+        return true;
+    }
+
+    for live in live_achievements {
+        let key = live.key.trim().to_lowercase();
+        if !key.is_empty() && !schema_icons_by_key.contains_key(&key) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Fetches the latest achievement schema (localized names, descriptions, and icon URLs)
+/// from Steam for a single `steam_id`, updates `steam_appdetails_cache.json`, and returns
+/// the schema list (falling back to the on-disk cache if offline or rate-limited).
+pub(crate) async fn refresh_game_achievements_schema(
+    app_handle: &tauri::AppHandle,
+    steam_id: u32,
+) -> Vec<Achievement> {
+    if steam_id == 0 {
+        return Vec::new();
+    }
+
+    let (mut api_key, language) = {
+        let state = app_handle.state::<AppState>();
+        let key = state
+            .steam_api_key
+            .lock()
+            .map(|k| k.trim().to_string())
+            .unwrap_or_default();
+        let lang = state
+            .language
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_else(|_| "fr".to_string());
+        (key, lang)
+    };
+
+    if api_key.is_empty() {
+        dotenv::dotenv().ok();
+        api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
+    }
+
+    let cache_path = appdetails_cache_path(app_handle);
+    let mut cache = load_appdetails_cache(&cache_path);
+
+    if !api_key.trim().is_empty() {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(12))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        if let Ok(meta) =
+            fetch_steam_metadata_with_client(&client, steam_id, &api_key, &language, false).await
+        {
+            if !meta.achievements.is_empty() {
+                log::info!(
+                    "[schema-refresh] Refreshed {} achievement icons/metadata from Steam for AppID {}",
+                    meta.achievements.len(),
+                    steam_id
+                );
+                let entry = cache.entry(steam_id).or_default();
+                entry.achievements = meta.achievements.clone();
+                entry.fetched_at = now_unix();
+                save_appdetails_cache(&cache_path, &cache);
+                return meta.achievements;
+            }
+        }
+    }
+
+    cache
+        .get(&steam_id)
+        .map(|c| c.achievements.clone())
+        .unwrap_or_default()
+}
+
+pub(crate) fn merge_schema_with_local(
+    schema: Vec<Achievement>,
+    local: &[Achievement],
+) -> Vec<Achievement> {
     let local_map: HashMap<String, &Achievement> = local
         .iter()
         .map(|a| (a.key.trim().to_lowercase(), a))
@@ -130,14 +245,14 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
                     },
                     unlocked: live.unlocked,
                     icon: if s.icon.is_empty() {
-                        live.icon.clone()
+                        normalize_steam_icon_url(&live.icon)
                     } else {
-                        s.icon
+                        normalize_steam_icon_url(&s.icon)
                     },
                     icon_gray: if s.icon_gray.is_empty() {
-                        live.icon_gray.clone()
+                        normalize_steam_icon_url(&live.icon_gray)
                     } else {
-                        s.icon_gray
+                        normalize_steam_icon_url(&s.icon_gray)
                     },
                     unlocked_time: live.unlocked_time,
                     rarity: live.rarity.clone(),
@@ -156,7 +271,11 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
                     max_progress: live.max_progress,
                 }
             } else {
-                s
+                Achievement {
+                    icon: normalize_steam_icon_url(&s.icon),
+                    icon_gray: normalize_steam_icon_url(&s.icon_gray),
+                    ..s
+                }
             }
         })
         .collect();
@@ -164,7 +283,10 @@ fn merge_schema_with_local(schema: Vec<Achievement>, local: &[Achievement]) -> V
     for ach in local {
         let key = ach.key.trim().to_lowercase();
         if !seen_schema_keys.contains(&key) {
-            merged.push(ach.clone());
+            let mut cloned = ach.clone();
+            cloned.icon = normalize_steam_icon_url(&cloned.icon);
+            cloned.icon_gray = normalize_steam_icon_url(&cloned.icon_gray);
+            merged.push(cloned);
         }
     }
 

@@ -162,19 +162,53 @@ struct RawAchievement {
     player_percent_unlocked: f64,
 }
 
-fn build_icon_url(steam_id: u32, hash: &str) -> String {
-    if hash.is_empty() {
+/// Normalizes any Steam achievement icon URL to the current `shared.fastly.steamstatic.com/community_assets`
+/// CDN endpoint. Valve no longer mirrors newly added DLC achievement icons onto the legacy
+/// `steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/...` path (which returns 404 for new DLCs).
+pub fn normalize_steam_icon_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
         return String::new();
     }
-    if hash.starts_with("https://") {
-        return hash.to_string();
+    let https = if trimmed.starts_with("http://") {
+        trimmed.replacen("http://", "https://", 1)
+    } else {
+        trimmed.to_string()
+    };
+    if let Some(rest) = https
+        .strip_prefix("https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/")
+        .or_else(|| {
+            https.strip_prefix(
+                "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/",
+            )
+        })
+        .or_else(|| {
+            https.strip_prefix(
+                "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/",
+            )
+        })
+        .or_else(|| {
+            https.strip_prefix("https://media.steampowered.com/steamcommunity/public/images/apps/")
+        })
+    {
+        return format!(
+            "https://shared.fastly.steamstatic.com/community_assets/images/apps/{rest}"
+        );
     }
-    if hash.starts_with("http://") {
-        return hash.replacen("http://", "https://", 1);
+    https
+}
+
+fn build_icon_url(steam_id: u32, hash: &str) -> String {
+    let trimmed = hash.trim();
+    if trimmed.is_empty() {
+        return String::new();
     }
-    return format!(
-        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{steam_id}/{hash}"
-    );
+    if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
+        return normalize_steam_icon_url(trimmed);
+    }
+    format!(
+        "https://shared.fastly.steamstatic.com/community_assets/images/apps/{steam_id}/{trimmed}"
+    )
 }
 
 fn extract_xml_value(line: &str, tag: &str) -> Option<String> {
@@ -682,5 +716,20 @@ mod tests {
         assert!(!is_valid_game_name("Unknown Game (AppID 1245620)"));
         assert!(is_valid_game_name("ELDEN RING"));
         assert!(is_valid_game_name("Jurassic World Evolution 3"));
+    }
+
+    #[test]
+    fn normalizes_and_builds_fastly_community_assets_icon_urls() {
+        let built = build_icon_url(2958130, "3800f6ef861ed486fa3d1eafe4cdfea0245de936.jpg");
+        assert_eq!(
+            built,
+            "https://shared.fastly.steamstatic.com/community_assets/images/apps/2958130/3800f6ef861ed486fa3d1eafe4cdfea0245de936.jpg"
+        );
+
+        let legacy = "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/2958130/3800f6ef861ed486fa3d1eafe4cdfea0245de936.jpg";
+        assert_eq!(
+            normalize_steam_icon_url(legacy),
+            "https://shared.fastly.steamstatic.com/community_assets/images/apps/2958130/3800f6ef861ed486fa3d1eafe4cdfea0245de936.jpg"
+        );
     }
 }

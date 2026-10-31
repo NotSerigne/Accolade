@@ -410,18 +410,37 @@
 		const stateMap = new Map<string, Achievement>(
 			achievements.map((a) => [a.key.trim().toLowerCase(), a])
 		);
+		const seenKeys = new Set<string>();
 
-		return schema.map((s: Achievement) => {
-			const live = stateMap.get(s.key.trim().toLowerCase());
+		const fromSchema: Achievement[] = schema.map((s: Achievement) => {
+			const normKey = s.key.trim().toLowerCase();
+			seenKeys.add(normKey);
+			const live = stateMap.get(normKey);
 			return {
 				...s,
+				name: live?.name || s.name || s.key,
 				unlocked: live?.unlocked ?? s.unlocked ?? false,
-				unlocked_time: live?.unlocked_time !== undefined ? live.unlocked_time : (s.unlocked_time ?? null),
+				unlocked_time:
+					live?.unlocked_time !== undefined ? live.unlocked_time : (s.unlocked_time ?? null),
 				rarity: live?.rarity || s.rarity || '',
 				completionpercentage: live?.completionpercentage || s.completionpercentage || '',
-				desc: live?.desc || s.desc || ''
+				desc: live?.desc || s.desc || '',
+				icon: live?.icon || s.icon || '',
+				icon_gray: live?.icon_gray || s.icon_gray || '',
+				progress: live?.progress ?? s.progress ?? null,
+				max_progress: live?.max_progress ?? s.max_progress ?? null
 			};
 		});
+
+		for (const live of achievements) {
+			const normKey = live.key.trim().toLowerCase();
+			if (!seenKeys.has(normKey)) {
+				seenKeys.add(normKey);
+				fromSchema.push(live);
+			}
+		}
+
+		return fromSchema;
 	});
 
 	let globalAchievementHighlight = $derived($searchQuery.trim().toLowerCase());
