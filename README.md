@@ -14,7 +14,7 @@
 
   _A Windows desktop app that tracks, enriches, and displays your achievements from emulated, cracked, and legitimate games — with real-time overlay notifications, live in-game HUD, playtime tracking, and a modern customizable UI._
 
-  [Download](#-download) • [What's New in v1.2](#-whats-new-in-v12) • [Features](#-features) • [Supported Sources](#-supported-emulators--sources) • [Setup](#-setup) • [Contributing](#-contributing)
+  [Download](#-download) • [What's New in v1.3](#-whats-new-in-v13) • [Features](#-features) • [Supported Sources](#-supported-emulators--sources) • [Setup](#-setup) • [Contributing](#-contributing)
 
 </div>
 
@@ -28,7 +28,18 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 
 ---
 
-## 🚀 What's New in v1.2
+## 🚀 What's New in v1.3
+
+- ✨ **Refined Glassmorphic UI & Full Light/Dark Themes** — Apple-inspired translucent surfaces (`backdrop-filter`), specular borders, crisp inline SVG icons, `Inter` / `SF Pro` typography with `tabular-nums`, and seamless Light & Dark theme support.
+- 🧭 **Compact Sidebar Dock & Hover Profile Popover** — Streamlined 76px sidebar with squircle game icons, dedicated Library shortcut, and a compact user dock that reveals a floating glassmorphic profile & XP card on hover/focus without overlapping page content.
+- 🔍 **Spotlight Search & Full Keyboard Navigation** — Enhanced `Ctrl+K` topbar search with keyboard arrow navigation (`↑` / `↓` / `Enter` / `Escape`), quick section pills in Settings, clickable library cards/rows, and accessible focus states across the app.
+- 🎨 **Rust-Powered Dynamic Game Theme Extraction** — Selecting any game as your theme extracts its vibrant dominant banner color directly in Rust (bypassing CDN CORS limits) and applies a synchronized accent palette and ambient backdrop across all views.
+- ⏳ **Accurate Live HowLongToBeat (HLTB) Sync** — Rebuilt HLTB integration combining dynamic endpoint discovery, live Next.js `__NEXT_DATA__` game page parsing, and web-search fallback for accurate **Main Story**, **Main + Sides**, and **100% Completionist** times.
+- 📌 **Redesigned In-Game HUD Tracker (`Alt+O`)** — Sleek glassmorphic achievement tracker overlay with expanded `480×460` viewport sizing so up to 4 tracked achievements, rarity badges, and progress bars display cleanly without clipping.
+- ⚡ **Performance & Startup Optimizations** — Faster dev startup and Vite/WebView2 connection (`127.0.0.1`, pre-bundled Tauri deps, route warmup), O(1) indexed game lookups, debounced search filtering, and shared HTTP client pooling in Rust.
+
+<details>
+<summary>Previous release highlights (v1.2)</summary>
 
 - 🕹️ **Live Process & Running Game Detection** — Automatically detects which game you are currently playing (both legitimate Steam installs and emulated/cracked games via `steam_appid.txt` + `steam_api(64).dll`, `OnlineFix.ini`, `steam_emu.ini`, `ColdClientLoader.ini`, `cream_api.ini`, `SmartSteamEmu.ini`, `ALI213.ini`) and displays a live **"Now Playing"** card in the sidebar.
 - ⏱️ **Automatic & Manual Playtime Tracker** — Tracks your playtime in real time while a game is running, merges it with Steam playtime, displays your most-played games on the Stats page, and includes an inline manual playtime editor (`Hours` / `Minutes`) per game.
@@ -41,6 +52,8 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 - 🏆 **Gamerscore (XP), Profile Level & Activity Heatmap** — Dynamic XP points based on Steam global rarity (up to **200 XP** for Mythic `< 0.1%` + **250 XP** Platinum bonus), profile level progression bar in the sidebar, and a 52-week GitHub-style unlock heatmap on the Stats page.
 - 💾 **One-Click Full Backup & Restore (`.zip`)** — Export and restore your entire Accolade configuration, custom sounds, caches, and all local emulator achievement folders in a single `.zip` archive.
 - ⚡ **Smart Steam & SteamGridDB Sync Engine** — Built-in sync mutex, rate-limited `appdetails` requests with exponential backoff on HTTP `403`/`429`, persistent disk caching (`steam_appdetails_cache.json`), and automatic **SteamGridDB Plan B** name resolution.
+
+</details>
 
 ---
 
@@ -84,7 +97,7 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 <summary>More screenshots</summary>
 <img src="docs/screenshots/theme.png" width="400">
 <img src="docs/screenshots/language.png" width="400">
-<img src="docs/screenshots/screenshot.png" width="400">
+<img src="docs/screenshots/screenshots.png" width="400">
 </details>
 
 ---
