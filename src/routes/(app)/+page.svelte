@@ -15,17 +15,20 @@
 	.home-main {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 320px;
-		gap: 8px;
+		gap: 10px;
 		overflow: hidden;
 		height: 100%;
 	}
 
 	.main-slot {
 		background: var(--bg-panel);
-		border-radius: 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: 14px;
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		min-width: 0;
+		box-shadow: var(--shadow-card);
 	}
 </style>

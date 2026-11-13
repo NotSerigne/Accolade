@@ -648,13 +648,15 @@ pub(crate) async fn sync_steam_metadata(
 
             let mut all_owned = Vec::new();
 
-            // 1. Owned games
-            if let Ok(owned) = fetch_owned_games(&effective_api_key, s_id, &language).await {
+            // 1 & 2. Owned games + Recently played (fetched concurrently)
+            let (owned_res, recent_res) = futures::join!(
+                fetch_owned_games(&effective_api_key, s_id, &language),
+                fetch_recently_played_games(&effective_api_key, s_id)
+            );
+            if let Ok(owned) = owned_res {
                 all_owned.extend(owned);
             }
-
-            // 2. Recently played (covers some shared/free games)
-            if let Ok(recent) = fetch_recently_played_games(&effective_api_key, s_id).await {
+            if let Ok(recent) = recent_res {
                 for rg in recent {
                     if !all_owned.iter().any(|og| og.appid == rg.appid) {
                         all_owned.push(rg);

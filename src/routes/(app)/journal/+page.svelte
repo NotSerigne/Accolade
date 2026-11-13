@@ -250,6 +250,8 @@
 								src={getGameIcon(item.game)}
 								alt={item.game.name}
 								class="game-icon"
+								loading="lazy"
+								decoding="async"
 								onerror={(e) => {
 									const t = e.target as HTMLImageElement;
 									if (item.game.steam_id && !t.src.includes('header.jpg')) {
@@ -265,13 +267,31 @@
 											alt={ach.name}
 											class="achievement-icon"
 											class:is-locked={!ach.unlocked}
+											loading="lazy"
+											decoding="async"
 											onerror={(e) => {
 												const t = e.target as HTMLImageElement;
 												t.style.display = 'none';
 											}}
 										/>
 									{:else}
-										<div class="achievement-icon achievement-icon-placeholder">🏆</div>
+										<div class="achievement-icon achievement-icon-placeholder">
+											<svg
+												width="18"
+												height="18"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
+												<path
+													d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+												/>
+											</svg>
+										</div>
 									{/if}
 									<div class="text">
 										<span class="name">{ach.name || ach.key}</span>
@@ -345,6 +365,8 @@
 								src={getGameIcon(event.game)}
 								alt={event.game.name}
 								class="game-icon"
+								loading="lazy"
+								decoding="async"
 								onerror={(e) => {
 									const t = e.target as HTMLImageElement;
 									if (event.game.steam_id && !t.src.includes('header.jpg')) {
@@ -360,13 +382,31 @@
 												src={event.achievement.icon}
 												alt={event.achievement.name}
 												class="achievement-icon"
+												loading="lazy"
+												decoding="async"
 												onerror={(e) => {
 													const t = e.target as HTMLImageElement;
 													t.style.display = 'none';
 												}}
 											/>
 										{:else}
-											<div class="achievement-icon achievement-icon-placeholder">🏆</div>
+											<div class="achievement-icon achievement-icon-placeholder">
+												<svg
+													width="18"
+													height="18"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<path
+														d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+													/>
+												</svg>
+											</div>
 										{/if}
 										<div class="text">
 											<span class="name">{event.achievement.name}</span>
@@ -375,7 +415,23 @@
 									</div>
 								{:else}
 									<div class="completion-row">
-										<div class="trophy-icon">🏆</div>
+										<div class="trophy-icon">
+											<svg
+												width="20"
+												height="20"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
+												<path
+													d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+												/>
+											</svg>
+										</div>
 										<div class="text">
 											<span class="name">{$i18n.t('journal.completed')}</span>
 											<span class="game">{event.game.name}</span>
@@ -495,6 +551,7 @@
 	.day-header .count {
 		font-size: 11px;
 		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.events-list {
@@ -556,22 +613,23 @@
 		opacity: 0.85;
 	}
 	.achievement-icon-placeholder {
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+		color: var(--accent, #c8a96e);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 18px;
 		flex-shrink: 0;
 	}
 	.trophy-icon {
 		width: 40px;
 		height: 40px;
 		border-radius: 8px;
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+		color: var(--accent, #c8a96e);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 20px;
+		flex-shrink: 0;
 	}
 
 	.text {
@@ -609,7 +667,7 @@
 	.pin-progress-track {
 		flex: 1;
 		height: 4px;
-		background: rgba(255, 255, 255, 0.08);
+		background: var(--surface-3);
 		border-radius: 99px;
 		overflow: hidden;
 	}
@@ -623,6 +681,7 @@
 		font-weight: 700;
 		color: var(--accent, #c8a96e);
 		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.event-meta {
@@ -639,14 +698,16 @@
 	.time {
 		font-size: 12px;
 		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 	.rarity {
 		font-size: 11px;
 		font-weight: 700;
 		color: var(--accent, #c8a96e);
-		background: rgba(200, 169, 110, 0.05);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 10%, transparent);
 		padding: 1px 6px;
 		border-radius: 4px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.unpin-btn {
@@ -684,7 +745,7 @@
 		background: transparent;
 	}
 	.scrollable::-webkit-scrollbar-thumb {
-		background: rgba(255, 255, 255, 0.1);
+		background: var(--border-soft);
 		border-radius: 3px;
 	}
 </style>

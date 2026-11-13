@@ -25,6 +25,12 @@ pub(crate) struct CachedAppDetails {
     #[serde(default)]
     pub achievements: Vec<Achievement>,
     pub fetched_at: u64,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub custom_icon_copied: bool,
+    #[serde(default)]
+    pub steamgrid_icon_url: String,
 }
 
 pub(crate) fn appdetails_cache_path(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -190,13 +196,10 @@ pub(crate) async fn refresh_game_achievements_schema(
     let mut cache = load_appdetails_cache(&cache_path);
 
     if !api_key.trim().is_empty() {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(12))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        let client = crate::achievements::steam::steam_http_client();
 
         if let Ok(meta) =
-            fetch_steam_metadata_with_client(&client, steam_id, &api_key, &language, false).await
+            fetch_steam_metadata_with_client(client, steam_id, &api_key, &language, false).await
         {
             if !meta.achievements.is_empty() {
                 log::info!(
@@ -206,6 +209,7 @@ pub(crate) async fn refresh_game_achievements_schema(
                 );
                 let entry = cache.entry(steam_id).or_default();
                 entry.achievements = meta.achievements.clone();
+                entry.language = Some(language.clone());
                 entry.fetched_at = now_unix();
                 save_appdetails_cache(&cache_path, &cache);
                 return meta.achievements;
@@ -340,21 +344,31 @@ pub(crate) async fn enrich_games_with_steam(
     let mut appdetails_cache = load_appdetails_cache(&cache_path);
     let mut cache_dirty = false;
 
-    // Limit concurrent Steam metadata tasks to 2 so we never burst-flood Steam endpoints
-    const STEAM_METADATA_CONCURRENCY: usize = 2;
+    // Allow up to 8 concurrent Steam metadata tasks using the shared pooled HTTP client
+    const STEAM_METADATA_CONCURRENCY: usize = 8;
 
-    let client = reqwest::Client::new();
+    let client = crate::achievements::steam::steam_http_client();
     let api_key_str = api_key.to_string();
     let steam_id_str = steam_id.to_string();
     let language_str = language.to_string();
 
-    let jobs: Vec<(u32, SourceType, Vec<Achievement>, bool)> = games
+    let jobs: Vec<(u32, SourceType, Vec<Achievement>, bool, bool)> = games
         .iter()
         .filter_map(|game| {
             let sid = game.steam_id?;
-            let has_cached_name = appdetails_cache
-                .get(&sid)
-                .is_some_and(|c| is_valid_game_name(&c.name));
+            let cached = appdetails_cache.get(&sid);
+            let has_cached_name = cached.is_some_and(|c| is_valid_game_name(&c.name));
+            let lang_matches = cached.is_some_and(|c| {
+                c.language
+                    .as_deref()
+                    .is_some_and(|l| l.eq_ignore_ascii_case(language))
+            });
+            let has_valid_schema = cached.is_some_and(|c| {
+                !c.achievements.is_empty()
+                    && c.achievements.iter().all(|a| a.icon.starts_with("http"))
+            });
+            // Skip GetGameAchievements & appdetails entirely on cache hit matching language & icons
+            let need_metadata = !(has_cached_name && lang_matches && has_valid_schema);
             // Only query `store.steampowered.com/api/appdetails` when we do not yet have
             // a valid cached name on disk!
             let need_appdetails = !has_cached_name;
@@ -362,27 +376,31 @@ pub(crate) async fn enrich_games_with_steam(
                 sid,
                 game.source.clone(),
                 game.achievements.clone(),
+                need_metadata,
                 need_appdetails,
             ))
         })
         .collect();
 
     let updates = stream::iter(jobs.into_iter().map(
-        |(steam_id, source, local_state, need_appdetails)| {
-            let client = client.clone();
+        |(steam_id, source, local_state, need_metadata, need_appdetails)| {
             let api_key = api_key_str.clone();
             let steam_id_inner = steam_id_str.clone();
             let language = language_str.clone();
             async move {
-                let metadata = fetch_steam_metadata_with_client(
-                    &client,
-                    steam_id,
-                    &api_key,
-                    &language,
-                    need_appdetails,
-                )
-                .await
-                .ok();
+                let metadata = if need_metadata {
+                    fetch_steam_metadata_with_client(
+                        client,
+                        steam_id,
+                        &api_key,
+                        &language,
+                        need_appdetails,
+                    )
+                    .await
+                    .ok()
+                } else {
+                    None
+                };
 
                 let player_achievements_res = if !steam_id_inner.is_empty() {
                     Some(
@@ -564,8 +582,35 @@ pub(crate) async fn enrich_games_with_steam(
                 cache_entry.achievements = meta.achievements.clone();
                 entry_dirty = true;
             }
-        } else if is_valid_game_name(&cache_entry.name) && !is_valid_game_name(&game.name) {
-            game.name = cache_entry.name.clone();
+            if is_valid_game_name(&cache_entry.name)
+                && cache_entry
+                    .language
+                    .as_deref()
+                    .is_none_or(|l| !l.eq_ignore_ascii_case(language))
+            {
+                cache_entry.language = Some(language.to_string());
+                entry_dirty = true;
+            }
+        } else if is_valid_game_name(&cache_entry.name) {
+            if !is_valid_game_name(&game.name) {
+                game.name = cache_entry.name.clone();
+            }
+            if game.genres.is_empty() && !cache_entry.genres.is_empty() {
+                game.genres = cache_entry.genres.clone();
+            }
+            if !cache_entry.header_image_url.is_empty() {
+                game.header_image_url = cache_entry.header_image_url.clone();
+            }
+            if game.game_icon.is_empty() && !cache_entry.game_icon_url.is_empty() {
+                game.game_icon = cache_entry.game_icon_url.clone();
+            }
+            if game.background_image_url.is_empty() && !cache_entry.background_image_url.is_empty()
+            {
+                game.background_image_url = cache_entry.background_image_url.clone();
+            }
+            if game.steamgrid_icon_url.is_empty() && !cache_entry.steamgrid_icon_url.is_empty() {
+                game.steamgrid_icon_url = cache_entry.steamgrid_icon_url.clone();
+            }
         }
 
         if game.header_image_url.is_empty() {
@@ -634,6 +679,31 @@ async fn fetch_sgdb_icon(
     }
 }
 
+fn local_file_to_asset_url(path: &Path) -> String {
+    let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let raw = canonical.to_string_lossy();
+    let mut encoded = String::with_capacity(raw.len() + 16);
+    for b in raw.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*b as char);
+            }
+            _ => {
+                encoded.push('%');
+                encoded.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        format!("http://asset.localhost/{}", encoded)
+    }
+    #[cfg(not(windows))]
+    {
+        format!("asset://localhost/{}", encoded)
+    }
+}
+
 pub async fn apply_steamgriddb_icons(
     games: &mut [Game],
     api_key: &str,
@@ -645,35 +715,83 @@ pub async fn apply_steamgriddb_icons(
 
     const SGDB_CONCURRENCY: usize = 6;
 
-    let client = reqwest::Client::new();
+    let client = crate::achievements::steam::steam_http_client();
     let api_key = api_key.trim().to_string();
 
-    let steam_games: Vec<(u32, usize, bool, bool)> = games
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, game)| {
-            let sid = game.steam_id?;
-            let need_icon = game.steamgrid_icon_url.trim().is_empty();
-            let need_name = !is_valid_game_name(&game.name);
-            if need_icon || need_name {
-                Some((sid, idx, need_icon, need_name))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let cache_path = appdetails_cache_path(app_handle);
+    let mut appdetails_cache = load_appdetails_cache(&cache_path);
+    let mut cache_dirty = false;
 
-    let updates = stream::iter(steam_games.into_iter().map(
+    let custom_icons_dir = app_handle
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("custom_icons"));
+
+    static SGDB_MISSING_CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<String>>,
+    > = std::sync::OnceLock::new();
+    let sgdb_missing_cache = SGDB_MISSING_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    let missing_snapshot: std::collections::HashSet<String> = sgdb_missing_cache
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+
+    let mut targets: Vec<(u32, usize, bool, bool)> = Vec::new();
+    for (idx, game) in games.iter_mut().enumerate() {
+        let mut has_local_custom_icon = false;
+        if let Some(ref dir) = custom_icons_dir {
+            let custom_icon_path = dir.join(format!("{}.png", game.id));
+            if custom_icon_path.is_file() {
+                if game.steamgrid_icon_url.trim().is_empty() {
+                    game.steamgrid_icon_url = local_file_to_asset_url(&custom_icon_path);
+                }
+                has_local_custom_icon = true;
+                if let Some(sid) = game.steam_id {
+                    if let Some(entry) = appdetails_cache.get_mut(&sid) {
+                        if !entry.custom_icon_copied {
+                            entry.custom_icon_copied = true;
+                            cache_dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(sid) = game.steam_id else {
+            continue;
+        };
+
+        if !has_local_custom_icon && game.steamgrid_icon_url.trim().is_empty() {
+            if let Some(cached_url) = appdetails_cache
+                .get(&sid)
+                .map(|c| c.steamgrid_icon_url.trim())
+                .filter(|u| !u.is_empty())
+            {
+                game.steamgrid_icon_url = cached_url.to_string();
+            }
+        }
+
+        let need_icon = !has_local_custom_icon
+            && game.steamgrid_icon_url.trim().is_empty()
+            && !missing_snapshot.contains(&game.id);
+        let need_name = !is_valid_game_name(&game.name);
+        if need_icon || need_name {
+            targets.push((sid, idx, need_icon, need_name));
+        }
+    }
+
+    let updates = stream::iter(targets.into_iter().map(
         |(steam_id, index, need_icon, need_name)| {
-            let client = client.clone();
             let api_key = api_key.clone();
             async move {
                 let icon_url = if need_icon {
-                    let official = fetch_sgdb_icon(&client, steam_id, &api_key, "official").await;
+                    let official = fetch_sgdb_icon(client, steam_id, &api_key, "official").await;
                     if official.is_some() {
                         official
                     } else {
-                        fetch_sgdb_icon(&client, steam_id, &api_key, "").await
+                        fetch_sgdb_icon(client, steam_id, &api_key, "").await
                     }
                 } else {
                     None
@@ -681,12 +799,12 @@ pub async fn apply_steamgriddb_icons(
 
                 // Plan B: fetch game title from SteamGridDB if Steam appdetails failed/rate-limited
                 let sgdb_name = if need_name {
-                    fetch_sgdb_game_name(&client, steam_id, &api_key).await
+                    fetch_sgdb_game_name(client, steam_id, &api_key).await
                 } else {
                     None
                 };
 
-                (index, steam_id, icon_url, sgdb_name)
+                (index, steam_id, need_icon, icon_url, sgdb_name)
             }
         },
     ))
@@ -694,13 +812,19 @@ pub async fn apply_steamgriddb_icons(
     .collect::<Vec<_>>()
     .await;
 
-    let cache_path = appdetails_cache_path(app_handle);
-    let mut appdetails_cache = load_appdetails_cache(&cache_path);
-    let mut cache_dirty = false;
-
-    for (index, steam_id, icon_url, sgdb_name) in updates {
+    for (index, steam_id, queried_icon, icon_url, sgdb_name) in updates {
         if let Some(url) = icon_url {
-            games[index].steamgrid_icon_url = url;
+            games[index].steamgrid_icon_url = url.clone();
+            let entry = appdetails_cache.entry(steam_id).or_default();
+            if entry.steamgrid_icon_url != url {
+                entry.steamgrid_icon_url = url;
+                entry.fetched_at = now_unix();
+                cache_dirty = true;
+            }
+        } else if queried_icon {
+            if let Ok(mut missing) = sgdb_missing_cache.lock() {
+                missing.insert(games[index].id.clone());
+            }
         }
         if let Some(name) = sgdb_name {
             if !is_valid_game_name(&games[index].name) {
@@ -954,7 +1078,7 @@ pub fn run() {
             let sgdb_key = std::env::var("STEAMGRIDDB_API_KEY").unwrap_or_default();
 
             let overlay_url = if cfg!(debug_assertions) && !is_minimized {
-                "http://localhost:5173/overlay"
+                "http://127.0.0.1:5173/overlay"
             } else {
                 "/overlay"
             };
@@ -967,7 +1091,7 @@ pub fn run() {
             // Must match the main window's `additionalBrowserArgs` (shared WebView2 environment)
             .additional_browser_args(overlay::WEBVIEW_BROWSER_ARGS)
             .title("")
-            .inner_size(460.0, 260.0)
+            .inner_size(480.0, 460.0)
             .position(30.0, 30.0)
             .transparent(true)
             .decorations(false)
@@ -1016,14 +1140,6 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-
-            #[cfg(debug_assertions)]
-            {
-                if !is_minimized {
-                    let overlay_win = app.get_webview_window("achievement-overlay").unwrap();
-                    overlay_win.open_devtools();
-                }
-            }
 
             app.manage(AppState {
                 games: Mutex::new(Vec::new()),

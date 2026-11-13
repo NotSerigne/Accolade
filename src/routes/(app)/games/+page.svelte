@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
-	import { games, loadGames } from '$lib/stores/Games.js';
-	import { selectedGameId, toggleGameFavorite } from '$lib/stores/selectedGame.js';
+	import { games, loadGames, getGameIconUrl, getGameCompletionPct } from '$lib/stores/Games.js';
+	import { applyGameTheme, selectedGameId, toggleGameFavorite } from '$lib/stores/selectedGame.js';
+	import { settings } from '$lib/stores/settings.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { gameFilters } from '$lib/stores/uiPreferences.js';
 	import { goto } from '$app/navigation';
@@ -24,13 +25,6 @@
 		return Array.from(tags).sort();
 	});
 
-	function getCompletion(game: Game): number {
-		const total = game.achievements_total || game.achievements?.length || 0;
-		if (total === 0) return 0;
-		const unlocked = game.achievements?.filter((a) => a.unlocked).length ?? 0;
-		return Math.round((unlocked / total) * 100);
-	}
-
 	function getExeName(game: Game): string {
 		if (!game.path_buf) return '';
 		const parts = game.path_buf.split(/[\\/]/);
@@ -39,26 +33,45 @@
 
 	function formatDate(timestamp: number | null): string {
 		if (!timestamp) return '---';
-		return new Date(timestamp * 1000).toLocaleDateString(undefined, {
+		return new Date(timestamp * 1000).toLocaleDateString($i18n.locale, {
 			year: 'numeric',
 			month: 'short',
 			day: 'numeric'
 		});
 	}
 
+	type GameStats = {
+		completionPct: number;
+		lastUnlockedTs: number;
+	};
+
+	let gameStatsMap = $derived.by(() => {
+		const map = new Map<string, GameStats>();
+		for (const g of $games) {
+			const achs = g.achievements ?? [];
+			let lastUnlockedTs = 0;
+			for (const a of achs) {
+				const t = a.unlocked_time ?? 0;
+				if (t > lastUnlockedTs) lastUnlockedTs = t;
+			}
+			map.set(g.id, {
+				completionPct: getGameCompletionPct(g),
+				lastUnlockedTs
+			});
+		}
+		return map;
+	});
+
 	let groupedGames = $derived.by(() => {
 		const groups: { label: string; games: Game[] }[] = [];
 		const map: Record<string, Game[]> = {};
 
 		filteredGames.forEach((game) => {
-			const lastUnlocked = Math.max(
-				...(game.achievements ?? []).map((x) => x.unlocked_time ?? 0),
-				0
-			);
+			const lastUnlocked = gameStatsMap.get(game.id)?.lastUnlockedTs ?? 0;
 			const date = lastUnlocked > 0 ? new Date(lastUnlocked * 1000) : null;
 			const label = date
-				? date.toLocaleDateString(undefined, { year: 'numeric', month: 'long' })
-				: 'Never played';
+				? date.toLocaleDateString($i18n.locale, { month: 'long', year: 'numeric' })
+				: $i18n.t('games.neverPlayed');
 
 			if (!map[label]) {
 				map[label] = [];
@@ -113,12 +126,14 @@
 			if (sortBy === 'name') {
 				cmp = a.name.localeCompare(b.name);
 			} else if (sortBy === 'completion') {
-				cmp = getCompletion(a) - getCompletion(b);
+				cmp =
+					(gameStatsMap.get(a.id)?.completionPct ?? 0) -
+					(gameStatsMap.get(b.id)?.completionPct ?? 0);
 			} else if (sortBy === 'exe_name') {
 				cmp = getExeName(a).localeCompare(getExeName(b));
 			} else if (sortBy === 'date') {
-				const lastA = Math.max(...(a.achievements ?? []).map((x) => x.unlocked_time ?? 0), 0);
-				const lastB = Math.max(...(b.achievements ?? []).map((x) => x.unlocked_time ?? 0), 0);
+				const lastA = gameStatsMap.get(a.id)?.lastUnlockedTs ?? 0;
+				const lastB = gameStatsMap.get(b.id)?.lastUnlockedTs ?? 0;
 				cmp = lastA - lastB;
 			}
 
@@ -129,10 +144,6 @@
 
 		return result;
 	});
-
-	function selectGameTheme(gameId: string) {
-		selectedGameId.set(gameId);
-	}
 
 	function openGame(gameId: string) {
 		void goto(resolve('/(app)/games/[id]', { id: gameId }));
@@ -205,7 +216,11 @@
 						<option value="completion">{$i18n.t('games.sort.completion')}</option>
 						<option value="exe_name">{$i18n.t('games.sort.exe')}</option>
 					</select>
-					<button class="sort-order-btn" onclick={toggleSortOrder} title={$i18n.t('games.sort.changeOrder')}>
+					<button
+						class="sort-order-btn"
+						onclick={toggleSortOrder}
+						title={$i18n.t('games.sort.changeOrder')}
+					>
 						{$gameFilters.sortOrder === 'asc' ? '↑' : '↓'}
 					</button>
 				</div>
@@ -231,7 +246,22 @@
 				onclick={() => ($gameFilters.displayMode = 'grid')}
 				title={$i18n.t('games.view.grid')}
 			>
-				⊞
+				<svg
+					width="15"
+					height="15"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<rect x="3" y="3" width="7" height="7" rx="1" />
+					<rect x="14" y="3" width="7" height="7" rx="1" />
+					<rect x="3" y="14" width="7" height="7" rx="1" />
+					<rect x="14" y="14" width="7" height="7" rx="1" />
+				</svg>
 			</button>
 			<button
 				class="view-btn"
@@ -239,7 +269,24 @@
 				onclick={() => ($gameFilters.displayMode = 'list')}
 				title={$i18n.t('games.view.list')}
 			>
-				≡
+				<svg
+					width="15"
+					height="15"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<line x1="8" y1="6" x2="21" y2="6" />
+					<line x1="8" y1="12" x2="21" y2="12" />
+					<line x1="8" y1="18" x2="21" y2="18" />
+					<line x1="3" y1="6" x2="3.01" y2="6" />
+					<line x1="3" y1="12" x2="3.01" y2="12" />
+					<line x1="3" y1="18" x2="3.01" y2="18" />
+				</svg>
 			</button>
 			<button
 				class="view-btn"
@@ -247,7 +294,20 @@
 				onclick={() => ($gameFilters.displayMode = 'timeline')}
 				title={$i18n.t('games.view.timeline')}
 			>
-				◆
+				<svg
+					width="15"
+					height="15"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="9" />
+					<polyline points="12 7 12 12 15 14" />
+				</svg>
 			</button>
 		</div>
 	</div>
@@ -259,18 +319,34 @@
 	{#if $gameFilters.displayMode === 'grid'}
 		<div class="games-grid">
 			{#each filteredGames as game (game.id)}
+				{@const pct = gameStatsMap.get(game.id)?.completionPct ?? 0}
 				<div class="game-card-container">
-					<div class="game-card" class:selected={$selectedGameId === game.id}>
+					<div
+						class="game-card"
+						class:selected={$selectedGameId === game.id}
+						role="button"
+						tabindex="0"
+						onclick={() => openGame(game.id)}
+						onkeydown={(e) => {
+							if (e.target !== e.currentTarget) return;
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								openGame(game.id);
+							}
+						}}
+					>
 						<div class="card-image">
 							{#if game.header_image_url}
-								<img src={game.header_image_url} alt={game.name} />
+								<img src={game.header_image_url} alt={game.name} loading="lazy" decoding="async" />
 							{:else if game.steam_id}
 								<img
 									src="https://cdn.cloudflare.steamstatic.com/steam/apps/{game.steam_id}/header.jpg"
 									alt={game.name}
+									loading="lazy"
+									decoding="async"
 								/>
 							{:else}
-								<div class="no-image">No image</div>
+								<div class="no-image">{$i18n.t('games.noImage')}</div>
 							{/if}
 						</div>
 						<div class="card-content">
@@ -279,25 +355,45 @@
 								<div class="progress-bar">
 									<div
 										class="progress-fill"
-										style:width={getCompletion(game) + '%'}
-										style:background={getCompletion(game) === 100
-											? 'var(--completed)'
-											: 'var(--accent)'}
+										style:width={pct + '%'}
+										style:background={pct === 100 ? 'var(--completed)' : 'var(--accent)'}
 									></div>
 								</div>
 								<span
 									class="progress-text"
-									style:color={getCompletion(game) === 100 ? 'var(--completed)' : 'var(--accent)'}
-									>{getCompletion(game)}%</span
+									style:color={pct === 100 ? 'var(--completed)' : 'var(--accent)'}>{pct}%</span
 								>
 							</div>
 							<div class="card-actions">
 								<button
 									class="action-btn theme-btn"
-									onclick={() => selectGameTheme(game.id)}
-									title="Use as theme"
+									class:active={$settings.dynamicTheme && $selectedGameId === game.id}
+									onclick={(e) => {
+										e.stopPropagation();
+										applyGameTheme(game.id);
+									}}
+									title={$i18n.t('games.action.useAsTheme')}
+									aria-label={$i18n.t('games.action.useAsTheme')}
 								>
-									🎨
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+										<circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+										<circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+										<circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+										<path
+											d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"
+										/>
+									</svg>
 								</button>
 								<button
 									class="action-btn fav-btn"
@@ -306,16 +402,52 @@
 										e.stopPropagation();
 										toggleGameFavorite(game.id);
 									}}
-									title="Toggle favorite"
+									title={$i18n.t(
+										game.is_favorite ? 'games.action.removeFavorite' : 'games.action.addFavorite'
+									)}
+									aria-label={$i18n.t(
+										game.is_favorite ? 'games.action.removeFavorite' : 'games.action.addFavorite'
+									)}
 								>
-									{game.is_favorite ? '♥️' : '♡'}
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill={game.is_favorite ? 'currentColor' : 'none'}
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+										/>
+									</svg>
 								</button>
 								<button
 									class="action-btn open-btn"
-									onclick={() => openGame(game.id)}
-									title="Open game"
+									onclick={(e) => {
+										e.stopPropagation();
+										openGame(game.id);
+									}}
+									title={$i18n.t('games.action.openGame')}
+									aria-label={$i18n.t('games.action.openGame')}
 								>
-									→
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<line x1="5" y1="12" x2="19" y2="12" />
+										<polyline points="12 5 19 12 12 19" />
+									</svg>
 								</button>
 							</div>
 						</div>
@@ -334,9 +466,31 @@
 				<span class="col-actions"></span>
 			</div>
 			{#each filteredGames as game (game.id)}
-				<div class="list-item" class:selected={$selectedGameId === game.id}>
+				{@const stats = gameStatsMap.get(game.id)}
+				{@const pct = stats?.completionPct ?? 0}
+				{@const lastTs = stats?.lastUnlockedTs ?? 0}
+				<div
+					class="list-item"
+					class:selected={$selectedGameId === game.id}
+					role="button"
+					tabindex="0"
+					onclick={() => openGame(game.id)}
+					onkeydown={(e) => {
+						if (e.target !== e.currentTarget) return;
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							openGame(game.id);
+						}
+					}}
+				>
 					<div class="col-cover">
-						<img src={game.game_icon} alt={game.name} class="list-icon" />
+						<img
+							src={getGameIconUrl(game)}
+							alt={game.name}
+							class="list-icon"
+							loading="lazy"
+							decoding="async"
+						/>
 					</div>
 					<div class="col-name">
 						<h3 class="list-title">{game.name}</h3>
@@ -349,32 +503,50 @@
 							<div class="progress-bar">
 								<div
 									class="progress-fill"
-									style:width={getCompletion(game) + '%'}
-									style:background={getCompletion(game) === 100
-										? 'var(--completed)'
-										: 'var(--accent)'}
+									style:width={pct + '%'}
+									style:background={pct === 100 ? 'var(--completed)' : 'var(--accent)'}
 								></div>
 							</div>
-							<span style:color={getCompletion(game) === 100 ? 'var(--completed)' : 'inherit'}
-								>{getCompletion(game)}%</span
+							<span
+								class="list-pct"
+								style:color={pct === 100 ? 'var(--completed)' : 'inherit'}>{pct}%</span
 							>
 						</div>
 					</div>
 					<div class="col-date">
-						<span class="date-text"
-							>{formatDate(
-								Math.max(...(game.achievements ?? []).map((x) => x.unlocked_time ?? 0), 0)
-							)}</span
-						>
+						<span class="date-text">{formatDate(lastTs)}</span>
 					</div>
 					<div class="col-actions">
 						<div class="list-actions">
 							<button
 								class="action-btn theme-btn"
-								onclick={() => selectGameTheme(game.id)}
-								title="Use as theme"
+								class:active={$settings.dynamicTheme && $selectedGameId === game.id}
+								onclick={(e) => {
+									e.stopPropagation();
+									applyGameTheme(game.id);
+								}}
+								title={$i18n.t('games.action.useAsTheme')}
+								aria-label={$i18n.t('games.action.useAsTheme')}
 							>
-								🎨
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+									<circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+									<circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+									<circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+									<path
+										d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"
+									/>
+								</svg>
 							</button>
 							<button
 								class="action-btn fav-btn"
@@ -383,16 +555,52 @@
 									e.stopPropagation();
 									toggleGameFavorite(game.id);
 								}}
-								title="Toggle favorite"
+								title={$i18n.t(
+									game.is_favorite ? 'games.action.removeFavorite' : 'games.action.addFavorite'
+								)}
+								aria-label={$i18n.t(
+									game.is_favorite ? 'games.action.removeFavorite' : 'games.action.addFavorite'
+								)}
 							>
-								{game.is_favorite ? '♥️' : '♡'}
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill={game.is_favorite ? 'currentColor' : 'none'}
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path
+										d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+									/>
+								</svg>
 							</button>
 							<button
 								class="action-btn open-btn"
-								onclick={() => openGame(game.id)}
-								title="Open game"
+								onclick={(e) => {
+									e.stopPropagation();
+									openGame(game.id);
+								}}
+								title={$i18n.t('games.action.openGame')}
+								aria-label={$i18n.t('games.action.openGame')}
 							>
-								→
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<line x1="5" y1="12" x2="19" y2="12" />
+									<polyline points="12 5 19 12 12 19" />
+								</svg>
 							</button>
 						</div>
 					</div>
@@ -408,44 +616,81 @@
 					</div>
 					<div class="timeline-items">
 						{#each group.games as game (game.id)}
+							{@const stats = gameStatsMap.get(game.id)}
+							{@const pct = stats?.completionPct ?? 0}
+							{@const lastTs = stats?.lastUnlockedTs ?? 0}
 							<div class="timeline-item" class:selected={$selectedGameId === game.id}>
 								<div class="timeline-dot"></div>
-								<div class="timeline-content">
-									<img src={game.game_icon} alt={game.name} class="timeline-icon" />
+								<div
+									class="timeline-content"
+									role="button"
+									tabindex="0"
+									onclick={() => openGame(game.id)}
+									onkeydown={(e) => {
+										if (e.target !== e.currentTarget) return;
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											openGame(game.id);
+										}
+									}}
+								>
+									<img
+										src={getGameIconUrl(game)}
+										alt={game.name}
+										class="timeline-icon"
+										loading="lazy"
+										decoding="async"
+									/>
 									<div class="timeline-info">
 										<div class="timeline-header">
 											<h3 class="timeline-title">{game.name}</h3>
-											<span class="timeline-date"
-												>{formatDate(
-													Math.max(...(game.achievements ?? []).map((x) => x.unlocked_time ?? 0), 0)
-												)}</span
-											>
+											<span class="timeline-date">{formatDate(lastTs)}</span>
 										</div>
 										<div class="timeline-progress-row">
 											<div class="progress-bar">
 												<div
 													class="progress-fill"
-													style:width={getCompletion(game) + '%'}
-													style:background={getCompletion(game) === 100
-														? 'var(--completed)'
-														: 'var(--accent)'}
+													style:width={pct + '%'}
+													style:background={pct === 100 ? 'var(--completed)' : 'var(--accent)'}
 												></div>
 											</div>
 											<span
 												class="timeline-completion"
-												style:color={getCompletion(game) === 100
-													? 'var(--completed)'
-													: 'var(--accent)'}>{getCompletion(game)}%</span
+												style:color={pct === 100 ? 'var(--completed)' : 'var(--accent)'}
+												>{pct}%</span
 											>
 										</div>
 									</div>
 									<div class="timeline-actions">
 										<button
 											class="action-btn theme-btn"
-											onclick={() => selectGameTheme(game.id)}
-											title="Use as theme"
+											class:active={$settings.dynamicTheme && $selectedGameId === game.id}
+											onclick={(e) => {
+												e.stopPropagation();
+												applyGameTheme(game.id);
+											}}
+											title={$i18n.t('games.action.useAsTheme')}
+											aria-label={$i18n.t('games.action.useAsTheme')}
 										>
-											🎨
+											<svg
+												width="14"
+												height="14"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
+												<circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+												<circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+												<circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+												<circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+												<path
+													d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"
+												/>
+											</svg>
 										</button>
 										<button
 											class="action-btn fav-btn"
@@ -454,16 +699,56 @@
 												e.stopPropagation();
 												toggleGameFavorite(game.id);
 											}}
-											title="Toggle favorite"
+											title={$i18n.t(
+												game.is_favorite
+													? 'games.action.removeFavorite'
+													: 'games.action.addFavorite'
+											)}
+											aria-label={$i18n.t(
+												game.is_favorite
+													? 'games.action.removeFavorite'
+													: 'games.action.addFavorite'
+											)}
 										>
-											{game.is_favorite ? '♥️' : '♡'}
+											<svg
+												width="14"
+												height="14"
+												viewBox="0 0 24 24"
+												fill={game.is_favorite ? 'currentColor' : 'none'}
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
+												<path
+													d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+												/>
+											</svg>
 										</button>
 										<button
 											class="action-btn open-btn"
-											onclick={() => openGame(game.id)}
-											title="Open game"
+											onclick={(e) => {
+												e.stopPropagation();
+												openGame(game.id);
+											}}
+											title={$i18n.t('games.action.openGame')}
+											aria-label={$i18n.t('games.action.openGame')}
 										>
-											→
+											<svg
+												width="14"
+												height="14"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
+												<line x1="5" y1="12" x2="19" y2="12" />
+												<polyline points="12 5 19 12 12 19" />
+											</svg>
 										</button>
 									</div>
 								</div>
@@ -601,8 +886,8 @@
 
 	.auto-group-btn {
 		padding: 8px 14px;
-		background: rgba(200, 169, 110, 0.1);
-		border: 1px solid rgba(200, 169, 110, 0.2);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 		border-radius: 8px;
 		color: var(--accent);
 		font-size: 13px;
@@ -619,10 +904,11 @@
 		font-size: 12px;
 		color: var(--text-muted);
 		margin-bottom: 12px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.auto-group-btn:hover {
-		background: rgba(200, 169, 110, 0.2);
+		background: color-mix(in srgb, var(--accent) 20%, transparent);
 		border-color: var(--accent);
 		transform: translateY(-1px);
 	}
@@ -642,8 +928,10 @@
 		background: transparent;
 		color: var(--text-secondary);
 		cursor: pointer;
-		border-radius: 4px;
-		font-size: 16px;
+		border-radius: 7px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		transition: all 0.2s;
 	}
 
@@ -659,10 +947,14 @@
 		overflow-y: auto;
 		flex: 1;
 		padding: 4px;
+		align-content: start;
+		align-items: start;
 	}
 
 	.game-card-container {
 		display: flex;
+		content-visibility: auto;
+		contain-intrinsic-size: 200px 260px;
 	}
 
 	.game-card {
@@ -674,7 +966,7 @@
 		cursor: pointer;
 		display: flex;
 		flex-direction: column;
-		height: 100%;
+		justify-content: space-between;
 		width: 100%;
 		position: relative;
 	}
@@ -684,7 +976,7 @@
 		border-color: var(--accent);
 		background: var(--surface-2);
 		transform: translateY(-4px);
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		box-shadow: var(--shadow-card, 0 8px 24px rgba(0, 0, 0, 0.2));
 	}
 
 	.card-image {
@@ -760,6 +1052,7 @@
 		font-size: 13px;
 		min-width: 35px;
 		text-align: right;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.card-actions {
@@ -787,6 +1080,12 @@
 		background: var(--surface-3);
 		color: var(--accent);
 		border-color: var(--accent);
+	}
+
+	.action-btn.theme-btn.active {
+		color: var(--accent);
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
 	}
 
 	.action-btn.fav-btn.favorited {
@@ -829,6 +1128,8 @@
 		border-bottom: 1px solid var(--border-soft);
 		transition: all 0.2s;
 		cursor: pointer;
+		content-visibility: auto;
+		contain-intrinsic-size: 0 72px;
 	}
 
 	.list-item:hover,
@@ -869,6 +1170,7 @@
 		padding: 0 16px;
 		color: var(--text-secondary);
 		font-size: 13px;
+		font-variant-numeric: tabular-nums;
 	}
 	.col-actions {
 		width: 120px;
@@ -905,6 +1207,7 @@
 		gap: 8px;
 		font-size: 12px;
 		color: var(--text-secondary);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.list-actions {
@@ -967,7 +1270,7 @@
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		border: 1px solid var(--accent-muted);
+		border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 	}
 
 	.timeline-items {
@@ -991,9 +1294,7 @@
 		flex-shrink: 0;
 		margin-top: 24px;
 		z-index: 1;
-		box-shadow:
-			0 0 0 4px var(--bg-main),
-			0 0 12px var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 		position: absolute;
 		left: -20px;
 	}
@@ -1048,6 +1349,7 @@
 	.timeline-date {
 		font-size: 12px;
 		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.timeline-progress-row {
@@ -1061,6 +1363,7 @@
 		font-weight: 600;
 		color: var(--accent);
 		min-width: 40px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.timeline-actions {

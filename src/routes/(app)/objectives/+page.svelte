@@ -98,7 +98,7 @@
 			<div class="easy-grid">
 				{#each easyAchievements as a (a.gameName + ':' + a.key)}
 					<div class="easy-card">
-						<img src={a.icon_gray || a.icon} alt={a.name} />
+						<img src={a.icon_gray || a.icon} alt={a.name} loading="lazy" decoding="async" />
 						<div class="info">
 							<span class="name">{a.name}</span>
 							<span class="game">{a.gameName}</span>
@@ -129,6 +129,8 @@
 							src={getGameIcon(game)}
 							alt={game.name}
 							class="game-thumb"
+							loading="lazy"
+							decoding="async"
 							onerror={(e) => {
 								const t = e.target as HTMLImageElement;
 								if (game.steam_id && !t.src.includes('header.jpg')) {
@@ -268,6 +270,8 @@
 		grid-template-columns: 1fr 1fr;
 		gap: 12px;
 		margin-bottom: 40px;
+		align-content: start;
+		align-items: start;
 	}
 	.easy-card {
 		background: var(--surface-1);

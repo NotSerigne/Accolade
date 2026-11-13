@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { games } from '$lib/stores/Games.js';
+	import { games, getGameIconUrl } from '$lib/stores/Games.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -7,6 +7,7 @@
 
 	let collections = $derived.by(() => {
 		const groups: Record<string, Game[]> = {};
+		const uncategorized = $i18n.t('collections.uncategorized');
 		$games.forEach((game) => {
 			if (game.tags && game.tags.length > 0) {
 				game.tags.forEach((tag) => {
@@ -14,8 +15,8 @@
 					groups[tag].push(game);
 				});
 			} else {
-				if (!groups['Sans collection']) groups['Sans collection'] = [];
-				groups['Sans collection'].push(game);
+				if (!groups[uncategorized]) groups[uncategorized] = [];
+				groups[uncategorized].push(game);
 			}
 		});
 		return groups;
@@ -32,33 +33,6 @@
 		void goto(resolve('/(app)/games/[id]', { id: gameId }));
 	}
 
-	function iconUrl(game: Game): string {
-		if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
-			return game.steamgrid_icon_url;
-		}
-
-		if (game.game_icon && game.game_icon.startsWith('http')) {
-			return game.game_icon;
-		}
-
-		if (
-			game.game_icon &&
-			!game.game_icon.includes('/') &&
-			!game.game_icon.includes('\\') &&
-			game.steam_id
-		) {
-			return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
-		}
-
-		if (game.header_image_url) return game.header_image_url;
-
-		if (game.steam_id) {
-			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
-		}
-
-		return '';
-	}
-
 	function onIconError(name: string, id: string) {
 		return (e: Event) => {
 			const t = e.target as HTMLImageElement;
@@ -70,9 +44,24 @@
 
 <main class="collections-page">
 	<header class="page-header">
-		<h1>📁 {$i18n.t('collections.title')}</h1>
+		<h1 class="page-title-row">
+			<svg
+				width="26"
+				height="26"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+			</svg>
+			{$i18n.t('collections.title')}
+		</h1>
 		<p class="subtitle">
-			{Object.keys(collections).filter((k) => k !== 'Sans collection').length}
+			{Object.keys(collections).filter((k) => k !== $i18n.t('collections.uncategorized')).length}
 			{$i18n.t('collections.count')}
 		</p>
 	</header>
@@ -94,17 +83,31 @@
 							title={game.name}
 						>
 							<div class="game-icon-container">
-								{#if iconUrl(game)}
+								{#if getGameIconUrl(game)}
 									<img
-										src={iconUrl(game)}
+										src={getGameIconUrl(game)}
 										alt={game.name}
+										loading="lazy"
+										decoding="async"
 										onerror={onIconError(game.name, game.id)}
 									/>
 								{:else}
 									<div class="game-fallback">{game.name[0]}</div>
 								{/if}
 								{#if game.is_favorite}
-									<div class="fav-badge">♥️</div>
+									<div class="fav-badge">
+										<svg
+											width="10"
+											height="10"
+											viewBox="0 0 24 24"
+											fill="currentColor"
+											aria-hidden="true"
+										>
+											<path
+												d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+											/>
+										</svg>
+									</div>
 								{/if}
 							</div>
 							<div class="game-info">
@@ -146,9 +149,16 @@
 		color: var(--text-primary);
 	}
 
+	.page-title-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
 	.subtitle {
 		color: var(--text-secondary);
 		font-size: 14px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.collections-list {
@@ -177,12 +187,15 @@
 		font-size: 14px;
 		color: var(--text-muted);
 		font-weight: 400;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.games-row {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 		gap: 16px;
+		align-content: start;
+		align-items: start;
 	}
 
 	.game-item {

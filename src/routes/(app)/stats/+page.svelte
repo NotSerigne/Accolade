@@ -9,7 +9,6 @@
 		type Achievement
 	} from '$lib/stores/Games.js';
 	import { SvelteDate, SvelteMap } from 'svelte/reactivity';
-	import { get } from 'svelte/store';
 	import { i18n } from '$lib/stores/i18n.js';
 
 	let activeTab = $state('overview');
@@ -53,19 +52,18 @@
 	});
 
 	let rarestAchievement = $derived.by(() => {
-		const unlocked = allUnlockedAchievements;
-		if (unlocked.length === 0) return null;
-		return [...unlocked].sort(
+		const withPct = allUnlockedAchievements.filter((a) => {
+			const n = parseFloat(a.completionpercentage);
+			return Number.isFinite(n) && n > 0;
+		});
+		if (withPct.length === 0) return null;
+		return [...withPct].sort(
 			(a, b) => parseFloat(a.completionpercentage) - parseFloat(b.completionpercentage)
 		)[0];
 	});
 
-	let today = new SvelteDate();
-	let oneYearAgo = new SvelteDate();
-	oneYearAgo.setFullYear(today.getFullYear() - 1);
-
-	function formatDate(date: Date | SvelteDate) {
-		return date.toLocaleDateString(get(i18n).locale, { day: 'numeric', month: 'short', year: 'numeric' });
+	function formatDate(date: Date | SvelteDate, locale: string) {
+		return date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
 	}
 
 	let heatmapData = $derived.by(() => {
@@ -516,7 +514,7 @@
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="date-now">{formatDate(today)}</span>
+			<span class="date-now">{formatDate(new Date(), $i18n.locale)}</span>
 		</div>
 	</header>
 
@@ -643,9 +641,9 @@
 						</svg>
 					</div>
 					<div class="card-info">
-						<span class="label">TEMPS DE JEU</span>
+						<span class="label">{$i18n.t('stats.playtime')}</span>
 						<span class="value">{formatPlaytime($totalPlaytimeSeconds)}</span>
-						<span class="sub">Cumulé sur tous les jeux</span>
+						<span class="sub">{$i18n.t('stats.playtimeSub')}</span>
 					</div>
 				</div>
 
@@ -661,7 +659,7 @@
 								<div class="game-info">
 									<span class="name">{game.name}</span>
 									{#if game.progression === 100}
-										<span class="completed-tag">Remastered</span>
+										<span class="completed-tag tabular-nums">100%</span>
 									{/if}
 								</div>
 								<div class="progress-bar-wrap">
@@ -733,13 +731,31 @@
 									<img
 										src={rarestAchievement.icon}
 										alt={rarestAchievement.name}
+										loading="lazy"
+										decoding="async"
 										onerror={(e) => {
 											const t = e.target as HTMLImageElement;
 											t.style.display = 'none';
 										}}
 									/>
 								{:else}
-									<div class="rarity-icon-placeholder">🏆</div>
+									<div class="rarity-icon-placeholder">
+										<svg
+											width="18"
+											height="18"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path
+												d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+											/>
+										</svg>
+									</div>
 								{/if}
 								<div class="info">
 									<span class="name">{rarestAchievement.name}</span>
@@ -1009,17 +1025,32 @@
 					<div class="recent-scroll">
 						{#each allUnlockedAchievements.slice(0, 50) as a (a.gameName + ':' + a.key)}
 							<div class="recent-item">
-								<img src={a.icon} alt={a.name} />
+								<img src={a.icon} alt={a.name} loading="lazy" decoding="async" />
 								<div class="info">
 									<div class="name-row">
 										<span class="name">{a.name}</span>
-										<span class="rarity-badge small">{a.completionpercentage}%</span>
+										{#if a.completionpercentage && Number.isFinite(parseFloat(a.completionpercentage))}
+											<span class="rarity-badge small">{a.completionpercentage}%</span>
+										{/if}
 									</div>
 									<span class="game">{a.gameName}</span>
 									<p class="desc">{a.desc}</p>
 								</div>
 								<span class="time"
-									>🕒 {new Date((a.unlocked_time ?? 0) * 1000).toLocaleDateString($i18n.locale, {
+									><svg
+										width="12"
+										height="12"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<circle cx="12" cy="12" r="10" />
+										<polyline points="12 6 12 12 16 14" />
+									</svg>{new Date((a.unlocked_time ?? 0) * 1000).toLocaleDateString($i18n.locale, {
 										day: 'numeric',
 										month: 'short'
 									})}</span
@@ -1037,10 +1068,13 @@
 	.stats-page {
 		display: flex;
 		flex-direction: column;
-		background: #161616;
-		color: #fff;
+		background: var(--bg-panel);
+		color: var(--text-primary);
 		height: 100%;
+		min-width: 0;
+		max-width: 100%;
 		overflow: hidden;
+		overflow-x: hidden;
 	}
 
 	.stats-header {
@@ -1054,12 +1088,14 @@
 		font-size: 28px;
 		font-weight: 700;
 		margin: 0 0 16px 0;
+		color: var(--text-primary);
 	}
 
 	.tabs {
 		display: flex;
 		gap: 8px;
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		padding: 4px;
 		border-radius: 8px;
 		width: fit-content;
@@ -1068,7 +1104,7 @@
 	.tabs button {
 		background: transparent;
 		border: none;
-		color: rgba(255, 255, 255, 0.5);
+		color: var(--text-muted);
 		padding: 6px 16px;
 		border-radius: 6px;
 		font-size: 13px;
@@ -1076,40 +1112,55 @@
 		transition: all 0.2s;
 	}
 
+	.tabs button:hover {
+		color: var(--text-primary);
+	}
+
 	.tabs button.active {
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, var(--surface-1));
 		color: var(--accent, #c8a96e);
 	}
 
 	.date-now {
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		font-size: 12px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.scrollable {
 		flex: 1;
+		min-width: 0;
+		overflow-x: hidden;
 		overflow-y: auto;
 		padding: 0 32px 32px;
 	}
 
 	.grid-overview {
 		display: grid;
-		grid-template-columns: repeat(6, 1fr);
+		grid-template-columns: repeat(6, minmax(0, 1fr));
 		grid-template-rows: auto 1fr;
-		gap: 16px;
+		gap: 12px;
+		width: 100%;
+		min-width: 0;
 	}
 
 	.card {
-		background: #1a1a1a;
-		border: 1px solid rgba(255, 255, 255, 0.05);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
 		border-radius: 12px;
 		padding: 20px;
+		min-width: 0;
+		box-sizing: border-box;
+		box-shadow: var(--shadow-card, none);
 	}
 
 	.stat-summary {
 		display: flex;
 		align-items: center;
-		gap: 16px;
+		gap: 12px;
+		padding: 14px 16px;
+		min-width: 0;
+		box-sizing: border-box;
 	}
 
 	.icon-circle {
@@ -1119,24 +1170,25 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgba(255, 255, 255, 0.05);
+		flex-shrink: 0;
+		background: var(--surface-2);
 	}
 
 	.icon-circle.games {
 		color: var(--accent, #c8a96e);
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
 	}
 	.icon-circle.trophy {
 		color: #3ddc84;
-		background: rgba(61, 220, 132, 0.1);
+		background: rgba(61, 220, 132, 0.12);
 	}
 	.icon-circle.rate {
 		color: #a855f7;
-		background: rgba(168, 85, 247, 0.1);
+		background: rgba(168, 85, 247, 0.12);
 	}
 	.icon-circle.gamerscore {
 		color: var(--accent, #c8a96e);
-		background: rgba(200, 169, 110, 0.14);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
 	}
 	.icon-circle.playtime {
 		color: #4ac8ff;
@@ -1144,32 +1196,43 @@
 	}
 	.icon-circle.remaining {
 		color: #f4b860;
-		background: rgba(244, 184, 96, 0.1);
+		background: rgba(244, 184, 96, 0.12);
 	}
 
 	.card-info {
 		display: flex;
 		flex-direction: column;
+		min-width: 0;
+		overflow: hidden;
 	}
 	.card-info .label {
 		font-size: 10px;
 		font-weight: 600;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		letter-spacing: 0.05em;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.card-info .value {
-		font-size: 24px;
+		font-size: clamp(18px, 1.8vw, 24px);
 		font-weight: 700;
 		margin: 2px 0;
-		color: #fff;
+		color: var(--text-primary);
+		font-variant-numeric: tabular-nums;
 	}
 	.card-info .sub {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.2);
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.top-games {
-		grid-column: 1 / 6;
+		grid-column: 1 / 5;
+		min-width: 0;
 	}
 	.card-header {
 		display: flex;
@@ -1180,11 +1243,12 @@
 	.card-header h2 {
 		font-size: 16px;
 		font-weight: 600;
-		color: #fff;
+		color: var(--text-primary);
 	}
 	.card-header .count {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.2);
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.game-progress-row {
@@ -1199,11 +1263,16 @@
 	.game-progress-row .name {
 		font-size: 14px;
 		font-weight: 500;
-		color: #e0e0e0;
+		color: var(--text-secondary);
 	}
 	.game-progress-row .completed-tag {
 		font-size: 10px;
-		color: rgba(255, 255, 255, 0.4);
+		font-weight: 700;
+		color: var(--completed, #e4b441);
+		background: color-mix(in srgb, var(--completed, #e4b441) 14%, transparent);
+		padding: 1px 6px;
+		border-radius: 999px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.progress-bar-wrap {
@@ -1214,7 +1283,7 @@
 	.progress-bar {
 		flex: 1;
 		height: 12px;
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--surface-3);
 		border-radius: 6px;
 		overflow: hidden;
 	}
@@ -1229,9 +1298,12 @@
 		font-weight: 600;
 		width: 40px;
 		text-align: right;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.side-column {
+		grid-column: 5 / 7;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
@@ -1246,7 +1318,7 @@
 	.global-progression h2 {
 		font-size: 11px;
 		font-weight: 600;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		margin-bottom: 20px;
 		align-self: flex-start;
 	}
@@ -1265,9 +1337,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow:
-			0 0 0 1px rgba(255, 255, 255, 0.025),
-			0 0 22px color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+		box-shadow: 0 0 0 1px var(--border-soft);
 	}
 	.donut-ring {
 		position: absolute;
@@ -1283,19 +1353,17 @@
 		stroke-width: 12;
 	}
 	.donut-track {
-		stroke: rgba(255, 255, 255, 0.055);
+		stroke: var(--surface-3);
 	}
 	.donut-progress {
-		stroke: color-mix(in srgb, var(--accent, #c8a96e) 82%, #ffffff);
+		stroke: var(--accent, #c8a96e);
 		stroke-linecap: round;
-		filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent, #c8a96e) 24%, transparent));
 		transition: stroke-dasharray 0.6s ease;
 	}
 	.donut-inner {
 		width: 82%;
 		height: 82%;
-		background: #1a1a1a;
-		box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.22);
+		background: var(--surface-1);
 		border-radius: 50%;
 		display: flex;
 		flex-direction: column;
@@ -1305,11 +1373,12 @@
 	.donut-val {
 		font-size: 24px;
 		font-weight: 700;
-		color: #fff;
+		color: var(--text-primary);
+		font-variant-numeric: tabular-nums;
 	}
 	.donut-label {
 		font-size: 10px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 	}
 
 	.unlocked-count {
@@ -1319,17 +1388,18 @@
 		font-size: 18px;
 		font-weight: 600;
 		display: block;
-		color: #fff;
+		color: var(--text-primary);
+		font-variant-numeric: tabular-nums;
 	}
 	.unlocked-count .lbl {
 		font-size: 10px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 	}
 
 	.podium h2 {
 		font-size: 11px;
 		font-weight: 600;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		margin-bottom: 16px;
 	}
 	.podium-list {
@@ -1351,13 +1421,14 @@
 		justify-content: center;
 		font-size: 10px;
 		font-weight: 700;
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
 		color: var(--accent, #c8a96e);
+		font-variant-numeric: tabular-nums;
 	}
 	.podium-item .name {
 		flex: 1;
 		font-size: 13px;
-		color: #e0e0e0;
+		color: var(--text-secondary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -1365,14 +1436,15 @@
 	.podium-item .pct {
 		font-size: 12px;
 		font-weight: 600;
-		color: #fff;
+		color: var(--text-primary);
 		border-bottom: 2px solid var(--accent, #c8a96e);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.card-subtitle {
 		font-size: 11px;
 		font-weight: 600;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		display: flex;
 		align-items: center;
 		gap: 6px;
@@ -1392,11 +1464,11 @@
 		width: 40px;
 		height: 40px;
 		border-radius: 8px;
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
+		color: var(--accent, #c8a96e);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 18px;
 		flex-shrink: 0;
 	}
 	.rarity-item .info {
@@ -1408,14 +1480,14 @@
 	.rarity-item .name {
 		font-size: 14px;
 		font-weight: 600;
-		color: #fff;
+		color: var(--text-primary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 	.rarity-item .game {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -1423,55 +1495,67 @@
 	.rarity-badge {
 		font-size: 11px;
 		font-weight: 700;
-		color: #f4b860;
-		background: rgba(244, 184, 96, 0.1);
+		color: color-mix(in srgb, #e59424 80%, var(--text-primary));
+		background: rgba(244, 184, 96, 0.14);
 		padding: 2px 6px;
 		border-radius: 4px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.best-week-val .val {
 		font-size: 32px;
 		font-weight: 700;
-		color: #fff;
+		color: var(--text-primary);
 		display: block;
+		font-variant-numeric: tabular-nums;
 	}
 	.best-week-val .lbl {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 	}
 
 	.activity-view {
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+		min-width: 0;
+		max-width: 100%;
 	}
 	.heatmap-card .sub {
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 	.heatmap-container {
 		margin-top: 20px;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.heatmap-wrapper {
 		display: flex;
 		gap: 8px;
 		position: relative;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.heatmap-y-labels {
 		display: flex;
 		flex-direction: column;
 		justify-content: space-between;
+		flex-shrink: 0;
 		padding: 18px 0 2px;
 		font-size: 9px;
-		color: rgba(255, 255, 255, 0.2);
+		color: var(--text-muted);
 		height: 77px;
 		margin-top: 18px;
 	}
 
 	.heatmap-scroll-area {
 		flex: 1;
+		min-width: 0;
+		max-width: 100%;
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
@@ -1483,7 +1567,7 @@
 		position: relative;
 		height: 18px;
 		font-size: 10px;
-		color: rgba(255, 255, 255, 0.2);
+		color: var(--text-muted);
 	}
 
 	.month-label {
@@ -1503,14 +1587,14 @@
 	.heatmap-cell {
 		width: 10px;
 		height: 10px;
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--surface-3);
 		border-radius: 2px;
 		transition: transform 0.1s;
 	}
 	.heatmap-cell:hover:not(.is-future) {
 		transform: scale(1.2);
 		z-index: 10;
-		outline: 1px solid rgba(255, 255, 255, 0.2);
+		outline: 1px solid var(--border-soft);
 	}
 	.heatmap-cell.lvl1 {
 		background: color-mix(in srgb, var(--accent, #c8a96e) 20%, transparent);
@@ -1537,19 +1621,25 @@
 		align-items: center;
 		gap: 6px;
 		font-size: 10px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		margin-top: 12px;
 		justify-content: flex-end;
 	}
 
 	.charts-row {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 16px;
+		min-width: 0;
+		max-width: 100%;
+	}
+	.chart-card {
+		min-width: 0;
+		max-width: 100%;
 	}
 	.chart-card .sub {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		margin: 4px 0 20px;
 	}
 
@@ -1557,6 +1647,8 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-start;
+		flex-wrap: wrap;
+		gap: 10px;
 		margin-bottom: 20px;
 	}
 
@@ -1569,7 +1661,7 @@
 	.window-nav {
 		display: flex;
 		gap: 2px;
-		background: rgba(255, 255, 255, 0.03);
+		background: var(--surface-2);
 		padding: 2px;
 		border-radius: 6px;
 	}
@@ -1577,7 +1669,7 @@
 	.window-nav button {
 		background: transparent;
 		border: none;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		width: 24px;
 		height: 24px;
 		display: flex;
@@ -1589,19 +1681,19 @@
 	}
 
 	.window-nav button:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.05);
-		color: #fff;
+		background: var(--surface-hover);
+		color: var(--text-primary);
 	}
 
 	.window-nav button:disabled {
-		opacity: 0.1;
+		opacity: 0.2;
 		cursor: default;
 	}
 
 	.timeframe-selector {
 		display: flex;
 		gap: 4px;
-		background: rgba(255, 255, 255, 0.03);
+		background: var(--surface-2);
 		padding: 2px;
 		border-radius: 6px;
 	}
@@ -1609,7 +1701,7 @@
 	.timeframe-selector button {
 		background: transparent;
 		border: none;
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		padding: 4px 8px;
 		border-radius: 4px;
 		font-size: 10px;
@@ -1620,11 +1712,11 @@
 	}
 
 	.timeframe-selector button:hover {
-		color: rgba(255, 255, 255, 0.6);
+		color: var(--text-primary);
 	}
 
 	.timeframe-selector button.active {
-		background: rgba(255, 255, 255, 0.07);
+		background: var(--surface-1);
 		color: var(--accent, #c8a96e);
 	}
 
@@ -1632,7 +1724,7 @@
 		height: 180px;
 		position: relative;
 		padding-bottom: 20px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+		border-bottom: 1px solid var(--border-soft);
 	}
 
 	.chart-point {
@@ -1665,7 +1757,7 @@
 		background: color-mix(in srgb, var(--accent, #c8a96e) 50%, transparent);
 	}
 	.bar.empty {
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--surface-3);
 	}
 	.bar.max {
 		background: #3ddc84;
@@ -1688,7 +1780,7 @@
 		align-items: flex-start;
 		gap: 16px;
 		padding-bottom: 16px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+		border-bottom: 1px solid var(--border-soft);
 	}
 	.recent-item img {
 		width: 48px;
@@ -1712,7 +1804,7 @@
 	.recent-item .name {
 		font-size: 15px;
 		font-weight: 600;
-		color: #fff;
+		color: var(--text-primary);
 	}
 	.rarity-badge.small {
 		font-size: 9px;
@@ -1727,7 +1819,7 @@
 	}
 	.recent-item .desc {
 		font-size: 13px;
-		color: rgba(255, 255, 255, 0.4);
+		color: var(--text-muted);
 		line-height: 1.4;
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
@@ -1737,38 +1829,44 @@
 	}
 	.recent-item .time {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.2);
+		color: var(--text-muted);
 		white-space: nowrap;
 		margin-top: 4px;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.custom-tooltip {
 		position: fixed;
-		background: #1e2329;
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
 		padding: 12px;
 		border-radius: 8px;
 		z-index: 1000;
 		pointer-events: none;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+		box-shadow: var(--shadow-elevated, 0 8px 24px rgba(0, 0, 0, 0.35));
 		min-width: 150px;
 		max-width: 250px;
 	}
 
 	.tooltip-title {
 		font-size: 11px;
-		color: rgba(255, 255, 255, 0.4);
+		color: var(--text-muted);
 		margin-bottom: 4px;
+		font-variant-numeric: tabular-nums;
 	}
 	.tooltip-value {
 		font-size: 16px;
 		font-weight: 700;
-		color: #fff;
+		color: var(--text-primary);
 		margin-bottom: 8px;
+		font-variant-numeric: tabular-nums;
 	}
 	.tooltip-sub {
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.6);
+		color: var(--text-secondary);
 		margin-bottom: 8px;
 	}
 
@@ -1776,13 +1874,13 @@
 		list-style: none;
 		padding: 0;
 		margin: 0;
-		border-top: 1px solid rgba(255, 255, 255, 0.05);
+		border-top: 1px solid var(--border-soft);
 		padding-top: 8px;
 	}
 
 	.tooltip-list li {
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.7);
+		color: var(--text-secondary);
 		margin-bottom: 4px;
 		white-space: nowrap;
 		overflow: hidden;
@@ -1790,13 +1888,13 @@
 	}
 
 	.tooltip-list li.more {
-		color: rgba(255, 255, 255, 0.3);
+		color: var(--text-muted);
 		font-style: italic;
 	}
 
 	.empty {
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.2);
+		color: var(--text-muted);
 	}
 
 	.scrollable::-webkit-scrollbar {
@@ -1806,7 +1904,41 @@
 		background: transparent;
 	}
 	.scrollable::-webkit-scrollbar-thumb {
-		background: rgba(255, 255, 255, 0.1);
+		background: var(--border-soft);
 		border-radius: 3px;
+	}
+
+	@media (max-width: 1280px) {
+		.grid-overview {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+		.top-games {
+			grid-column: 1 / 3;
+		}
+		.side-column {
+			grid-column: 3 / 4;
+		}
+	}
+
+	@media (max-width: 1180px) {
+		.charts-row {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	@media (max-width: 820px) {
+		.stats-header {
+			padding: 20px 20px 16px;
+		}
+		.scrollable {
+			padding: 0 20px 24px;
+		}
+		.grid-overview {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.top-games,
+		.side-column {
+			grid-column: 1 / -1;
+		}
 	}
 </style>

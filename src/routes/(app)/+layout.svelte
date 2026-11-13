@@ -4,7 +4,12 @@
 	import Settings from '$lib/Settings.svelte';
 	import { loadSettings, settings } from '$lib/stores/settings.js';
 	import { settingsOpen, watcherActive } from '$lib/stores/ui.js';
-	import { setupAchievementsRealtimeSync, syncSteamMetadata } from '$lib/stores/Games.js';
+	import {
+		getGameHeaderUrl,
+		loadGames,
+		setupAchievementsRealtimeSync,
+		syncSteamMetadata
+	} from '$lib/stores/Games.js';
 	import { refreshSteamUser } from '$lib/stores/user.js';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
@@ -23,28 +28,67 @@
 
 	let { children } = $props();
 	let isSetupRoute = $derived(page.url.pathname.startsWith('/setup'));
-	let isGameRoute = $derived(page.url.pathname.startsWith('/games/'));
 	let activeThemeColor = $state<string | null>(null);
 	let activeThemeContrast = $state<string>('#111111');
+	let selectedBannerUrl = $derived(
+		$selectedGame
+			? $selectedGame.header_image_url ||
+				($selectedGame.steam_id
+					? getGameHeaderUrl($selectedGame)
+					: $selectedGame.background_image_url ||
+						$selectedGame.steamgrid_icon_url ||
+						getGameHeaderUrl($selectedGame))
+			: ''
+	);
+
+	function parseColorRgb(color: string): [number, number, number] | null {
+		const hexMatch = color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+		if (hexMatch) {
+			const hex = hexMatch[1];
+			if (hex.length === 3) {
+				return [
+					parseInt(hex[0] + hex[0], 16),
+					parseInt(hex[1] + hex[1], 16),
+					parseInt(hex[2] + hex[2], 16)
+				];
+			}
+			return [
+				parseInt(hex.slice(0, 2), 16),
+				parseInt(hex.slice(2, 4), 16),
+				parseInt(hex.slice(4, 6), 16)
+			];
+		}
+		const rgb = color.match(/\d+/g);
+		if (rgb && rgb.length >= 3) {
+			return [Number(rgb[0]), Number(rgb[1]), Number(rgb[2])];
+		}
+		return null;
+	}
 
 	$effect(() => {
+		let cancelled = false;
 		const game = $selectedGame;
 		const s = $settings;
 
-		if (!s.dynamicTheme || !game || !isGameRoute) {
+		if (!s.dynamicTheme || !game) {
 			activeThemeColor = null;
 			activeThemeContrast = '#111111';
 			return;
 		}
 
-		const imageUrl = game.header_image_url || game.background_image_url || game.steamgrid_icon_url;
+		const imageUrl =
+			game.header_image_url ||
+			(game.steam_id
+				? getGameHeaderUrl(game)
+				: game.background_image_url || game.steamgrid_icon_url || getGameHeaderUrl(game));
 		if (imageUrl) {
 			extractGameThemeColor(imageUrl).then((color) => {
+				if (cancelled) return;
 				activeThemeColor = color;
 				if (color) {
-					const rgb = color.match(/\d+/g);
-					if (rgb) {
-						const [r, g, b] = rgb.map(Number);
+					const parsed = parseColorRgb(color);
+					if (parsed) {
+						const [r, g, b] = parsed;
 						const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 						activeThemeContrast = luminance > 0.6 ? '#111111' : '#ffffff';
 					}
@@ -54,6 +98,10 @@
 			activeThemeColor = null;
 			activeThemeContrast = '#111111';
 		}
+
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	function hasEmptyApiKeys(): boolean {
@@ -125,12 +173,13 @@
 				return;
 			}
 
-			await refreshSteamUser();
+			await loadGames();
+			void refreshSteamUser();
 			console.log('[DEBUG][layout] Starting sync with keys:', {
 				steamKeyLen: s.steamApiKey?.length,
 				sgdbKeyLen: s.steamGridDbApiKey?.length
 			});
-			await syncSteamMetadata(s.steamApiKey, s.steamGridDbApiKey);
+			void syncSteamMetadata(s.steamApiKey, s.steamGridDbApiKey);
 
 			void checkForUpdates(true);
 		})();
@@ -156,13 +205,12 @@
 	style:--accent={$settings.dynamicTheme && activeThemeColor
 		? activeThemeColor
 		: 'var(--accent-default)'}
-	style:--accent-text={activeThemeContrast}
+	style:--accent-text={$settings.dynamicTheme && activeThemeColor ? activeThemeContrast : undefined}
 >
-	{#if $settings.dynamicTheme && $selectedGame && isGameRoute && !isSetupRoute}
+	{#if $settings.dynamicTheme && $selectedGame && !isSetupRoute}
 		<div
 			class="dynamic-bg"
-			style:background-image="url({$selectedGame.background_image_url ||
-				$selectedGame.header_image_url})"
+			style:background-image="url({$selectedGame.background_image_url || selectedBannerUrl})"
 		></div>
 	{/if}
 	{#if !isSetupRoute}
@@ -197,14 +245,20 @@
 <style>
 	.app-container {
 		display: grid;
-		grid-template-columns: 72px 1fr;
+		grid-template-columns: 76px 1fr;
 		grid-template-rows: 64px 1fr;
 		height: 100vh;
-		gap: 0;
-		padding: 0;
+		gap: 10px;
+		padding: 10px;
 		overflow: hidden;
 		background: var(--bg-app);
 		position: relative;
+	}
+
+	@media (max-width: 980px) {
+		.app-container:not(.setup) {
+			grid-template-columns: 66px 1fr;
+		}
 	}
 
 	.dynamic-bg {
@@ -235,29 +289,34 @@
 	.sidebar-slot {
 		grid-column: 1 / 2;
 		grid-row: 1 / 3;
-		z-index: 5;
+		z-index: 20;
 	}
 
 	.topbar-slot {
 		grid-column: 2 / 3;
 		grid-row: 1 / 2;
-		padding: 8px 8px 4px 0;
-		z-index: 10;
+		padding: 0;
+		min-width: 0;
+		z-index: 15;
 	}
 
 	.content-slot {
 		grid-column: 2 / 3;
 		grid-row: 2 / 3;
-		padding: 4px 8px 8px 0;
+		padding: 0;
+		min-width: 0;
+		min-height: 0;
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+		position: relative;
+		z-index: 1;
 	}
 
 	.app-container.setup {
 		grid-template-columns: 1fr;
 		grid-template-rows: 1fr;
-		padding: 8px;
+		padding: 10px;
 	}
 
 	.app-container.setup .content-slot {
@@ -269,13 +328,15 @@
 	.settings-overlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.58);
-		backdrop-filter: blur(8px);
+		background: rgba(0, 0, 0, 0.54);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		padding: 24px;
 		z-index: 1000;
+		animation: settings-fade-in 0.22s var(--spring-out) both;
 	}
 
 	.settings-backdrop {
@@ -292,11 +353,34 @@
 		position: relative;
 		width: min(1100px, 100%);
 		height: min(88vh, 860px);
-		background: var(--bg-panel);
-		border: 1px solid var(--border-soft);
-		border-radius: 18px;
+		background: var(--glass-bg, var(--bg-panel));
+		backdrop-filter: blur(20px) saturate(180%);
+		-webkit-backdrop-filter: blur(20px) saturate(180%);
+		border: 1px solid var(--border-specular);
+		border-radius: 20px;
 		overflow: hidden;
-		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+		box-shadow: var(--shadow-elevated);
 		z-index: 1;
+		animation: settings-spring-in 0.34s var(--spring-out) both;
+	}
+
+	@keyframes settings-fade-in {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes settings-spring-in {
+		from {
+			opacity: 0;
+			transform: scale(0.96) translateY(8px);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
 	}
 </style>

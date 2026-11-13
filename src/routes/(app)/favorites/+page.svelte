@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { games } from '$lib/stores/Games.js';
+	import { games, getGameIconUrl } from '$lib/stores/Games.js';
 	import { toggleGameFavorite } from '$lib/stores/selectedGame.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { goto } from '$app/navigation';
@@ -19,33 +19,6 @@
 		void goto(resolve('/(app)/games/[id]', { id: gameId }));
 	}
 
-	function iconUrl(game: Game): string {
-		if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
-			return game.steamgrid_icon_url;
-		}
-
-		if (game.game_icon && game.game_icon.startsWith('http')) {
-			return game.game_icon;
-		}
-
-		if (
-			game.game_icon &&
-			!game.game_icon.includes('/') &&
-			!game.game_icon.includes('\\') &&
-			game.steam_id
-		) {
-			return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
-		}
-
-		if (game.header_image_url) return game.header_image_url;
-
-		if (game.steam_id) {
-			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
-		}
-
-		return '';
-	}
-
 	function onIconError(name: string, id: string) {
 		return (e: Event) => {
 			const t = e.target as HTMLImageElement;
@@ -57,7 +30,21 @@
 
 <main class="favorites-page">
 	<header class="page-header">
-		<h1>♥️ {$i18n.t('favorites.title')}</h1>
+		<h1 class="page-title-row">
+			<svg
+				width="26"
+				height="26"
+				viewBox="0 0 24 24"
+				fill="currentColor"
+				class="title-heart"
+				aria-hidden="true"
+			>
+				<path
+					d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+				/>
+			</svg>
+			{$i18n.t('favorites.title')}
+		</h1>
 		<p class="subtitle">
 			{favoriteGames.length}
 			{$i18n.t('favorites.count')}
@@ -76,20 +63,38 @@
 					title={game.name}
 				>
 					<div class="game-icon-container">
-						{#if iconUrl(game)}
-							<img src={iconUrl(game)} alt={game.name} onerror={onIconError(game.name, game.id)} />
+						{#if getGameIconUrl(game)}
+							<img
+								src={getGameIconUrl(game)}
+								alt={game.name}
+								loading="lazy"
+								decoding="async"
+								onerror={onIconError(game.name, game.id)}
+							/>
 						{:else}
 							<div class="game-fallback">{game.name[0]}</div>
 						{/if}
 						<button
+							type="button"
 							class="fav-badge"
 							onclick={(e) => {
 								e.stopPropagation();
 								toggleGameFavorite(game.id);
 							}}
-							title="Retirer des favoris"
+							title={$i18n.t('games.action.removeFavorite')}
+							aria-label={$i18n.t('games.action.removeFavorite')}
 						>
-							♥️
+							<svg
+								width="12"
+								height="12"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								aria-hidden="true"
+							>
+								<path
+									d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+								/>
+							</svg>
 						</button>
 					</div>
 					<div class="game-info">
@@ -109,7 +114,19 @@
 		</div>
 	{:else}
 		<div class="empty-state">
-			<div class="empty-icon">♥️</div>
+			<div class="empty-icon">
+				<svg
+					width="64"
+					height="64"
+					viewBox="0 0 24 24"
+					fill="currentColor"
+					aria-hidden="true"
+				>
+					<path
+						d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+					/>
+				</svg>
+			</div>
 			<h2>{$i18n.t('favorites.emptyTitle')}</h2>
 			<p>{$i18n.t('favorites.emptyText')}</p>
 			<button class="browse-btn" onclick={() => goto(resolve('/'))}>
@@ -138,15 +155,29 @@
 		color: var(--text-primary);
 	}
 
+	.page-title-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.title-heart {
+		color: #ff4d4d;
+		flex-shrink: 0;
+	}
+
 	.subtitle {
 		color: var(--text-secondary);
 		font-size: 14px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.games-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 		gap: 16px;
+		align-content: start;
+		align-items: start;
 	}
 
 	.game-item {

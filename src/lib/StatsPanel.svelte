@@ -1,6 +1,13 @@
 <script lang="ts">
 	// src/lib/StatsPanel.svelte
-	import { games, totalUnlockedAchievements, type Game } from '$lib/stores/Games.js';
+	import {
+		games,
+		getGameHeaderUrl,
+		getGameIconUrl,
+		totalUnlockedAchievements
+	} from '$lib/stores/Games.js';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 
 	type RarityBreakdown = {
@@ -13,22 +20,8 @@
 		common: number;
 	};
 
-	function getGameIcon(game: Game): string {
-		if (game.steamgrid_icon_url && game.steamgrid_icon_url.startsWith('http')) {
-			return game.steamgrid_icon_url;
-		}
-
-		if (game.game_icon && game.game_icon.startsWith('http')) {
-			return game.game_icon;
-		}
-
-		if (game.header_image_url) return game.header_image_url;
-
-		if (game.steam_id) {
-			return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
-		}
-
-		return '';
+	function openGame(id: string) {
+		void goto(resolve('/(app)/games/[id]', { id }));
 	}
 
 	let totalAchievements = $derived(
@@ -100,8 +93,8 @@
 				return total > 0 && unlocked === total;
 			})
 			.sort((a, b) => {
-				const latestA = Math.max(...(a.achievements?.map((a) => a.unlocked_time ?? 0) ?? [0]));
-				const latestB = Math.max(...(b.achievements?.map((a) => a.unlocked_time ?? 0) ?? [0]));
+				const latestA = Math.max(...(a.achievements?.map((x) => x.unlocked_time ?? 0) ?? [0]));
+				const latestB = Math.max(...(b.achievements?.map((x) => x.unlocked_time ?? 0) ?? [0]));
 				return latestB - latestA;
 			})
 			.slice(0, 3);
@@ -151,28 +144,35 @@
 
 	<div class="stat-card">
 		<span class="stat-label">{$i18n.t('statsPanel.unlocked')}</span>
-		<span class="stat-value">{$totalUnlockedAchievements}</span>
-		<span class="stat-sub">{$i18n.t('statsPanel.outOf', { total: totalAchievements })}</span>
+		<span class="stat-value tabular-nums">{$totalUnlockedAchievements}</span>
+		<span class="stat-sub tabular-nums">{$i18n.t('statsPanel.outOf', { total: totalAchievements })}</span>
 	</div>
 
 	<div class="stat-card">
 		<span class="stat-label">{$i18n.t('statsPanel.avgProgress')}</span>
-		<span class="stat-value">{avgProgression}%</span>
+		<span class="stat-value tabular-nums">{avgProgression}%</span>
 	</div>
 
 	<div class="stat-card">
 		<span class="stat-label">{$i18n.t('statsPanel.avgRarity')}</span>
-		<span class="stat-value">{highRarityPct}%</span>
+		<span class="stat-value tabular-nums">{highRarityPct}%</span>
 	</div>
 
 	<h2 class="section-title">{$i18n.t('statsPanel.rarityBreakdown')}</h2>
 
 	<ul class="rarity-list">
 		{#each rarityRows as row (row.className)}
-			<li>
-				<span class={'dot ' + row.className}></span>
-				<span class="rarity-label">{row.label}</span>
-				<span class="rarity-count">{row.count}</span>
+			{@const sharePct =
+				$totalUnlockedAchievements > 0 ? (row.count / $totalUnlockedAchievements) * 100 : 0}
+			<li class="rarity-row">
+				<div class="rarity-row-top">
+					<span class={'dot ' + row.className}></span>
+					<span class="rarity-label">{row.label}</span>
+					<span class="rarity-count tabular-nums">{row.count}</span>
+				</div>
+				<div class="rarity-bar-track" aria-hidden="true">
+					<div class={'rarity-bar-fill ' + row.className} style:width="{sharePct}%"></div>
+				</div>
 			</li>
 		{/each}
 	</ul>
@@ -181,24 +181,42 @@
 
 	<ul class="completed-list">
 		{#each recentlyCompleted as game (game.id)}
+			{@const total = game.achievements_total || game.achievements?.length || 0}
 			<li class="completed-item">
-				<img
-					src={getGameIcon(game)}
-					alt={game.name}
-					class="game-icon"
-					onerror={(e) => {
-						const t = e.target as HTMLImageElement;
-						if (game.steam_id && !t.src.includes('header.jpg')) {
-							t.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`;
-						}
-					}}
-				/>
-				<div class="completed-info">
-					<span class="completed-name">{game.name}</span>
-					<span class="completed-sub">
-						100% · {game.achievements?.length}/{game.achievements?.length}
-					</span>
-				</div>
+				<button type="button" class="completed-btn" onclick={() => openGame(game.id)}>
+					<img
+						src={getGameIconUrl(game)}
+						alt={game.name}
+						class="game-icon"
+						onerror={(e) => {
+							const t = e.target as HTMLImageElement;
+							const headerUrl = getGameHeaderUrl(game);
+							if (headerUrl && t.src !== headerUrl) {
+								t.src = headerUrl;
+							}
+						}}
+					/>
+					<div class="completed-info">
+						<span class="completed-name">{game.name}</span>
+						<span class="completed-sub tabular-nums">
+							100% · {total}/{total}
+						</span>
+					</div>
+					<svg
+						class="completed-chevron"
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M9 18l6-6-6-6" />
+					</svg>
+				</button>
 			</li>
 		{/each}
 	</ul>
@@ -207,13 +225,15 @@
 <style>
 	.stats-panel {
 		background: var(--bg-panel);
-		border-radius: 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: 14px;
 		padding: 24px;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
 		height: 100%;
+		box-shadow: var(--shadow-card);
 	}
 
 	.section-title {
@@ -226,14 +246,19 @@
 		margin-bottom: 4px;
 	}
 
+	.section-title:first-child {
+		margin-top: 0;
+	}
+
 	.stat-card {
 		background: var(--surface-1);
-		border-radius: 8px;
-		border: 0.5px solid var(--border-soft);
-		padding: 16px;
+		border-radius: 10px;
+		border: 1px solid var(--border-soft);
+		padding: 14px 16px;
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
+		box-shadow: var(--shadow-card);
 	}
 
 	.stat-label {
@@ -245,16 +270,18 @@
 	}
 
 	.stat-value {
-		font-size: 32px;
+		font-size: 30px;
 		font-weight: 700;
 		color: var(--accent, #c8a96e);
-		line-height: 1;
+		line-height: 1.05;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.stat-sub {
 		font-size: 12px;
-		color: #6a7080;
+		color: var(--text-muted);
 		margin-top: 2px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.rarity-list {
@@ -266,7 +293,13 @@
 		gap: 10px;
 	}
 
-	.rarity-list li {
+	.rarity-row {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+	}
+
+	.rarity-row-top {
 		display: flex;
 		align-items: center;
 		gap: 10px;
@@ -280,26 +313,33 @@
 		flex-shrink: 0;
 	}
 
-	.dot.mythic {
+	.dot.mythic,
+	.rarity-bar-fill.mythic {
 		background: #ff3b5c;
 	}
-	.dot.legendary {
+	.dot.legendary,
+	.rarity-bar-fill.legendary {
 		background: #ffd85a;
 	}
-	.dot.epic {
+	.dot.epic,
+	.rarity-bar-fill.epic {
 		background: #a855f7;
 	}
-	.dot.very-rare {
+	.dot.very-rare,
+	.rarity-bar-fill.very-rare {
 		background: #f4b860;
 	}
-	.dot.rare {
+	.dot.rare,
+	.rarity-bar-fill.rare {
 		background: #4ac8ff;
 	}
-	.dot.uncommon {
+	.dot.uncommon,
+	.rarity-bar-fill.uncommon {
 		background: #3ddc84;
 	}
-	.dot.common {
-		background: #6a7080;
+	.dot.common,
+	.rarity-bar-fill.common {
+		background: var(--text-muted);
 	}
 
 	.rarity-label {
@@ -309,6 +349,20 @@
 	.rarity-count {
 		color: var(--text-primary);
 		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.rarity-bar-track {
+		height: 4px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		overflow: hidden;
+	}
+
+	.rarity-bar-fill {
+		height: 100%;
+		border-radius: 999px;
+		transition: width 0.35s var(--spring-out);
 	}
 
 	.completed-list {
@@ -317,19 +371,46 @@
 		margin: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 4px;
 	}
 
 	.completed-item {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		padding: 10px 0;
 		border-bottom: 1px solid var(--border-soft);
 	}
 
 	.completed-item:last-child {
 		border-bottom: none;
+	}
+
+	.completed-btn {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		width: 100%;
+		padding: 8px 6px;
+		border-radius: 8px;
+		border: none;
+		background: transparent;
+		text-align: left;
+		font-family: inherit;
+		cursor: pointer;
+		transition:
+			background 0.18s ease,
+			transform 0.2s var(--spring-out);
+	}
+
+	.completed-btn:hover {
+		background: var(--surface-hover);
+	}
+
+	.completed-btn:hover .completed-chevron {
+		color: var(--text-primary);
+		transform: translateX(2px);
+	}
+
+	.completed-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
 	}
 
 	.game-icon {
@@ -342,6 +423,8 @@
 	}
 
 	.completed-info {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
@@ -360,6 +443,16 @@
 	.completed-sub {
 		font-size: 11px;
 		color: var(--completed, #4caf6e);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.completed-chevron {
+		color: var(--text-muted);
+		flex-shrink: 0;
+		transition:
+			color 0.18s ease,
+			transform 0.2s var(--spring-out);
 	}
 
 	::-webkit-scrollbar {
@@ -369,10 +462,10 @@
 		background: transparent;
 	}
 	::-webkit-scrollbar-thumb {
-		background: #2a2a2a;
+		background: var(--border-soft);
 		border-radius: 2px;
 	}
 	::-webkit-scrollbar-thumb:hover {
-		background: #3a3a3a;
+		background: var(--text-muted);
 	}
 </style>

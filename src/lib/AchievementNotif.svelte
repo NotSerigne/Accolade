@@ -34,22 +34,22 @@
 		position?: Position;
 	}>();
 
-	const PLATINUM_COLORS = { accent: '#ffd700', glow: 'rgba(255, 215, 0, 0.38)' };
+	const PLATINUM_COLOR = '#ffd700';
 	const PLATINUM_GRADIENT = 'linear-gradient(90deg, #b8860b, #ffd700, #daa520, #ffd700, #b8860b)';
-	const DEFAULT_COLORS = { accent: '#6a7080', glow: 'rgba(106, 112, 128, 0.35)' };
+	const DEFAULT_COLOR = '#6a7080';
 
-	const rarityStyle = $derived(() => {
-		if (achievement?.is_platinum) return PLATINUM_COLORS;
-		if (achievement?.completionpercentage == null) return DEFAULT_COLORS;
+	const rarityColor = $derived(() => {
+		if (achievement?.is_platinum) return PLATINUM_COLOR;
+		if (achievement?.completionpercentage == null) return DEFAULT_COLOR;
 
 		const n = achievement.completionpercentage;
-		if (n <= 0.1) return { accent: '#ff3b5c', glow: 'rgba(255, 59, 92, 0.55)' };
-		if (n <= 1.0) return { accent: '#ffd85a', glow: 'rgba(255, 216, 90, 0.55)' };
-		if (n <= 3.0) return { accent: '#a855f7', glow: 'rgba(168, 85, 247, 0.55)' };
-		if (n <= 7.0) return { accent: '#f4b860', glow: 'rgba(244, 184, 96, 0.55)' };
-		if (n <= 15.0) return { accent: '#4ac8ff', glow: 'rgba(74, 200, 255, 0.55)' };
-		if (n <= 35.0) return { accent: '#3ddc84', glow: 'rgba(61, 220, 132, 0.55)' };
-		return DEFAULT_COLORS;
+		if (n <= 0.1) return '#ff3b5c';
+		if (n <= 1.0) return '#ffd85a';
+		if (n <= 3.0) return '#a855f7';
+		if (n <= 7.0) return '#f4b860';
+		if (n <= 15.0) return '#4ac8ff';
+		if (n <= 35.0) return '#3ddc84';
+		return DEFAULT_COLOR;
 	});
 
 	const ringDash = $derived(
@@ -99,9 +99,7 @@
 			<span
 				class="badge"
 				class:badge-platinum={achievement.is_platinum}
-				style="background: {achievement.is_platinum
-					? PLATINUM_GRADIENT
-					: rarityStyle().accent}; box-shadow: 0 0 12px 2px {rarityStyle().glow};"
+				style="background: {achievement.is_platinum ? PLATINUM_GRADIENT : rarityColor()};"
 			>
 				{achievement.is_platinum
 					? $i18n.t('notif.platinum')
@@ -121,11 +119,10 @@
 						{/if}
 					</div>
 					<div class="info">
-						<div class="name" style="color: {rarityStyle().accent};">{achievement.name}</div>
+						<div class="name" style="color: {rarityColor()};">{achievement.name}</div>
 						<div class="desc">{achievement.desc}</div>
 						<div class="meta">
-							<span class="rarity" style="color: {rarityStyle().accent};">{achievement.rarity}</span
-							>
+							<span class="rarity" style="color: {rarityColor()};">{achievement.rarity}</span>
 							{#if achievement.completionpercentage != null}
 								<span class="pct">— {achievement.completionpercentage}%</span>
 							{/if}
@@ -149,7 +146,7 @@
 									cy="18"
 									r="15"
 									stroke-dasharray={ringDash + ' 94.25'}
-									style="stroke: {rarityStyle().accent};"
+									style="stroke: {rarityColor()};"
 								/>
 							</svg>
 						</div>
@@ -163,10 +160,13 @@
 <style>
 	.notif-wrapper {
 		font-family:
-			'Segoe UI',
-			system-ui,
+			'Inter',
 			-apple-system,
+			BlinkMacSystemFont,
+			'SF Pro Display',
+			system-ui,
 			sans-serif;
+		-webkit-font-smoothing: antialiased;
 		width: 100%;
 		max-width: 460px;
 		display: flex;
@@ -199,13 +199,20 @@
 		display: block;
 		width: calc(100% - 32px);
 		text-align: center;
-		font-family: 'Segoe UI Semibold', 'Segoe UI', system-ui, sans-serif;
+		font-family:
+			'Inter',
+			-apple-system,
+			BlinkMacSystemFont,
+			'SF Pro Display',
+			system-ui,
+			sans-serif;
 		font-size: 20px;
 		font-weight: 700;
 		letter-spacing: 0.18em;
 		color: #fff;
 		border-radius: 16px;
 		padding: 8px 28px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 	}
 
 	.badge-platinum {
@@ -237,9 +244,8 @@
 
 	.card-platinum {
 		box-shadow:
-			0 0 0 1px rgba(255, 215, 0, 0.28),
-			0 6px 18px rgba(255, 215, 0, 0.16),
-			0 0 20px rgba(255, 215, 0, 0.05);
+			0 0 0 1px rgba(255, 215, 0, 0.35),
+			0 8px 32px rgba(0, 0, 0, 0.6);
 	}
 
 	.body {
@@ -268,7 +274,13 @@
 	}
 
 	.name {
-		font-family: 'Segoe UI Semibold', 'Segoe UI', system-ui, sans-serif;
+		font-family:
+			'Inter',
+			-apple-system,
+			BlinkMacSystemFont,
+			'SF Pro Display',
+			system-ui,
+			sans-serif;
 		font-size: 18px;
 		font-weight: 700;
 		letter-spacing: 0.04em;
@@ -295,21 +307,30 @@
 	}
 
 	.rarity {
-		font-family: 'Segoe UI Semibold', 'Segoe UI', system-ui, sans-serif;
+		font-family:
+			'Inter',
+			-apple-system,
+			BlinkMacSystemFont,
+			'SF Pro Display',
+			system-ui,
+			sans-serif;
 		font-size: 13px;
 		font-weight: 700;
 		letter-spacing: 0.08em;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.pct {
 		font-size: 13px;
 		font-weight: 600;
 		color: #9ca3af;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.date {
 		font-size: 12px;
 		color: #6b7280;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.progress-wrap {
@@ -320,10 +341,17 @@
 	}
 
 	.fraction {
-		font-family: 'Segoe UI Semibold', 'Segoe UI', system-ui, sans-serif;
+		font-family:
+			'Inter',
+			-apple-system,
+			BlinkMacSystemFont,
+			'SF Pro Display',
+			system-ui,
+			sans-serif;
 		font-size: 14px;
 		font-weight: 700;
 		color: #fff;
+		font-variant-numeric: tabular-nums;
 		position: absolute;
 		inset: 0;
 		display: flex;

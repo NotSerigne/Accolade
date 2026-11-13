@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { games } from './Games.js';
 import type { Game } from './Games.js';
 import { steamUser } from './user.js';
+import { settings, saveSettings } from './settings.js';
 
 const SELECTED_GAME_KEY = 'accolade:selected-game:v1';
 
@@ -36,64 +37,147 @@ export async function toggleGameFavorite(gameId: string) {
 	}
 }
 
+export function applyGameTheme(gameId: string): void {
+	selectedGameId.set(gameId);
+	const current = get(settings);
+	if (!current.dynamicTheme) {
+		const next = { ...current, dynamicTheme: true };
+		settings.set(next);
+		void saveSettings(next);
+	}
+}
+
+const THEME_COLOR_STORAGE_KEY = 'accolade:theme-colors:v1';
+const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const colorCache = new Map<string, string>();
+const themeColorCache = new Map<string, Promise<string | null>>();
+
+function readStoredColorCache(): Record<string, string> {
+	if (typeof localStorage === 'undefined') return {};
+	try {
+		const raw = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
+		if (!raw) return {};
+		const parsed = JSON.parse(raw);
+		return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+	} catch {
+		return {};
+	}
+}
+
+function cacheThemeColor(imageUrl: string, color: string): void {
+	colorCache.set(imageUrl, color);
+	if (typeof localStorage === 'undefined') return;
+	try {
+		const stored = readStoredColorCache();
+		stored[imageUrl] = color;
+		localStorage.setItem(THEME_COLOR_STORAGE_KEY, JSON.stringify(stored));
+	} catch {
+		// Ignore storage quota errors
+	}
+}
+
 /**
  * Extracts the dominant color from an image and adjusts it for visibility.
  */
-export async function extractGameThemeColor(imageUrl: string): Promise<string | null> {
-	if (!imageUrl) return null;
+export function extractGameThemeColor(imageUrl: string): Promise<string | null> {
+	if (!imageUrl) return Promise.resolve(null);
 
-	return new Promise((resolve) => {
+	const memCached = colorCache.get(imageUrl);
+	if (memCached) return Promise.resolve(memCached);
+
+	const storedCached = readStoredColorCache()[imageUrl];
+	if (typeof storedCached === 'string' && storedCached) {
+		colorCache.set(imageUrl, storedCached);
+		return Promise.resolve(storedCached);
+	}
+
+	const cached = themeColorCache.get(imageUrl);
+	if (cached) return cached;
+
+	const fallbackToBackend = async (): Promise<string | null> => {
+		try {
+			const backendColor = await invoke<string>('extract_game_theme_color', { imageUrl });
+			const trimmed = typeof backendColor === 'string' ? backendColor.trim() : '';
+			if (HEX_COLOR_RE.test(trimmed)) {
+				cacheThemeColor(imageUrl, trimmed);
+				return trimmed;
+			}
+		} catch (err) {
+			console.error('Backend theme color extraction failed:', err);
+		}
+		themeColorCache.delete(imageUrl);
+		return null;
+	};
+
+	const promise = new Promise<string | null>((resolve) => {
 		const img = new Image();
 		img.crossOrigin = 'Anonymous';
 		img.src = imageUrl;
 
 		img.onload = () => {
-			const canvas = document.createElement('canvas');
-			const ctx = canvas.getContext('2d');
-			if (!ctx) return resolve(null);
+			try {
+				const canvas = document.createElement('canvas');
+				const ctx = canvas.getContext('2d');
+				if (!ctx) {
+					void fallbackToBackend().then(resolve);
+					return;
+				}
 
-			// Downscale the image for performance during analysis
-			canvas.width = 40;
-			canvas.height = 40;
-			ctx.drawImage(img, 0, 0, 40, 40);
+				// Downscale the image for performance during analysis
+				canvas.width = 40;
+				canvas.height = 40;
+				ctx.drawImage(img, 0, 0, 40, 40);
 
-			const data = ctx.getImageData(0, 0, 40, 40).data;
-			let r = 0,
-				g = 0,
-				b = 0,
-				count = 0;
+				const data = ctx.getImageData(0, 0, 40, 40).data;
+				let r = 0,
+					g = 0,
+					b = 0,
+					count = 0;
 
-			// Average colors for a simple and fast dominant tone
-			for (let i = 0; i < data.length; i += 4) {
-				const alpha = data[i + 3];
-				if (alpha < 150) continue; // Ignore pixels that are too transparent
+				// Average colors for a simple and fast dominant tone
+				for (let i = 0; i < data.length; i += 4) {
+					const alpha = data[i + 3];
+					if (alpha < 150) continue; // Ignore pixels that are too transparent
 
-				r += data[i];
-				g += data[i + 1];
-				b += data[i + 2];
-				count++;
+					r += data[i];
+					g += data[i + 1];
+					b += data[i + 2];
+					count++;
+				}
+
+				if (count === 0) {
+					void fallbackToBackend().then(resolve);
+					return;
+				}
+
+				r = Math.floor(r / count);
+				g = Math.floor(g / count);
+				b = Math.floor(b / count);
+
+				// Adjust the color so it stays readable on dark backgrounds
+				const [h, s, l] = rgbToHsl(r, g, b);
+
+				// Boost saturation if it is too low
+				const finalS = Math.max(s, 0.5);
+				// Keep luminance visible on dark backgrounds
+				const finalL = Math.max(Math.min(l, 0.65), 0.45);
+
+				const [fR, fG, fB] = hslToRgb(h, finalS, finalL);
+				const color = `rgb(${fR}, ${fG}, ${fB})`;
+				cacheThemeColor(imageUrl, color);
+				resolve(color);
+			} catch {
+				void fallbackToBackend().then(resolve);
 			}
-
-			if (count === 0) return resolve(null);
-
-			r = Math.floor(r / count);
-			g = Math.floor(g / count);
-			b = Math.floor(b / count);
-
-			// Adjust the color so it stays readable on dark backgrounds
-			const [h, s, l] = rgbToHsl(r, g, b);
-
-			// Boost saturation if it is too low
-			const finalS = Math.max(s, 0.5);
-			// Keep luminance visible on dark backgrounds
-			const finalL = Math.max(Math.min(l, 0.65), 0.45);
-
-			const [fR, fG, fB] = hslToRgb(h, finalS, finalL);
-			resolve(`rgb(${fR}, ${fG}, ${fB})`);
 		};
 
-		img.onerror = () => resolve(null);
+		img.onerror = () => {
+			void fallbackToBackend().then(resolve);
+		};
 	});
+
+	themeColorCache.set(imageUrl, promise);
+	return promise;
 }
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {

@@ -73,6 +73,99 @@ type PlaytimeUpdatedPayload = {
 	playtime_seconds: number;
 };
 
+export type RarityTier = 'legendary' | 'epic' | 'rare' | 'common';
+
+export interface RarityPalette {
+	tier: RarityTier;
+	color: string;
+	bg: string;
+	border: string;
+	glow: string;
+}
+
+const RARITY_PALETTES: Record<RarityTier, RarityPalette> = {
+	legendary: {
+		tier: 'legendary',
+		color: '#f5b841',
+		bg: 'rgba(245, 184, 65, 0.14)',
+		border: 'rgba(245, 184, 65, 0.38)',
+		glow: 'none'
+	},
+	epic: {
+		tier: 'epic',
+		color: '#b57cff',
+		bg: 'rgba(181, 124, 255, 0.14)',
+		border: 'rgba(181, 124, 255, 0.36)',
+		glow: 'none'
+	},
+	rare: {
+		tier: 'rare',
+		color: '#4ea8de',
+		bg: 'rgba(78, 168, 222, 0.14)',
+		border: 'rgba(78, 168, 222, 0.34)',
+		glow: 'none'
+	},
+	common: {
+		tier: 'common',
+		color: '#8b93a6',
+		bg: 'rgba(139, 147, 166, 0.12)',
+		border: 'rgba(139, 147, 166, 0.26)',
+		glow: 'none'
+	}
+};
+
+export function getGameHeaderUrl(game: Game): string {
+	if (game.header_image_url?.trim()) {
+		return game.header_image_url;
+	}
+	return `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id || game.id}/header.jpg`;
+}
+
+export function getGameIconUrl(game: Game): string {
+	if (game.steamgrid_icon_url?.trim()) {
+		return game.steamgrid_icon_url;
+	}
+	if (game.game_icon?.trim()) {
+		if (
+			game.game_icon.startsWith('http') ||
+			game.game_icon.startsWith('data:') ||
+			game.game_icon.startsWith('asset:') ||
+			game.game_icon.startsWith('/')
+		) {
+			return game.game_icon;
+		}
+		if (!game.game_icon.includes('/') && !game.game_icon.includes('\\') && game.steam_id) {
+			return `https://media.steampowered.com/steamcommunity/public/images/apps/${game.steam_id}/${game.game_icon}.ico`;
+		}
+	}
+	return getGameHeaderUrl(game);
+}
+
+export function getGameCompletionPct(game: Game): number {
+	const achs = game.achievements ?? [];
+	const total = game.achievements_total || achs.length || 0;
+	if (total <= 0) return 0;
+	let unlocked = 0;
+	for (let i = 0; i < achs.length; i++) {
+		if (achs[i].unlocked) unlocked++;
+	}
+	return Math.min(100, Math.max(0, Math.round((unlocked / total) * 100)));
+}
+
+export function getRarityTier(percent?: number | string): RarityTier {
+	if (percent === undefined || percent === null || percent === '') return 'common';
+	const val = typeof percent === 'number' ? percent : parseFloat(percent);
+	if (!Number.isFinite(val)) return 'common';
+	if (val < 5) return 'legendary';
+	if (val < 15) return 'epic';
+	if (val < 40) return 'rare';
+	return 'common';
+}
+
+export function getRarityPalette(percent?: number | string): RarityPalette {
+	return RARITY_PALETTES[getRarityTier(percent)];
+}
+
 export function formatPlaytime(seconds?: number): string {
 	const s = Math.max(0, Math.floor(seconds || 0));
 	if (s === 0) return '0m';
@@ -146,20 +239,33 @@ export const games = writable<Game[]>([]);
 let achievementsSyncInitialized = false;
 let activeSyncPromise: Promise<void> | null = null;
 
-export const totalUnlockedAchievements = derived(games, ($games) =>
-	$games.reduce((acc, g) => acc + (g.achievements?.filter((a) => a.unlocked).length ?? 0), 0)
-);
+export const totalUnlockedAchievements = derived(games, ($games) => {
+	let count = 0;
+	for (let i = 0; i < $games.length; i++) {
+		const achs = $games[i].achievements;
+		if (!achs) continue;
+		for (let j = 0; j < achs.length; j++) {
+			if (achs[j].unlocked) count++;
+		}
+	}
+	return count;
+});
 
-export const totalCompletedGames = derived(
-	games,
-	($games) =>
-		$games.filter((g) => {
-			const total = g.achievements_total || g.achievements?.length || 0;
-			if (total === 0) return false;
-			const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
-			return unlocked === total;
-		}).length
-);
+export const totalCompletedGames = derived(games, ($games) => {
+	let completed = 0;
+	for (let i = 0; i < $games.length; i++) {
+		const g = $games[i];
+		const achs = g.achievements;
+		const total = g.achievements_total || achs?.length || 0;
+		if (total === 0 || !achs) continue;
+		let unlocked = 0;
+		for (let j = 0; j < achs.length; j++) {
+			if (achs[j].unlocked) unlocked++;
+		}
+		if (unlocked === total) completed++;
+	}
+	return completed;
+});
 
 export const totalPlaytimeSeconds = derived(games, ($games) =>
 	$games.reduce((acc, g) => acc + (g.playtime_seconds || 0), 0)

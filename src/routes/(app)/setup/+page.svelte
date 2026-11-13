@@ -259,8 +259,12 @@
 						disabled={draft.notificationSound === 'none'}
 						aria-label={previewingSound === draft.notificationSound &&
 						draft.notificationSound !== 'none'
-							? 'Stop preview'
-							: 'Play preview'}
+							? $i18n.t('setup.stopPreview')
+							: $i18n.t('setup.playPreview')}
+						title={previewingSound === draft.notificationSound &&
+						draft.notificationSound !== 'none'
+							? $i18n.t('setup.stopPreview')
+							: $i18n.t('setup.playPreview')}
 					>
 						{#if previewingSound === draft.notificationSound && draft.notificationSound !== 'none'}
 							■
@@ -335,7 +339,8 @@
 						id="accentColorPicker"
 						type="color"
 						bind:value={draft.accentColor}
-						aria-label="Custom accent color"
+						aria-label={$i18n.t('setup.customColor')}
+						title={$i18n.t('setup.customColor')}
 					/>
 				</div>
 			</fieldset>

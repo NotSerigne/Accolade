@@ -378,7 +378,12 @@
 					in:fade={{ duration: 200 }}
 				>
 					<div class="image-wrapper">
-						<img src={convertFileSrc(screenshot.path)} alt={screenshot.filename} loading="lazy" />
+						<img
+							src={convertFileSrc(screenshot.path)}
+							alt={screenshot.filename}
+							loading="lazy"
+							decoding="async"
+						/>
 						{#if screenshot.filename.toLowerCase().endsWith('.gif')}
 							<span class="gif-badge">REPLAY GIF</span>
 						{/if}
@@ -436,6 +441,8 @@
 				class="lightbox-main-img"
 				src={convertFileSrc(selectedScreenshot.path)}
 				alt={selectedScreenshot.filename}
+				loading="lazy"
+				decoding="async"
 			/>
 			<div class="lightbox-footer">
 				<div class="lightbox-navigation">
@@ -496,7 +503,9 @@
 										<img
 											class="game-icon"
 											src={game.steamgrid_icon_url || game.game_icon}
-											alt="Game icon"
+											alt={game?.name || 'Game icon'}
+											loading="lazy"
+											decoding="async"
 										/>
 									{/if}
 									<div class="brand-text">
@@ -513,14 +522,32 @@
 											<img
 												class="ach-icon"
 												src={ach.icon}
-												alt="Achievement icon"
+												alt={ach.name || 'Achievement icon'}
+												loading="lazy"
+												decoding="async"
 												onerror={(e) => {
 													const t = e.target as HTMLImageElement;
 													t.style.display = 'none';
 												}}
 											/>
 										{:else}
-											<div class="ach-icon ach-icon-placeholder">🏆</div>
+											<div class="ach-icon ach-icon-placeholder">
+												<svg
+													width="16"
+													height="16"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<path
+														d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+													/>
+												</svg>
+											</div>
 										{/if}
 										<div class="ach-details">
 											<div class="ach-header">
@@ -571,7 +598,7 @@
 							</div>
 						{:else}
 							<div class="brand-text">
-								<h3>Manuel</h3>
+								<h3>{$i18n.t('screenshots.manual')}</h3>
 								<p class="date-text">{formatDate(selectedScreenshot.timestamp)}</p>
 							</div>
 						{/if}
@@ -583,13 +610,13 @@
 						<button class="secondary-btn share-btn" onclick={() => exportShareCard(selectedScreenshot!)}>
 							{$i18n.t('screenshots.shareCard')}
 						</button>
-						<button class="secondary-btn" onclick={closeLightbox}>Fermer</button>
+						<button class="secondary-btn" onclick={closeLightbox}>{$i18n.t('button.close')}</button>
 						<button
 							class="danger-btn"
 							onclick={(e) => {
 								deleteScreenshot(selectedScreenshot!, e);
 								closeLightbox();
-							}}>Supprimer</button
+							}}>{$i18n.t('button.remove')}</button
 						>
 					</div>
 				</div>
@@ -624,6 +651,7 @@
 	.subtitle {
 		color: var(--text-muted);
 		font-size: 14px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.action-btn {
@@ -712,6 +740,8 @@
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 		gap: 24px;
+		align-content: start;
+		align-items: start;
 	}
 
 	.screenshot-card {
@@ -810,6 +840,7 @@
 	.date {
 		font-size: 12px;
 		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 
 	/* Lightbox */
@@ -831,7 +862,7 @@
 	.lightbox-content {
 		max-width: 98vw;
 		max-height: 98vh;
-		background: var(--bg-main);
+		background: var(--bg-panel);
 		border-radius: 10px;
 		overflow: hidden;
 		box-shadow: 0 40px 100px rgba(0, 0, 0, 0.9);
@@ -903,6 +934,7 @@
 		color: var(--text-secondary);
 		min-width: 45px;
 		text-align: center;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.lightbox-info-container {
@@ -952,6 +984,7 @@
 	.date-text {
 		color: var(--text-muted);
 		font-size: 11px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.ach-brand {
@@ -977,11 +1010,11 @@
 		flex-shrink: 0;
 	}
 	.ach-icon-placeholder {
-		background: rgba(200, 169, 110, 0.1);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+		color: var(--accent, #c8a96e);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 16px;
 	}
 
 	.ach-details {
@@ -1145,6 +1178,7 @@
 		font-size: 9px;
 		font-weight: 800;
 		color: var(--text-primary);
+		font-variant-numeric: tabular-nums;
 		position: absolute;
 		inset: 0;
 		display: flex;

@@ -333,12 +333,26 @@
 						<span class="user-name"
 							>{profile1.user?.personaname || $i18n.t('compare.defaultProfile1')}</span
 						>
-						<span class="user-games">{profile1.games.length} jeux</span>
+						<span class="user-games">{$i18n.t('compare.gamesCount', { count: profile1.games.length })}</span>
 					</div>
 				</div>
 			{:else}
 				<div class="placeholder-card">
-					<div class="icon">📁</div>
+					<div class="icon">
+						<svg
+							width="22"
+							height="22"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+						</svg>
+					</div>
 					<span>{$i18n.t('compare.profile1NotLoaded')}</span>
 				</div>
 			{/if}
@@ -389,12 +403,26 @@
 						<span class="user-name"
 							>{profile2.user?.personaname || $i18n.t('compare.defaultProfile2')}</span
 						>
-						<span class="user-games">{profile2.games.length} jeux</span>
+						<span class="user-games">{$i18n.t('compare.gamesCount', { count: profile2.games.length })}</span>
 					</div>
 				</div>
 			{:else}
 				<div class="placeholder-card">
-					<div class="icon">📁</div>
+					<div class="icon">
+						<svg
+							width="22"
+							height="22"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+						</svg>
+					</div>
 					<span>{$i18n.t('compare.profile2NotLoaded')}</span>
 				</div>
 			{/if}
@@ -579,7 +607,7 @@
 	}
 
 	.compare-page::-webkit-scrollbar-thumb {
-		background: rgba(255, 255, 255, 0.1);
+		background: var(--border-soft);
 		border: 4px solid transparent;
 		background-clip: padding-box;
 		border-radius: 10px;
@@ -587,7 +615,7 @@
 	}
 
 	.compare-page::-webkit-scrollbar-thumb:hover {
-		background: rgba(255, 255, 255, 0.2);
+		background: var(--text-muted);
 	}
 
 	.page-header {
@@ -700,6 +728,7 @@
 	.user-games {
 		font-size: 0.85rem;
 		color: var(--text-secondary);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.placeholder-card {
@@ -710,7 +739,9 @@
 		opacity: 0.5;
 	}
 	.placeholder-card .icon {
-		font-size: 1.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.vs-badge {
@@ -738,6 +769,7 @@
 		font-size: 1.4rem;
 		font-weight: 800;
 		color: var(--accent);
+		font-variant-numeric: tabular-nums;
 	}
 	.ribbon-item .lbl {
 		font-size: 0.75rem;
@@ -799,6 +831,7 @@
 		gap: 20px;
 		font-size: 2rem;
 		font-weight: 800;
+		font-variant-numeric: tabular-nums;
 	}
 	.v-vs {
 		font-size: 1rem;
@@ -905,10 +938,12 @@
 		font-size: 0.7rem;
 		color: var(--text-muted);
 		font-family: monospace;
+		font-variant-numeric: tabular-nums;
 	}
 	.bar-pct {
 		font-size: 0.75rem;
 		font-family: monospace;
+		font-variant-numeric: tabular-nums;
 		font-weight: 700;
 		width: 35px;
 		text-align: right;

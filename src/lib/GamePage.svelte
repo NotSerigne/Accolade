@@ -13,7 +13,7 @@
 		type HltbData,
 		games
 	} from '$lib/stores/Games.js';
-	import { searchQuery, achievementJumpIntent } from '$lib/stores/ui.js';
+	import { searchQuery, achievementJumpIntent, settingsOpen } from '$lib/stores/ui.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { open } from '@tauri-apps/plugin-shell';
@@ -262,9 +262,10 @@
 			.catch(() => {});
 	});
 
+	let pinnedSet = $derived(new Set(pinnedKeys.map((k) => k.trim().toLowerCase())));
+
 	function isPinned(key: string): boolean {
-		const norm = key.trim().toLowerCase();
-		return pinnedKeys.some((k) => k.trim().toLowerCase() === norm);
+		return pinnedSet.has(key.trim().toLowerCase());
 	}
 
 	async function togglePin(key: string): Promise<void> {
@@ -292,13 +293,30 @@
 		void open(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
 	}
 
+	type ExportNotice = {
+		message: string;
+		type: 'success' | 'error';
+	};
+
+	let exportNotice = $state<ExportNotice | null>(null);
+	let exportNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function showExportNotice(message: string, type: 'success' | 'error' = 'success') {
+		exportNotice = { message, type };
+		if (exportNoticeTimer) clearTimeout(exportNoticeTimer);
+		exportNoticeTimer = setTimeout(() => {
+			exportNotice = null;
+			exportNoticeTimer = null;
+		}, 4000);
+	}
+
 	async function handleExportGame() {
 		if (game) {
 			try {
 				const path = await exportGame(game);
-				alert(path);
+				showExportNotice(path, 'success');
 			} catch {
-				alert('Export failed');
+				showExportNotice('Export failed', 'error');
 			}
 		}
 	}
@@ -323,10 +341,10 @@
 					});
 
 				const path = await exportSummaryPdf(title, content);
-				alert(path);
+				showExportNotice(path, 'success');
 			} catch (err) {
 				console.error('PDF Export Error:', err);
-				alert(String(err));
+				showExportNotice(String(err), 'error');
 			}
 		}
 	}
@@ -379,6 +397,7 @@
 		let unlisten: (() => void) | undefined;
 
 		const handleKeydown = (e: KeyboardEvent) => {
+			if (get(settingsOpen)) return;
 			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
 			if (e.key === 'ArrowLeft' && prevGame) {
@@ -401,6 +420,8 @@
 		return () => {
 			unlisten?.();
 			window.removeEventListener('keydown', handleKeydown);
+			if (flashTimer) clearTimeout(flashTimer);
+			if (exportNoticeTimer) clearTimeout(exportNoticeTimer);
 		};
 	});
 
@@ -593,7 +614,7 @@
 
 	function formatDate(ts: number | null): string {
 		if (!ts) return '';
-		return new Date(ts * 1000).toLocaleDateString('fr-FR', {
+		return new Date(ts * 1000).toLocaleDateString($i18n.locale, {
 			day: '2-digit',
 			month: '2-digit',
 			year: 'numeric',
@@ -616,7 +637,6 @@
 
 	type RarityPalette = {
 		border: string;
-		shadow: string;
 		badgeBg: string;
 		badgeColor: string;
 		fill: string;
@@ -626,18 +646,16 @@
 		const n = parseFloat(pct);
 		if (isNaN(n)) {
 			return {
-				border: 'rgba(255,255,255,0.06)',
-				shadow: 'none',
-				badgeBg: 'rgba(255,255,255,0.05)',
-				badgeColor: '#6a7080',
-				fill: '#4a5060'
+				border: 'var(--border-soft)',
+				badgeBg: 'var(--surface-2)',
+				badgeColor: 'var(--text-muted)',
+				fill: 'var(--text-muted)'
 			};
 		}
 
 		if (n <= 0.1) {
 			return {
 				border: '#ff3b5c',
-				shadow: '0 0 10px rgba(255,59,92,0.15)',
 				badgeBg: 'rgba(255,59,92,0.14)',
 				badgeColor: '#ff3b5c',
 				fill: '#ff3b5c'
@@ -646,7 +664,6 @@
 		if (n <= 1) {
 			return {
 				border: '#ffd85a',
-				shadow: '0 0 10px rgba(255,216,90,0.12)',
 				badgeBg: 'rgba(255,216,90,0.14)',
 				badgeColor: '#ffd85a',
 				fill: '#ffd85a'
@@ -655,7 +672,6 @@
 		if (n <= 3) {
 			return {
 				border: '#a855f7',
-				shadow: '0 0 10px rgba(168,85,247,0.15)',
 				badgeBg: 'rgba(168,85,247,0.14)',
 				badgeColor: '#a855f7',
 				fill: '#a855f7'
@@ -664,7 +680,6 @@
 		if (n <= 7) {
 			return {
 				border: '#f4b860',
-				shadow: '0 0 10px rgba(244,184,96,0.12)',
 				badgeBg: 'rgba(244,184,96,0.14)',
 				badgeColor: '#f4b860',
 				fill: '#f4b860'
@@ -673,7 +688,6 @@
 		if (n <= 15) {
 			return {
 				border: '#4ac8ff',
-				shadow: '0 0 10px rgba(74,200,255,0.15)',
 				badgeBg: 'rgba(74,200,255,0.1)',
 				badgeColor: '#4ac8ff',
 				fill: '#4ac8ff'
@@ -682,7 +696,6 @@
 		if (n <= 35) {
 			return {
 				border: '#3ddc84',
-				shadow: '0 0 10px rgba(61,220,132,0.12)',
 				badgeBg: 'rgba(61,220,132,0.12)',
 				badgeColor: '#3ddc84',
 				fill: '#3ddc84'
@@ -690,11 +703,10 @@
 		}
 
 		return {
-			border: 'rgba(255,255,255,0.06)',
-			shadow: 'none',
-			badgeBg: 'rgba(255,255,255,0.05)',
-			badgeColor: '#6a7080',
-			fill: '#4a5060'
+			border: 'var(--border-soft)',
+			badgeBg: 'var(--surface-2)',
+			badgeColor: 'var(--text-muted)',
+			fill: 'var(--text-muted)'
 		};
 	}
 
@@ -711,7 +723,7 @@
 </script>
 
 {#if !game}
-	<div class="not-found">Jeu introuvable.</div>
+	<div class="not-found">{$i18n.t('game.notFound')}</div>
 {:else}
 	<div class="game-page" style:--game-bg={`url('${heroBackground(game)}')`}>
 		<div class="bg-overlay"></div>
@@ -735,7 +747,7 @@
 				<span class="nav-label">{prevGame ? prevGame.name || prevGame.id : ''}</span>
 			</button>
 
-			<span class="nav-index">{currentIndex + 1} / {$games.length}</span>
+			<span class="nav-index tabular-nums">{currentIndex + 1} / {$games.length}</span>
 
 			<button
 				class="nav-btn"
@@ -766,9 +778,22 @@
 								class="big-fav-btn"
 								class:favorited={game.is_favorite}
 								onclick={() => toggleGameFavorite(game.id)}
-								title={game.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+								title={$i18n.t(
+									game.is_favorite ? 'games.action.removeFavorite' : 'games.action.addFavorite'
+								)}
+								aria-label={$i18n.t(
+									game.is_favorite ? 'games.action.removeFavorite' : 'games.action.addFavorite'
+								)}
 							>
-								{game.is_favorite ? '♥️' : '♡'}
+								{#if game.is_favorite}
+									<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+									</svg>
+								{:else}
+									<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+									</svg>
+								{/if}
 							</button>
 						</div>
 						<span class="emulator-badge"
@@ -782,12 +807,12 @@
 						<div class="progress-card">
 							<div class="progress-left">
 								<div class="progress-stats">
-									<span class="main-count"
+									<span class="main-count tabular-nums"
 										><strong>{unlockedCount}</strong>
 										<span class="slash">/ {totalCount}</span></span
 									>
 									<span
-										class="main-pct"
+										class="main-pct tabular-nums"
 										style:color={progressPct === 100 ? 'var(--completed)' : 'var(--accent)'}
 										>{progressPct}%</span
 									>
@@ -803,22 +828,26 @@
 							</div>
 							<div class="progress-right">
 								<div class="stat-item">
-									<span class="stat-label">TOTAL</span>
-									<span class="stat-value">{totalCount}</span>
+									<span class="stat-label">{$i18n.t('game.total')}</span>
+									<span class="stat-value tabular-nums">{totalCount}</span>
 								</div>
 								<div class="stat-item">
 									<span class="stat-label">{$i18n.t('game.unlocked')}</span>
-									<span class="stat-value highlight">{unlockedCount}</span>
+									<span class="stat-value highlight tabular-nums">{unlockedCount}</span>
 								</div>
 								<div class="stat-item playtime-stat">
 									<div class="stat-label-row">
-										<span class="stat-label">TEMPS DE JEU</span>
+										<span class="stat-label">{$i18n.t('game.playtime')}</span>
 										<button
 											class="mini-edit-icon"
 											onclick={() => (editingPlaytime ? (editingPlaytime = false) : openPlaytimeEditor())}
-											title="Modifier le temps de jeu"
+											title={$i18n.t('game.editPlaytime')}
+											aria-label={$i18n.t('game.editPlaytime')}
 										>
-											✎
+											<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+												<path d="M12 20h9" />
+												<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+											</svg>
 										</button>
 									</div>
 									{#if editingPlaytime}
@@ -827,8 +856,8 @@
 												type="number"
 												min="0"
 												bind:value={editPlaytimeHours}
-												class="pt-input"
-												title="Heures"
+												class="pt-input tabular-nums"
+												title={$i18n.t('game.hours')}
 											/>
 											<span>h</span>
 											<input
@@ -836,14 +865,22 @@
 												min="0"
 												max="59"
 												bind:value={editPlaytimeMins}
-												class="pt-input"
-												title="Minutes"
+												class="pt-input tabular-nums"
+												title={$i18n.t('game.minutes')}
 											/>
 											<span>m</span>
-											<button class="pt-save-btn" onclick={saveManualPlaytime}>✓</button>
+											<button
+												class="pt-save-btn"
+												onclick={saveManualPlaytime}
+												aria-label={$i18n.t('game.save')}
+											>
+												<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+													<polyline points="20 6 9 17 4 12" />
+												</svg>
+											</button>
 										</div>
 									{:else}
-										<span class="stat-value playtime-val">{formatPlaytime(gamePlaytimeSeconds)}</span>
+										<span class="stat-value playtime-val tabular-nums">{formatPlaytime(gamePlaytimeSeconds)}</span>
 									{/if}
 								</div>
 							</div>
@@ -852,33 +889,32 @@
 						<!-- HowLongToBeat Bar -->
 						<div class="hltb-bar">
 							<div class="hltb-brand">
-								<span class="hltb-badge">HLTB</span>
-								<span class="hltb-sub">HowLongToBeat</span>
+								<span class="hltb-badge">HowLongToBeat</span>
 							</div>
 
 							{#if editingHltb}
 								<div class="hltb-edit-row">
 									<label>
-										<span>Histoire (h)</span>
+										<span>{$i18n.t('game.hltb.mainShort')}</span>
 										<input type="number" step="0.5" min="0" bind:value={customHltbMain} placeholder="ex: 15" />
 									</label>
 									<label>
-										<span>+ Extras (h)</span>
+										<span>{$i18n.t('game.hltb.extraShort')}</span>
 										<input type="number" step="0.5" min="0" bind:value={customHltbExtra} placeholder="ex: 28" />
 									</label>
 									<label>
-										<span>100% (h)</span>
+										<span>{$i18n.t('game.hltb.compShort')}</span>
 										<input type="number" step="0.5" min="0" bind:value={customHltb100} placeholder="ex: 45" />
 									</label>
-									<button class="hltb-btn primary" onclick={saveCustomHltb}>Enregistrer</button>
-									<button class="hltb-btn" onclick={() => (editingHltb = false)}>Annuler</button>
+									<button class="hltb-btn primary" onclick={saveCustomHltb}>{$i18n.t('game.save')}</button>
+									<button class="hltb-btn" onclick={() => (editingHltb = false)}>{$i18n.t('game.cancel')}</button>
 								</div>
 							{:else}
 								<div class="hltb-metrics">
 									<div class="hltb-metric">
 										<div class="hltb-metric-top">
-											<span class="hltb-label">Histoire principale</span>
-											<strong class="hltb-hours">
+											<span class="hltb-label">{$i18n.t('game.hltb.main')}</span>
+											<strong class="hltb-hours tabular-nums">
 												{hltbLoading ? '...' : hltbData?.main_hours ? `${hltbData.main_hours}h` : '—'}
 											</strong>
 										</div>
@@ -892,8 +928,8 @@
 
 									<div class="hltb-metric">
 										<div class="hltb-metric-top">
-											<span class="hltb-label">Histoire + Extras</span>
-											<strong class="hltb-hours">
+											<span class="hltb-label">{$i18n.t('game.hltb.extra')}</span>
+											<strong class="hltb-hours tabular-nums">
 												{hltbLoading
 													? '...'
 													: hltbData?.main_extra_hours
@@ -911,8 +947,8 @@
 
 									<div class="hltb-metric">
 										<div class="hltb-metric-top">
-											<span class="hltb-label">Complétionniste 100%</span>
-											<strong class="hltb-hours">
+											<span class="hltb-label">{$i18n.t('game.hltb.completionist')}</span>
+											<strong class="hltb-hours tabular-nums">
 												{hltbLoading
 													? '...'
 													: hltbData?.completionist_hours
@@ -933,17 +969,25 @@
 									<button
 										class="hltb-icon-btn"
 										onclick={openHltbEditor}
-										title="Définir ou modifier les durées HLTB manuellement"
+										title={$i18n.t('game.hltb.editManual')}
+										aria-label={$i18n.t('game.hltb.editManual')}
 									>
-										✎
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+											<path d="M12 20h9" />
+											<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+										</svg>
 									</button>
 									<button
 										class="hltb-icon-btn"
 										disabled={hltbLoading}
 										onclick={refreshHltb}
-										title="Actualiser depuis HowLongToBeat"
+										title={$i18n.t('game.hltb.refresh')}
+										aria-label={$i18n.t('game.hltb.refresh')}
 									>
-										↻
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+											<polyline points="23 4 23 10 17 10" />
+											<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+										</svg>
 									</button>
 								</div>
 							{/if}
@@ -954,14 +998,18 @@
 								{#each game.tags || [] as tag (tag)}
 									<span class="tag">
 										{tag}
-										<button class="remove-tag" onclick={() => removeGameTag(game.id, tag)}>×</button
+										<button
+											class="remove-tag"
+											onclick={() => removeGameTag(game.id, tag)}
+											title={$i18n.t('game.removeTag')}
+											aria-label={$i18n.t('game.removeTag')}>×</button
 										>
 									</span>
 								{/each}
 								<div class="add-tag-form">
 									<input
 										type="text"
-										placeholder="Ajouter un tag..."
+										placeholder={$i18n.t('game.addTag')}
 										bind:value={newTag}
 										list="existing-tags"
 										onkeydown={(e) => e.key === 'Enter' && handleAddTag()}
@@ -981,14 +1029,14 @@
 				<div class="main-section">
 					<div class="controls-bar">
 						<div class="view-tabs">
-							<button class="tab" class:active={activeView === 'achievements'} onclick={() => (activeView = 'achievements')}>Succès</button>
-							<button class="tab" class:active={activeView === 'map'} onclick={() => (activeView = 'map')}>Carte de progression</button>
+							<button class="tab" class:active={activeView === 'achievements'} onclick={() => (activeView = 'achievements')}>{$i18n.t('game.achievementsTitle')}</button>
+							<button class="tab" class:active={activeView === 'map'} onclick={() => (activeView = 'map')}>{$i18n.t('game.shareCard')}</button>
 						</div>
 
 						<div class="controls-bottom">
 						{#if activeView === 'achievements'}
 							<div class="filter-tabs">
-								<button class="tab" class:active={filter === 'all'} onclick={() => (filter = 'all')}>Tout</button>
+								<button class="tab" class:active={filter === 'all'} onclick={() => (filter = 'all')}>{$i18n.t('game.filterAll')}</button>
 								<button class="tab" class:active={filter === 'unlocked'} onclick={() => (filter = 'unlocked')}>{$i18n.t('game.unlocked')}</button>
 								<button class="tab" class:active={filter === 'locked'} onclick={() => (filter = 'locked')}>{$i18n.t('game.locked')}</button>
 							</div>
@@ -997,8 +1045,8 @@
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
 									<circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
 								</svg>
-								<input class="search-input" type="text" placeholder="Chercher un succès..." bind:value={search} />
-								<span class="search-count">{filtered.length} / {totalCount}</span>
+								<input class="search-input" type="text" placeholder={$i18n.t('game.searchAchievement')} bind:value={search} />
+								<span class="search-count tabular-nums">{filtered.length} / {totalCount}</span>
 							</div>
 
 							<select class="sort-select" bind:value={sort}>
@@ -1051,13 +1099,19 @@
 								</button>
 						{:else}
 							<div class="map-summary">
-								<span class="map-summary-title">Progression</span>
-								<span class="map-summary-value">{unlockedCount} / {totalCount} étapes</span>
+								<span class="map-summary-title">{$i18n.t('game.progressLabel')}</span>
+								<span class="map-summary-value tabular-nums">{$i18n.t('game.stepsCount', { unlocked: unlockedCount, total: totalCount })}</span>
 							</div>
 						{/if}
 
 								<div class="export-actions">
-									<button class="profile-btn-mini" onclick={handleExportGame} title={$i18n.t('game.exportJson')}>
+									<button
+										type="button"
+										class="profile-btn-mini"
+										onclick={handleExportGame}
+										title={$i18n.t('game.exportJson')}
+										aria-label={$i18n.t('game.exportJson')}
+									>
 							<svg
 								width="14"
 								height="14"
@@ -1071,7 +1125,13 @@
 							>
 									</button>
 
-									<button class="profile-btn-mini" onclick={handleExportGamePdf} title={$i18n.t('game.exportPdf')}>
+									<button
+										type="button"
+										class="profile-btn-mini"
+										onclick={handleExportGamePdf}
+										title={$i18n.t('game.exportPdf')}
+										aria-label={$i18n.t('game.exportPdf')}
+									>
 							<svg
 								width="14"
 								height="14"
@@ -1090,7 +1150,13 @@
 							>
 									</button>
 
-									<button class="profile-btn-mini" onclick={openProfilesFolder} title={$i18n.t('game.exportFolder')}>
+									<button
+										type="button"
+										class="profile-btn-mini"
+										onclick={openProfilesFolder}
+										title={$i18n.t('game.exportFolder')}
+										aria-label={$i18n.t('game.exportFolder')}
+									>
 							<svg
 								width="14"
 								height="14"
@@ -1125,6 +1191,7 @@
 									{@const palette = rarityPalette(ach.completionpercentage)}
 									{@const displayIcon = isLocked && ach.icon_gray ? ach.icon_gray : ach.icon}
 									{@const achNormalizedKey = normalizeAchievementKey(ach.key)}
+									{@const pinned = pinnedSet.has(achNormalizedKey)}
 									{@const isTopbarMatch =
 										globalAchievementHighlight &&
 										(ach.name.toLowerCase().includes(globalAchievementHighlight) ||
@@ -1137,7 +1204,6 @@
 										class:highlighted={Boolean(isTopbarMatch)}
 										class:jump-flash={flashAchievementKey === achNormalizedKey}
 										style:border-color={palette.border}
-										style:box-shadow={palette.shadow}
 										use:trackAchievementRow={ach.key}
 									>
 										<div class="ach-card-inner">
@@ -1147,15 +1213,35 @@
 														src={displayIcon}
 														alt={ach.name}
 														class:muted-icon={isLocked}
+														loading="lazy"
+														decoding="async"
 														onerror={(event) => {
 															const target = event.currentTarget as HTMLImageElement;
 															target.style.display = 'none';
 															target.parentElement?.classList.add('icon-error');
 														}}
 													/>
-													<span class="ach-placeholder icon-fallback">🏆</span>
+													<span class="ach-placeholder icon-fallback">
+														<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+															<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+															<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+															<path d="M4 22h16" />
+															<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+															<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+															<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+														</svg>
+													</span>
 												{:else}
-													<span class="ach-placeholder">🏆</span>
+													<span class="ach-placeholder">
+														<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+															<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+															<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+															<path d="M4 22h16" />
+															<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+															<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+															<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+														</svg>
+													</span>
 												{/if}
 											</div>
 
@@ -1167,7 +1253,7 @@
 															: ach.name || ach.key}
 													</div>
 													{#if isUnlocked && ach.unlocked_time}
-														<div class="ach-date">{formatDate(ach.unlocked_time)}</div>
+														<div class="ach-date tabular-nums">{formatDate(ach.unlocked_time)}</div>
 													{/if}
 												</div>
 
@@ -1184,7 +1270,7 @@
 														{@const cur = ach.progress ?? 0}
 														{@const pct = Math.min(Math.max((cur / ach.max_progress) * 100, 0), 100)}
 														<div class="ach-progress-info">
-															<span class="ach-progress-tag">
+															<span class="ach-progress-tag tabular-nums">
 																{formatProgressVal(cur)} / {formatProgressVal(ach.max_progress)}
 															</span>
 															<div class="rarity-progress-track">
@@ -1196,7 +1282,7 @@
 													{#if ach.completionpercentage}
 														<div class="rarity-info">
 															<span
-																class="rarity-tag"
+																class="rarity-tag tabular-nums"
 																style:background={palette.badgeBg}
 																style:color={palette.badgeColor}
 															>
@@ -1219,7 +1305,8 @@
 															class="action-btn"
 															class:is-copied={editingAchKey === ach.key}
 															onclick={() => openAchievementEditor(ach)}
-															title="Modifier l'état ou la date de déblocage"
+															title={$i18n.t('game.editAchievementDate')}
+															aria-label={$i18n.t('game.editAchievementDate')}
 														>
 															<svg
 																width="11"
@@ -1234,18 +1321,18 @@
 																<path d="M12 20h9" />
 																<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
 															</svg>
-															Éditer
+															{$i18n.t('game.edit')}
 														</button>
 														<button
 															class="action-btn"
-															class:is-copied={isPinned(ach.key)}
+															class:is-copied={pinned}
 															onclick={() => togglePin(ach.key)}
 														>
 															<svg
 																width="11"
 																height="11"
 																viewBox="0 0 24 24"
-																fill={isPinned(ach.key) ? 'currentColor' : 'none'}
+																fill={pinned ? 'currentColor' : 'none'}
 																stroke="currentColor"
 																stroke-width="2.5"
 																stroke-linecap="round"
@@ -1254,7 +1341,7 @@
 																<line x1="12" y1="17" x2="12" y2="22" />
 																<path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
 															</svg>
-															{isPinned(ach.key) ? $i18n.t('hud.unpin') : $i18n.t('hud.pin')}
+															{pinned ? $i18n.t('hud.unpin') : $i18n.t('hud.pin')}
 														</button>
 														<button
 															class="action-btn"
@@ -1326,12 +1413,23 @@
 														class:unlocked={editAchUnlocked}
 														onclick={() => (editAchUnlocked = !editAchUnlocked)}
 													>
-														{editAchUnlocked ? '✓ Débloqué' : '🔒 Verrouillé'}
+														{#if editAchUnlocked}
+															<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+																<polyline points="20 6 9 17 4 12" />
+															</svg>
+															<span>{$i18n.t('game.stateUnlocked')}</span>
+														{:else}
+															<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+																<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+																<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+															</svg>
+															<span>{$i18n.t('game.stateLocked')}</span>
+														{/if}
 													</button>
 
 													{#if editAchUnlocked}
 														<div class="ach-dt-group">
-															<span class="ach-dt-label">Date & heure :</span>
+															<span class="ach-dt-label">{$i18n.t('game.dateTimeLabel')}</span>
 															<input
 																type="datetime-local"
 																class="ach-dt-input"
@@ -1342,7 +1440,7 @@
 																class="ach-dt-now"
 																onclick={setEditDateTimeNow}
 															>
-																Maintenant
+																{$i18n.t('game.now')}
 															</button>
 														</div>
 													{/if}
@@ -1355,14 +1453,14 @@
 														disabled={savingAchEdit}
 														onclick={() => saveAchievementEdit(ach.key)}
 													>
-														{savingAchEdit ? '...' : 'Enregistrer'}
+														{savingAchEdit ? '...' : $i18n.t('game.save')}
 													</button>
 													<button
 														type="button"
 														class="ach-cancel-btn"
 														onclick={() => (editingAchKey = null)}
 													>
-														Annuler
+														{$i18n.t('game.cancel')}
 													</button>
 												</div>
 											</div>
@@ -1381,8 +1479,8 @@
 							<div class="progress-map">
 								<div class="map-intro">
 									<div class="map-intro-copy">
-										<h2>Carte de progression</h2>
-										<p>Chaque étape représente un succès de ce jeu.</p>
+										<h2>{$i18n.t('game.shareCard')}</h2>
+										<p>{$i18n.t('game.timelineStepHint')}</p>
 									</div>
 									<strong class="map-overall-progress">{unlockedCount}/{totalCount}</strong>
 								</div>
@@ -1402,35 +1500,55 @@
 													void openAchievementFromMap(ach.key);
 												}
 											}}
-											aria-label={`Voir la description de ${ach.name || ach.key}`}
+											aria-label={$i18n.t('game.viewDescriptionAria', { name: ach.name || ach.key })}
 										>
 											<div
 												class="map-achievement-index"
 												class:complete={isUnlocked}
-												aria-label={`Succès ${index + 1} sur ${totalCount}`}
+												aria-label={$i18n.t('game.stepIndexAria', { index: index + 1, total: totalCount })}
 											>
 												<span>{index + 1}</span>
 												<small>/{totalCount}</small>
 											</div>
 											<div class="map-achievement-icon">
 												{#if ach.icon || ach.icon_gray}
-													<img src={isUnlocked ? ach.icon : ach.icon_gray || ach.icon} alt="" />
+													<img
+														src={isUnlocked ? ach.icon : ach.icon_gray || ach.icon}
+														alt=""
+														loading="lazy"
+														decoding="async"
+													/>
 												{:else}
-													<span>🏆</span>
+													<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+														<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+														<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+														<path d="M4 22h16" />
+														<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+														<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+														<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+													</svg>
 												{/if}
 											</div>
 											<div class="map-achievement-content">
 												<div class="map-achievement-title">{ach.name || ach.key}</div>
-												<div class="map-achievement-description">{ach.desc || 'Succès à débloquer'}</div>
+												<div class="map-achievement-description">{ach.desc || $i18n.t('game.achievementToUnlock')}</div>
 												<div class="map-achievement-meta">
-													<span class="map-rarity" style:color={palette.badgeColor}>{rarityLabel(ach.completionpercentage) || 'Inconnu'} · {parseFloat(ach.completionpercentage || '0').toFixed(1)}%</span>
+													<span class="map-rarity tabular-nums" style:color={palette.badgeColor}>{rarityLabel(ach.completionpercentage) || $i18n.t('game.unknown')} · {parseFloat(ach.completionpercentage || '0').toFixed(1)}%</span>
 													<div class="map-rarity-track">
 														<div class="map-rarity-fill" style:width={`${Math.min(parseFloat(ach.completionpercentage) || 0, 100)}%`} style:background={palette.fill}></div>
 													</div>
 												</div>
 											</div>
 											<div class="map-achievement-status" class:complete={isUnlocked}>
-												{isUnlocked ? '✓' : '·'}
+												{#if isUnlocked}
+													<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+														<polyline points="20 6 9 17 4 12" />
+													</svg>
+												{:else}
+													<svg width="6" height="6" viewBox="0 0 8 8" fill="currentColor" aria-hidden="true">
+														<circle cx="4" cy="4" r="3" />
+													</svg>
+												{/if}
 											</div>
 										</div>
 									{/each}
@@ -1441,6 +1559,36 @@
 				</div>
 			</div>
 		</div>
+
+		{#if exportNotice}
+			<div
+				class="export-toast"
+				class:is-error={exportNotice.type === 'error'}
+				role="status"
+				aria-live="polite"
+			>
+				{#if exportNotice.type === 'error'}
+					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+					</svg>
+				{:else}
+					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<polyline points="20 6 9 17 4 12" />
+					</svg>
+				{/if}
+				<span class="export-toast-msg">{exportNotice.message}</span>
+				<button
+					type="button"
+					class="export-toast-close"
+					aria-label={$i18n.t('button.close')}
+					onclick={() => (exportNotice = null)}
+				>
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+						<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+					</svg>
+				</button>
+			</div>
+		{/if}
 	</div>
 {/if}
 
@@ -1450,7 +1598,7 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		background-color: #080a0f;
+		background-color: var(--bg-app);
 		background-image: var(--game-bg);
 		background-size: cover;
 		background-position: center top;
@@ -1465,14 +1613,14 @@
 		overflow-y: overlay;
 		overflow-x: hidden;
 		scrollbar-width: thin;
-		scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+		scrollbar-color: var(--border-soft) transparent;
 	}
 
 	.game-scroll-area::-webkit-scrollbar {
 		width: 6px;
 	}
 	.game-scroll-area::-webkit-scrollbar-thumb {
-		background: rgba(255, 255, 255, 0.15);
+		background: var(--border-soft);
 		border-radius: 10px;
 	}
 	.game-scroll-area::-webkit-scrollbar-track {
@@ -1484,9 +1632,9 @@
 		inset: 0;
 		background: linear-gradient(
 			180deg,
-			rgba(8, 10, 15, 0.2) 0%,
-			rgba(8, 10, 15, 0.85) 35%,
-			rgba(8, 10, 15, 0.98) 100%
+			rgba(8, 10, 15, 0.34) 0%,
+			color-mix(in srgb, var(--bg-app) 86%, transparent) 38%,
+			var(--bg-app) 100%
 		);
 		z-index: -1;
 		pointer-events: none;
@@ -1506,7 +1654,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #6a7080;
+		color: var(--text-muted);
 		font-size: 14px;
 	}
 	.not-found {
@@ -1528,20 +1676,20 @@
 		justify-content: space-between;
 		padding: 16px 32px;
 		flex-shrink: 0;
-		background: rgba(8, 10, 15, 0.5);
+		background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
 		backdrop-filter: blur(16px);
-		border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+		border-bottom: 1px solid var(--border-soft);
 	}
 
 	.nav-btn {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		background: rgba(255, 255, 255, 0.04);
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 8px;
 		padding: 6px 14px;
-		color: #888;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 600;
 		cursor: pointer;
@@ -1549,12 +1697,12 @@
 		max-width: 180px;
 	}
 	.nav-btn:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.08);
-		color: #fff;
-		border-color: rgba(255, 255, 255, 0.12);
+		background: var(--surface-hover);
+		color: var(--text-primary);
+		border-color: var(--border-specular);
 	}
 	.nav-btn:disabled {
-		opacity: 0.2;
+		opacity: 0.28;
 		cursor: default;
 	}
 	.nav-label {
@@ -1564,9 +1712,10 @@
 	}
 	.nav-index {
 		font-size: 12px;
-		color: #444;
+		color: var(--text-muted);
 		font-weight: 700;
 		letter-spacing: 0.5px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.game-header {
@@ -1583,6 +1732,7 @@
 		font-size: 42px;
 		font-weight: 800;
 		color: #fff;
+		text-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
 		letter-spacing: -1px;
 	}
 	.title-with-fav {
@@ -1593,33 +1743,32 @@
 	.big-fav-btn {
 		background: transparent;
 		border: none;
-		font-size: 32px;
 		cursor: pointer;
-		color: rgba(255, 255, 255, 0.2);
-		transition: all 0.2s;
+		color: rgba(255, 255, 255, 0.45);
+		transition: all 0.2s var(--spring-out);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0;
+		padding: 4px;
 	}
 	.big-fav-btn:hover {
 		transform: scale(1.1);
-		color: rgba(255, 255, 255, 0.5);
+		color: rgba(255, 255, 255, 0.8);
 	}
 	.big-fav-btn.favorited {
 		color: #ff4d4d;
-		filter: drop-shadow(0 0 10px rgba(255, 77, 77, 0.3));
 	}
 	.emulator-badge {
 		font-size: 10px;
 		font-weight: 700;
 		color: #fff;
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: rgba(0, 0, 0, 0.42);
+		border: 1px solid rgba(255, 255, 255, 0.2);
 		border-radius: 20px;
 		padding: 4px 14px;
 		text-transform: uppercase;
 		letter-spacing: 1.2px;
+		backdrop-filter: blur(8px);
 	}
 
 	.progress-card-container {
@@ -1629,14 +1778,14 @@
 	}
 
 	.progress-card {
-		background: rgba(13, 20, 28, 0.85);
-		border: 1px solid rgba(255, 255, 255, 0.04);
+		background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+		border: 1px solid var(--border-soft);
 		border-radius: 16px;
 		padding: 24px 32px;
 		display: flex;
 		gap: 48px;
-		backdrop-filter: blur(12px);
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+		backdrop-filter: blur(16px);
+		box-shadow: var(--shadow-elevated);
 	}
 
 	.stat-label-row {
@@ -1647,11 +1796,13 @@
 	.mini-edit-icon {
 		background: transparent;
 		border: none;
-		color: #6a7080;
-		font-size: 11px;
+		color: var(--text-muted);
 		cursor: pointer;
-		padding: 0 2px;
+		padding: 2px;
 		line-height: 1;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		transition: color 0.15s;
 	}
 	.mini-edit-icon:hover {
@@ -1665,40 +1816,43 @@
 		align-items: center;
 		gap: 4px;
 		font-size: 12px;
-		color: #9ca3af;
+		color: var(--text-secondary);
 	}
 	.pt-input {
 		width: 48px;
-		background: rgba(0, 0, 0, 0.45);
-		border: 1px solid rgba(255, 255, 255, 0.15);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 6px;
-		color: #fff;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 3px 6px;
 		outline: none;
+		font-variant-numeric: tabular-nums;
 	}
 	.pt-save-btn {
 		background: var(--accent, #c8a96e);
-		color: #080a0f;
+		color: var(--accent-text);
 		border: none;
 		border-radius: 6px;
-		padding: 3px 8px;
-		font-size: 11px;
-		font-weight: 800;
+		padding: 4px 8px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		cursor: pointer;
 	}
 
 	/* HowLongToBeat Bar */
 	.hltb-bar {
-		background: rgba(13, 20, 28, 0.75);
-		border: 1px solid rgba(255, 255, 255, 0.05);
+		background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+		border: 1px solid var(--border-soft);
 		border-radius: 14px;
 		padding: 12px 20px;
 		display: flex;
 		align-items: center;
 		gap: 24px;
-		backdrop-filter: blur(10px);
+		backdrop-filter: blur(12px);
+		box-shadow: var(--shadow-card);
 	}
 	.hltb-brand {
 		display: flex;
@@ -1715,11 +1869,6 @@
 		padding: 3px 8px;
 		border-radius: 6px;
 		letter-spacing: 0.08em;
-	}
-	.hltb-sub {
-		font-size: 11px;
-		font-weight: 700;
-		color: #6a7080;
 	}
 	.hltb-metrics {
 		flex: 1;
@@ -1739,18 +1888,18 @@
 	}
 	.hltb-label {
 		font-size: 11px;
-		color: #8f97a8;
+		color: var(--text-secondary);
 		font-weight: 600;
 	}
 	.hltb-hours {
 		font-size: 13px;
 		font-weight: 800;
-		color: #fff;
+		color: var(--text-primary);
 		font-variant-numeric: tabular-nums;
 	}
 	.hltb-track {
 		height: 4px;
-		background: rgba(255, 255, 255, 0.06);
+		background: var(--surface-2);
 		border-radius: 3px;
 		overflow: hidden;
 	}
@@ -1773,9 +1922,9 @@
 		flex-shrink: 0;
 	}
 	.hltb-icon-btn {
-		background: rgba(255, 255, 255, 0.04);
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		color: #8f97a8;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
 		width: 26px;
 		height: 26px;
 		border-radius: 6px;
@@ -1783,12 +1932,11 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 12px;
 		transition: all 0.15s;
 	}
 	.hltb-icon-btn:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.1);
-		color: #fff;
+		background: var(--surface-hover);
+		color: var(--text-primary);
 	}
 	.hltb-edit-row {
 		flex: 1;
@@ -1802,22 +1950,23 @@
 		align-items: center;
 		gap: 6px;
 		font-size: 11px;
-		color: #9ca3af;
+		color: var(--text-secondary);
 	}
 	.hltb-edit-row input {
 		width: 68px;
-		background: rgba(0, 0, 0, 0.4);
-		border: 1px solid rgba(255, 255, 255, 0.12);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 6px;
 		padding: 4px 8px;
-		color: #fff;
+		color: var(--text-primary);
 		font-size: 12px;
 		outline: none;
+		font-variant-numeric: tabular-nums;
 	}
 	.hltb-btn {
-		background: rgba(255, 255, 255, 0.06);
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		color: #ccc;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
 		border-radius: 6px;
 		padding: 5px 10px;
 		font-size: 11px;
@@ -1827,7 +1976,7 @@
 	.hltb-btn.primary {
 		background: var(--accent, #c8a96e);
 		border-color: var(--accent, #c8a96e);
-		color: #080a0f;
+		color: var(--accent-text);
 	}
 
 	/* Manual Achievement Editor Panel */
@@ -1837,8 +1986,8 @@
 		justify-content: space-between;
 		gap: 12px;
 		padding: 10px 16px;
-		border-top: 1px solid rgba(255, 255, 255, 0.06);
-		background: rgba(0, 0, 0, 0.35);
+		border-top: 1px solid var(--border-soft);
+		background: var(--surface-2);
 		border-radius: 0 0 14px 14px;
 		flex-wrap: wrap;
 	}
@@ -1849,9 +1998,12 @@
 		flex-wrap: wrap;
 	}
 	.ach-state-toggle {
-		background: rgba(255, 255, 255, 0.06);
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		color: #9ca3af;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
 		border-radius: 8px;
 		padding: 5px 12px;
 		font-size: 11px;
@@ -1871,23 +2023,27 @@
 	}
 	.ach-dt-label {
 		font-size: 11px;
-		color: #8f97a8;
+		color: var(--text-secondary);
 		font-weight: 600;
 	}
 	.ach-dt-input {
-		background: rgba(13, 20, 28, 0.9);
-		border: 1px solid rgba(255, 255, 255, 0.14);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
 		border-radius: 6px;
 		padding: 4px 8px;
-		color: #fff;
+		color: var(--text-primary);
 		font-size: 11px;
 		color-scheme: dark;
 		outline: none;
+		font-variant-numeric: tabular-nums;
+	}
+	:global([data-theme='light']) .ach-dt-input {
+		color-scheme: light;
 	}
 	.ach-dt-now {
-		background: rgba(255, 255, 255, 0.06);
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		color: #ccc;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
 		border-radius: 6px;
 		padding: 4px 8px;
 		font-size: 10px;
@@ -1895,8 +2051,8 @@
 		cursor: pointer;
 	}
 	.ach-dt-now:hover {
-		background: rgba(255, 255, 255, 0.12);
-		color: #fff;
+		background: var(--surface-hover);
+		color: var(--text-primary);
 	}
 	.ach-editor-right {
 		display: flex;
@@ -1906,7 +2062,7 @@
 	.ach-save-btn {
 		background: var(--accent, #c8a96e);
 		border: none;
-		color: #080a0f;
+		color: var(--accent-text);
 		border-radius: 6px;
 		padding: 5px 12px;
 		font-size: 11px;
@@ -1915,8 +2071,8 @@
 	}
 	.ach-cancel-btn {
 		background: transparent;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		color: #9ca3af;
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
 		border-radius: 6px;
 		padding: 5px 10px;
 		font-size: 11px;
@@ -1938,8 +2094,8 @@
 	}
 
 	.tag {
-		background: rgba(200, 169, 110, 0.1);
-		border: 1px solid rgba(200, 169, 110, 0.2);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, var(--surface-1));
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 28%, transparent);
 		color: var(--accent);
 		padding: 4px 10px;
 		border-radius: 6px;
@@ -1968,8 +2124,8 @@
 	.add-tag-form {
 		display: flex;
 		align-items: center;
-		background: rgba(255, 255, 255, 0.05);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
 		border-radius: 6px;
 		padding: 2px;
 	}
@@ -1977,11 +2133,14 @@
 	.add-tag-form input {
 		background: transparent;
 		border: none;
-		color: #fff;
+		color: var(--text-primary);
 		font-size: 11px;
 		padding: 2px 8px;
 		outline: none;
-		width: 100px;
+		width: 110px;
+	}
+	.add-tag-form input::placeholder {
+		color: var(--text-muted);
 	}
 
 	.add-tag-form button {
@@ -2011,10 +2170,11 @@
 	.main-count {
 		font-size: 32px;
 		font-weight: 800;
-		color: #fff;
+		color: var(--text-primary);
+		font-variant-numeric: tabular-nums;
 	}
 	.slash {
-		color: #444;
+		color: var(--text-muted);
 		font-size: 20px;
 		font-weight: 600;
 		margin-left: 6px;
@@ -2022,11 +2182,12 @@
 	.main-pct {
 		font-size: 32px;
 		font-weight: 900;
-		color: var(--accent, #00e5ff);
+		color: var(--accent, #c8a96e);
+		font-variant-numeric: tabular-nums;
 	}
 	.progress-bar-track {
 		height: 10px;
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--surface-2);
 		border-radius: 5px;
 		overflow: hidden;
 	}
@@ -2040,7 +2201,7 @@
 	.progress-right {
 		display: flex;
 		gap: 40px;
-		border-left: 1px solid rgba(255, 255, 255, 0.08);
+		border-left: 1px solid var(--border-soft);
 		padding-left: 48px;
 	}
 	.stat-item {
@@ -2051,13 +2212,14 @@
 	.stat-label {
 		font-size: 11px;
 		font-weight: 700;
-		color: #6a7080;
+		color: var(--text-muted);
 		letter-spacing: 1.5px;
 	}
 	.stat-value {
 		font-size: 24px;
 		font-weight: 800;
-		color: #fff;
+		color: var(--text-primary);
+		font-variant-numeric: tabular-nums;
 	}
 	.stat-value.highlight {
 		color: #3ddc84;
@@ -2068,10 +2230,11 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		background: rgba(13, 20, 28, 0.45);
-		border: 1px solid rgba(255, 255, 255, 0.03);
+		background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+		border: 1px solid var(--border-soft);
 		border-radius: 20px 20px 0 0;
-		backdrop-filter: blur(8px);
+		backdrop-filter: blur(12px);
+		box-shadow: var(--shadow-card);
 		min-width: 0;
 	}
 
@@ -2081,7 +2244,7 @@
 		align-items: stretch;
 		gap: 12px;
 		padding: 20px 28px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+		border-bottom: 1px solid var(--border-soft);
 		flex-shrink: 0;
 		overflow: visible;
 	}
@@ -2108,7 +2271,7 @@
 		display: flex;
 		flex: 0 1 auto;
 		min-width: 0;
-		background: rgba(0, 0, 0, 0.3);
+		background: var(--surface-2);
 		border-radius: 10px;
 		padding: 4px;
 		gap: 4px;
@@ -2120,7 +2283,7 @@
 		background: transparent;
 		cursor: pointer;
 		font-size: 12px;
-		color: #6a7080;
+		color: var(--text-muted);
 		font-weight: 600;
 		white-space: nowrap;
 		transition: all 0.25s;
@@ -2128,16 +2291,15 @@
 	.tab.active {
 		background: var(--accent, #0066cc);
 		color: var(--accent-text);
-		box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #0066cc) 40%, transparent);
 	}
 	.tab:hover:not(.active) {
-		color: #fff;
-		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-primary);
+		background: var(--surface-hover);
 	}
 
 	.profile-btn-mini {
-		background: rgba(255, 255, 255, 0.04);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 8px;
 		color: var(--text-secondary);
 		cursor: pointer;
@@ -2145,7 +2307,7 @@
 		align-items: center;
 		justify-content: center;
 		padding: 8px;
-		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+		transition: all 0.2s var(--spring-out);
 		flex-shrink: 0;
 	}
 
@@ -2165,13 +2327,14 @@
 		min-width: 150px;
 		max-width: none;
 		height: 38px;
-		background: rgba(0, 0, 0, 0.3);
-		border: 1px solid rgba(255, 255, 255, 0.05);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 10px;
 		display: flex;
 		align-items: center;
 		gap: 12px;
 		padding: 0 14px;
+		color: var(--text-muted);
 	}
 	.search-input {
 		flex: 1;
@@ -2179,41 +2342,38 @@
 		border: none;
 		outline: none;
 		font-size: 13px;
-		color: #fff;
+		color: var(--text-primary);
 	}
 	.search-input::placeholder {
-		color: #333;
+		color: var(--text-muted);
 	}
 	.search-count {
 		font-size: 12px;
-		color: #333;
+		color: var(--text-muted);
 		font-weight: 700;
 		white-space: nowrap;
 		flex-shrink: 0;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.export-actions {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		flex-shrink: 0;
-	}
-
-	.export-actions {
-		margin-left: auto;
 		gap: 6px;
+		flex-shrink: 0;
+		margin-left: auto;
 	}
 
 	.sort-select {
 		flex: 0 1 160px;
 		min-width: 125px;
 		height: 38px;
-		background: rgba(255, 255, 255, 0.05);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 10px;
 		padding: 0 14px;
 		font-size: 13px;
-		color: #fff;
+		color: var(--text-primary);
 		outline: none;
 		cursor: pointer;
 		color-scheme: dark;
@@ -2221,15 +2381,18 @@
 			border-color 0.2s,
 			background 0.2s;
 	}
+	:global([data-theme='light']) .sort-select {
+		color-scheme: light;
+	}
 	.sort-select:hover {
-		background: rgba(255, 255, 255, 0.08);
+		background: var(--surface-hover);
 	}
 	.sort-select:focus {
 		border-color: var(--accent, #0066cc);
 	}
 	.sort-select option {
-		background: #1a1a1a;
-		color: #fff;
+		background: var(--surface-1);
+		color: var(--text-primary);
 	}
 
 	.order-btn {
@@ -2238,26 +2401,26 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgba(255, 255, 255, 0.05);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 10px;
-		color: #6a7080;
+		color: var(--text-secondary);
 		cursor: pointer;
 		transition: all 0.2s;
 	}
 	.order-btn:hover {
-		background: rgba(255, 255, 255, 0.08);
-		color: #fff;
+		background: var(--surface-hover);
+		color: var(--text-primary);
 	}
 
 	.reveal-btn {
 		height: 38px;
 		padding: 0 12px;
-		background: rgba(255, 255, 255, 0.03);
-		border: 1px solid rgba(255, 255, 255, 0.08);
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
 		border-radius: 10px;
 		font-size: 13px;
-		color: #6a7080;
+		color: var(--text-secondary);
 		cursor: pointer;
 		display: flex;
 		align-items: center;
@@ -2267,9 +2430,9 @@
 		white-space: nowrap;
 	}
 	.reveal-btn.active {
-		background: color-mix(in srgb, var(--accent, #0066cc) 12%, transparent);
-		border-color: color-mix(in srgb, var(--accent, #0066cc) 30%, transparent);
-		color: var(--accent, #00e5ff);
+		background: color-mix(in srgb, var(--accent, #0066cc) 14%, transparent);
+		border-color: color-mix(in srgb, var(--accent, #0066cc) 35%, transparent);
+		color: var(--accent, #c8a96e);
 	}
 	.reveal-btn span {
 		font-weight: 600;
@@ -2280,16 +2443,17 @@
 		align-items: center;
 		gap: 10px;
 		margin-right: auto;
-		color: #6a7080;
+		color: var(--text-muted);
 		font-size: 12px;
 	}
 	.map-summary-title {
-		color: #fff;
+		color: var(--text-primary);
 		font-weight: 700;
 	}
 	.map-summary-value {
 		color: var(--accent);
 		font-weight: 700;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.achievements-list {
@@ -2312,12 +2476,12 @@
 	}
 	.map-intro h2 {
 		margin: 0 0 6px;
-		color: #fff;
+		color: var(--text-primary);
 		font-size: 20px;
 	}
 	.map-intro p {
 		margin: 0;
-		color: #6a7080;
+		color: var(--text-muted);
 		font-size: 13px;
 	}
 	.map-track {
@@ -2335,15 +2499,15 @@
 	.map-achievement-index {
 		width: 42px;
 		height: 42px;
-		border: 2px solid rgba(255, 255, 255, 0.12);
+		border: 2px solid var(--border-soft);
 		border-radius: 50%;
 		flex-shrink: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		gap: 1px;
-		color: #8f97a8;
-		background: rgba(255, 255, 255, 0.03);
+		color: var(--text-secondary);
+		background: var(--surface-2);
 		font-size: 13px;
 		font-weight: 800;
 		font-variant-numeric: tabular-nums;
@@ -2356,12 +2520,11 @@
 	.map-achievement-index small {
 		font-size: 9px;
 		font-weight: 700;
-		color: #596171;
+		color: var(--text-muted);
 	}
 	.map-achievement-index.complete {
 		border-color: var(--accent);
 		color: var(--accent);
-		box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 28%, transparent);
 	}
 	.map-achievement-card {
 		min-width: 0;
@@ -2370,11 +2533,15 @@
 		align-items: center;
 		gap: 12px;
 		padding: 10px;
-		background: rgba(8, 12, 18, 0.72);
-		border: 1px solid rgba(255, 255, 255, 0.07);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
 		border-radius: 10px;
 		cursor: pointer;
-		transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+		box-shadow: var(--shadow-card);
+		transition:
+			transform 0.2s var(--spring-out),
+			border-color 0.2s ease,
+			box-shadow 0.2s ease;
 	}
 	.map-achievement-card:focus-visible {
 		outline: 2px solid var(--accent);
@@ -2383,10 +2550,10 @@
 	.map-achievement-card:hover {
 		transform: translateY(-2px);
 		border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+		box-shadow: var(--shadow-elevated);
 	}
 	.map-achievement-card.unlocked {
-		border-color: color-mix(in srgb, var(--accent) 35%, rgba(255, 255, 255, 0.07));
+		border-color: color-mix(in srgb, var(--accent) 35%, var(--border-soft));
 	}
 	.map-achievement-icon {
 		width: 48px;
@@ -2394,7 +2561,8 @@
 		border-radius: 8px;
 		overflow: hidden;
 		flex-shrink: 0;
-		background: #10141b;
+		background: var(--surface-3);
+		color: var(--text-muted);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -2404,15 +2572,12 @@
 		height: 100%;
 		object-fit: cover;
 	}
-	.map-achievement-icon span {
-		font-size: 22px;
-	}
 	.map-achievement-content {
 		flex: 1;
 		min-width: 0;
 	}
 	.map-achievement-title {
-		color: #fff;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 700;
 		white-space: nowrap;
@@ -2420,7 +2585,7 @@
 		text-overflow: ellipsis;
 	}
 	.map-achievement-description {
-		color: #7d8596;
+		color: var(--text-muted);
 		font-size: 11px;
 		white-space: nowrap;
 		overflow: hidden;
@@ -2438,13 +2603,14 @@
 		font-weight: 800;
 		white-space: nowrap;
 		text-transform: uppercase;
+		font-variant-numeric: tabular-nums;
 	}
 	.map-rarity-track {
 		height: 3px;
 		flex: 1;
 		min-width: 24px;
 		border-radius: 3px;
-		background: rgba(255, 255, 255, 0.08);
+		background: var(--surface-2);
 		overflow: hidden;
 	}
 	.map-rarity-fill {
@@ -2459,16 +2625,13 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #596171;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		font-size: 14px;
-		font-weight: 900;
+		color: var(--text-muted);
+		border: 1px solid var(--border-soft);
 	}
 	.map-achievement-status.complete {
 		background: var(--accent);
 		color: var(--accent-text);
 		border-color: var(--accent);
-		box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
 	}
 	.ach-grid {
 		display: flex;
@@ -2477,19 +2640,25 @@
 	}
 
 	.ach-card {
-		background: rgba(8, 12, 18, 0.6);
-		border: 1px solid rgba(255, 255, 255, 0.05);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
 		border-radius: 14px;
-		transition: all 0.25s;
+		box-shadow: var(--shadow-card);
+		transition:
+			transform 0.22s var(--spring-out),
+			border-color 0.2s ease,
+			box-shadow 0.22s ease;
 		position: relative;
+		content-visibility: auto;
+		contain-intrinsic-size: 0 88px;
 	}
 	.ach-card:hover {
 		transform: translateY(-1px);
-		background: rgba(12, 18, 26, 0.8);
-		border-color: rgba(255, 255, 255, 0.1);
+		border-color: var(--border-specular);
+		box-shadow: var(--shadow-elevated);
 	}
 	.ach-card.is-unlocked {
-		border-color: rgba(255, 255, 255, 0.08);
+		border-color: var(--border-soft);
 	}
 	.ach-card-inner {
 		display: flex;
@@ -2506,8 +2675,8 @@
 		border-radius: 10px;
 		overflow: hidden;
 		flex-shrink: 0;
-		background: #10141b;
-		border: 1px solid rgba(255, 255, 255, 0.05);
+		background: var(--surface-3);
+		border: 1px solid var(--border-soft);
 	}
 	.ach-icon-box img {
 		width: 100%;
@@ -2519,7 +2688,7 @@
 		filter: grayscale(0.8);
 	}
 	.ach-placeholder {
-		font-size: 28px;
+		color: var(--text-muted);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -2549,20 +2718,21 @@
 	.ach-name {
 		font-size: 16px;
 		font-weight: 800;
-		color: #fff;
+		color: var(--text-primary);
 		letter-spacing: -0.2px;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 	.ach-name.muted {
-		color: #444;
+		color: var(--text-muted);
 	}
 	.ach-date {
 		font-size: 10px;
-		color: #6a7080;
+		color: var(--text-muted);
 		font-weight: 700;
 		letter-spacing: 0.5px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.ach-desc-row {
@@ -2570,7 +2740,7 @@
 	}
 	.ach-desc {
 		font-size: 12px;
-		color: #9ca3af;
+		color: var(--text-secondary);
 		line-height: 1.3;
 		font-weight: 500;
 		display: -webkit-box;
@@ -2581,7 +2751,7 @@
 	}
 	.ach-desc.italic {
 		font-style: italic;
-		opacity: 0.5;
+		opacity: 0.55;
 	}
 
 	.ach-footer-row {
@@ -2602,11 +2772,12 @@
 		border-radius: 4px;
 		text-transform: uppercase;
 		letter-spacing: 0.8px;
+		font-variant-numeric: tabular-nums;
 	}
 	.rarity-progress-track {
 		width: 100px;
 		height: 4px;
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--surface-2);
 		border-radius: 3px;
 		overflow: hidden;
 	}
@@ -2628,6 +2799,7 @@
 		background: color-mix(in srgb, var(--accent, #c8a96e) 16%, transparent);
 		color: var(--accent, #c8a96e);
 		letter-spacing: 0.4px;
+		font-variant-numeric: tabular-nums;
 	}
 	.ach-progress-fill {
 		height: 100%;
@@ -2644,16 +2816,17 @@
 		right: 16px;
 		bottom: 10px;
 	}
-	.ach-card:hover .ach-actions {
+	.ach-card:hover .ach-actions,
+	.ach-card:focus-within .ach-actions {
 		opacity: 1;
 	}
 	.action-btn {
-		background: rgba(0, 0, 0, 0.6);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: var(--surface-3);
+		border: 1px solid var(--border-soft);
 		border-radius: 6px;
 		padding: 4px 10px;
 		font-size: 10px;
-		color: #ccc;
+		color: var(--text-secondary);
 		font-weight: 700;
 		cursor: pointer;
 		display: flex;
@@ -2663,9 +2836,9 @@
 		backdrop-filter: blur(4px);
 	}
 	.action-btn:hover {
-		background: rgba(255, 255, 255, 0.1);
-		color: #fff;
-		border-color: rgba(255, 255, 255, 0.2);
+		background: var(--surface-hover);
+		color: var(--text-primary);
+		border-color: var(--border-specular);
 	}
 	.action-btn.is-copied {
 		background: rgba(61, 220, 132, 0.2);
@@ -2679,20 +2852,80 @@
 	@keyframes achJumpFlash {
 		0% {
 			transform: scale(1.015);
-			background: color-mix(in srgb, var(--accent) 18%, rgba(8, 12, 18, 0.6));
+			background: color-mix(in srgb, var(--accent) 18%, var(--surface-1));
 			border-color: var(--accent);
-			box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent),
-				0 0 24px color-mix(in srgb, var(--accent) 30%, transparent);
+			box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 		}
 		100% {
 			transform: scale(1);
-			background: rgba(8, 12, 18, 0.6);
-			box-shadow: none;
+			background: var(--surface-1);
+			box-shadow: var(--shadow-card);
 		}
 	}
 
 	.is-secret-hidden {
 		opacity: 0.3;
 		filter: blur(2px);
+	}
+
+	.export-toast {
+		position: fixed;
+		right: 24px;
+		bottom: 24px;
+		z-index: 250;
+		max-width: 420px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 14px;
+		border-radius: 12px;
+		background: var(--surface-1);
+		border: 1px solid rgba(61, 220, 132, 0.4);
+		color: var(--text-primary);
+		box-shadow: var(--shadow-elevated);
+		backdrop-filter: blur(14px);
+		font-size: 12px;
+		font-weight: 600;
+	}
+
+	.export-toast svg:first-child {
+		color: #3ddc84;
+		flex-shrink: 0;
+	}
+
+	.export-toast.is-error {
+		border-color: rgba(255, 77, 77, 0.45);
+	}
+
+	.export-toast.is-error svg:first-child {
+		color: #ff4d4d;
+	}
+
+	.export-toast-msg {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.export-toast-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		border: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		padding: 2px;
+		border-radius: 6px;
+		transition:
+			background 0.15s ease,
+			color 0.15s ease;
+	}
+
+	.export-toast-close:hover {
+		background: var(--surface-hover);
+		color: var(--text-primary);
 	}
 </style>

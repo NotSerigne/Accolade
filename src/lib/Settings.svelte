@@ -26,6 +26,9 @@
 
 	let isSaving = $state(false);
 	let saveError = $state('');
+	type NoticeKind = 'success' | 'error' | 'info';
+	let actionNotice = $state<{ text: string; kind: NoticeKind } | null>(null);
+	let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 	let apiKeyVisible = $state(false);
 	let sgdbKeyVisible = $state(false);
 	let previewAudio = $state<HTMLAudioElement | null>(null);
@@ -34,6 +37,36 @@
 	let isRecordingHudShortcut = $state(false);
 	let appVersion = $state('');
 	let customSounds = $state<Array<{ filename: string; path: string }>>([]);
+
+	function showNotice(text: string, kind: NoticeKind = 'info'): void {
+		actionNotice = { text, kind };
+		if (noticeTimer) clearTimeout(noticeTimer);
+		noticeTimer = setTimeout(() => {
+			actionNotice = null;
+			noticeTimer = null;
+		}, 5000);
+	}
+
+	function dismissNotice(): void {
+		if (noticeTimer) {
+			clearTimeout(noticeTimer);
+			noticeTimer = null;
+		}
+		actionNotice = null;
+	}
+
+	function jumpToSection(sectionId: string): void {
+		const target = document.getElementById(sectionId);
+		if (target) {
+			target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
+	}
+
+	$effect(() => {
+		return () => {
+			if (noticeTimer) clearTimeout(noticeTimer);
+		};
+	});
 
 	async function refreshCustomSounds() {
 		try {
@@ -55,9 +88,11 @@
 				});
 				await refreshCustomSounds();
 				draft.notificationSound = 'custom:' + imported.path;
+				showNotice(imported.filename, 'success');
 			}
 		} catch (e) {
 			console.error('Import sound failed:', e);
+			showNotice(String(e), 'error');
 		}
 	}
 
@@ -69,11 +104,11 @@
 			});
 			if (dest) {
 				const saved = await invoke<string>('create_backup_zip', { destPath: dest });
-				alert(saved);
+				showNotice(saved, 'success');
 			}
 		} catch (e) {
 			console.error('Backup failed:', e);
-			alert(String(e));
+			showNotice(String(e), 'error');
 		}
 	}
 
@@ -87,11 +122,11 @@
 				const count = await invoke<number>('restore_backup_zip', { zipPath: src });
 				await refreshCustomSounds();
 				await loadGames();
-				alert('Restauration termin\u00e9e (' + count + ' fichiers)');
+				showNotice('Restauration termin\u00e9e (' + count + ' fichiers)', 'success');
 			}
 		} catch (e) {
 			console.error('Restore failed:', e);
-			alert(String(e));
+			showNotice(String(e), 'error');
 		}
 	}
 
@@ -100,6 +135,25 @@
 	getVersion()
 		.then((v) => (appVersion = v))
 		.catch(() => {});
+
+	function handleWindowKeydown(e: KeyboardEvent) {
+		if (isRecordingShortcut || isRecordingHudShortcut) {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				e.stopPropagation();
+				isRecordingShortcut = false;
+				isRecordingHudShortcut = false;
+				return;
+			}
+			handleShortcutKeydown(e);
+			return;
+		}
+
+		if (e.key === 'Escape' && !isSaving) {
+			e.preventDefault();
+			close();
+		}
+	}
 
 	function handleShortcutKeydown(e: KeyboardEvent) {
 		if (!isRecordingShortcut && !isRecordingHudShortcut) return;
@@ -257,9 +311,9 @@
 	async function handleExport() {
 		try {
 			const path = await exportProfile();
-			alert(path);
+			showNotice(path, 'success');
 		} catch {
-			alert(get(i18n).t('setup.errorSave', { details: '' }));
+			showNotice(get(i18n).t('setup.errorSave', { details: '' }), 'error');
 		}
 	}
 
@@ -293,10 +347,10 @@
 			});
 
 			const path = await exportSummaryPdf(title, content);
-			alert(path);
+			showNotice(path, 'success');
 		} catch (err) {
 			console.error('PDF Export Error:', err);
-			alert(get(i18n).t('setup.errorSave', { details: String(err) }));
+			showNotice(get(i18n).t('setup.errorSave', { details: String(err) }), 'error');
 		}
 	}
 
@@ -384,13 +438,14 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleShortcutKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <div class="settings-page">
 	<div class="settings-header">
 		<h1 id="settings-title" class="settings-title">{$i18n.t('settings.title')}</h1>
 		<div class="header-actions">
 			<button
+				type="button"
 				class="icon-close-btn"
 				onclick={close}
 				title={$i18n.t('button.close')}
@@ -408,18 +463,64 @@
 					<line x1="6" y1="6" x2="18" y2="18" />
 				</svg>
 			</button>
-			<button class="save-btn" onclick={save} disabled={isSaving}>
+			<button type="button" class="save-btn" onclick={save} disabled={isSaving}>
 				{isSaving ? $i18n.t('setup.saving') : $i18n.t('setup.save')}
 			</button>
 		</div>
 	</div>
 
+	<nav class="settings-nav" aria-label={$i18n.t('settings.title')}>
+		<button type="button" class="nav-pill" onclick={() => jumpToSection('sec-account')}>
+			{$i18n.t('setup.steam')}
+		</button>
+		<button type="button" class="nav-pill" onclick={() => jumpToSection('sec-library')}>
+			{$i18n.t('settings.searchPaths')}
+		</button>
+		<button type="button" class="nav-pill" onclick={() => jumpToSection('sec-overlay')}>
+			{$i18n.t('setup.notifications')}
+		</button>
+		<button type="button" class="nav-pill" onclick={() => jumpToSection('sec-system')}>
+			{$i18n.t('settings.behavior')}
+		</button>
+		<button type="button" class="nav-pill" onclick={() => jumpToSection('sec-appearance')}>
+			{$i18n.t('settings.appearance')}
+		</button>
+		<button type="button" class="nav-pill" onclick={() => jumpToSection('sec-data')}>
+			{$i18n.t('settings.backupSection')}
+		</button>
+	</nav>
+
 	{#if saveError}
 		<div class="save-error" role="alert">{saveError}</div>
 	{/if}
 
+	{#if actionNotice}
+		<div class="action-notice {actionNotice.kind}" role="status" aria-live="polite">
+			<span class="notice-text">{actionNotice.text}</span>
+			<button
+				type="button"
+				class="notice-close"
+				onclick={dismissNotice}
+				aria-label={$i18n.t('button.close')}
+			>
+				<svg
+					width="12"
+					height="12"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2.5"
+					aria-hidden="true"
+				>
+					<line x1="18" y1="6" x2="6" y2="18" />
+					<line x1="6" y1="6" x2="18" y2="18" />
+				</svg>
+			</button>
+		</div>
+	{/if}
+
 	<div class="settings-body">
-		<section class="settings-section">
+		<section id="sec-account" class="settings-section">
 			<div class="section-label">{$i18n.t('setup.steam')}</div>
 
 			<div class="setting-row">
@@ -448,6 +549,7 @@
 						bind:value={draft.steamApiKey}
 					/>
 					<button
+						type="button"
 						class="toggle-btn"
 						onclick={() => (apiKeyVisible = !apiKeyVisible)}
 						title={apiKeyVisible ? $i18n.t('settings.apiKeyHide') : $i18n.t('settings.apiKeyShow')}
@@ -497,6 +599,7 @@
 						bind:value={draft.steamGridDbApiKey}
 					/>
 					<button
+						type="button"
 						class="toggle-btn"
 						onclick={() => (sgdbKeyVisible = !sgdbKeyVisible)}
 						title={sgdbKeyVisible ? $i18n.t('settings.apiKeyHide') : $i18n.t('settings.apiKeyShow')}
@@ -541,10 +644,15 @@
 
 			<div class="setting-row">
 				<div class="setting-info">
-					<div class="setting-name">Pseudo</div>
-					<div class="setting-desc">Votre nom d'utilisateur RetroAchievements</div>
+					<div class="setting-name">{$i18n.t('settings.username')}</div>
+					<div class="setting-desc">{$i18n.t('settings.raUsernameHint')}</div>
 				</div>
-				<input class="text-input" type="text" placeholder="Pseudo" bind:value={draft.raUsername} />
+				<input
+					class="text-input"
+					type="text"
+					placeholder={$i18n.t('settings.usernamePlaceholder')}
+					bind:value={draft.raUsername}
+				/>
 			</div>
 
 			<div class="setting-row" style="margin-top: 14px;">
@@ -565,7 +673,7 @@
 
 		<div class="separator"></div>
 
-		<section class="settings-section">
+		<section id="sec-library" class="settings-section">
 			<div class="section-label">{$i18n.t('settings.searchPaths')}</div>
 			<div class="setting-desc-top">{$i18n.t('settings.searchPathsDesc')}</div>
 
@@ -587,6 +695,7 @@
 						</svg>
 						<span class="path-text">{path}</span>
 						<button
+							type="button"
 							class="remove-btn"
 							onclick={() => removePath(path)}
 							title={$i18n.t('button.remove')}
@@ -610,7 +719,7 @@
 				{/if}
 			</div>
 
-			<button class="add-path-btn" onclick={addPath}>
+			<button type="button" class="add-path-btn" onclick={addPath}>
 				<svg
 					width="13"
 					height="13"
@@ -644,7 +753,7 @@
 
 		<div class="separator"></div>
 
-		<section class="settings-section">
+		<section id="sec-overlay" class="settings-section">
 			<div class="section-label">{$i18n.t('settings.position')}</div>
 			<div class="setting-desc-top">{$i18n.t('settings.positionDesc')}</div>
 
@@ -654,6 +763,7 @@
 					<div class="grid-guide horizontal"></div>
 					{#each positionOptions as pos (pos.value)}
 						<button
+							type="button"
 							class="pos-btn"
 							style={pos.style}
 							class:active={draft.windowPosition === pos.value}
@@ -673,10 +783,11 @@
 								>
 							{/each}
 							{#each customSounds as cs (cs.path)}
-								<option value={"custom:" + cs.path}>🎵 {cs.filename}</option>
+								<option value={"custom:" + cs.path}>{cs.filename}</option>
 							{/each}
 						</select>
 						<button
+							type="button"
 							class="sound-preview-btn"
 							onclick={handleImportSound}
 							title={$i18n.t('settings.importSound')}
@@ -687,6 +798,7 @@
 							</svg>
 						</button>
 						<button
+							type="button"
 							class="sound-preview-btn"
 							class:playing={previewingSound === draft.notificationSound &&
 								draft.notificationSound !== 'none'}
@@ -710,7 +822,7 @@
 						</button>
 					</div>
 
-					<p class="position-side-label" style="margin-top: 12px;">Volume</p>
+					<p class="position-side-label" style="margin-top: 12px;">{$i18n.t('settings.volume')}</p>
 					<div class="volume-row">
 						<svg
 							width="14"
@@ -736,7 +848,7 @@
 					</div>
 
 					<p class="position-side-label" style="margin-top: 12px;">{$i18n.t('settings.test')}</p>
-					<button class="test-btn" onclick={testNotification}>
+					<button type="button" class="test-btn" onclick={testNotification}>
 						<svg
 							width="13"
 							height="13"
@@ -758,7 +870,7 @@
 		<div class="separator"></div>
 
 		<!-- ── Section Comportement ── -->
-		<section class="settings-section">
+		<section id="sec-system" class="settings-section">
 			<div class="section-label">{$i18n.t('settings.behavior')}</div>
 
 			<div class="setting-row">
@@ -824,22 +936,37 @@
 					<div class="setting-name">{$i18n.t('settings.hudShortcut')}</div>
 					<div class="setting-desc">{$i18n.t('settings.hudShortcutDesc')}</div>
 				</div>
-				<div class="shortcut-record-wrap">
+				<div class="shortcut-record-wrap" class:is-recording={isRecordingHudShortcut}>
 					<div class="shortcut-display" class:recording={isRecordingHudShortcut}>
-						{draft.hudShortcut}
+						{#if isRecordingHudShortcut}
+							<span class="recording-dot" aria-hidden="true"></span>
+							<span class="shortcut-text recording-label">{$i18n.t('setup.recordShortcut')}</span>
+						{/if}
+						{#if draft.hudShortcut}
+							<span class="keycap-group">
+								{#each draft.hudShortcut.split('+').filter(Boolean) as key, idx (idx)}
+									{#if idx > 0}<span class="key-sep">+</span>{/if}
+									<kbd class="keycap">{key}</kbd>
+								{/each}
+							</span>
+						{/if}
 					</div>
 					<button
+						type="button"
 						class="record-btn"
 						class:is-recording={isRecordingHudShortcut}
 						onclick={() => {
 							isRecordingShortcut = false;
 							isRecordingHudShortcut = !isRecordingHudShortcut;
 						}}
-						title={isRecordingHudShortcut ? 'Enregistrer' : 'Modifier'}
+						title={$i18n.t(isRecordingHudShortcut ? 'settings.shortcutSave' : 'settings.shortcutEdit')}
+						aria-label={$i18n.t(
+							isRecordingHudShortcut ? 'settings.shortcutSave' : 'settings.shortcutEdit'
+						)}
 					>
 						{#if isRecordingHudShortcut}
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-								<rect x="6" y="6" width="12" height="12" />
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+								<rect x="6" y="6" width="12" height="12" rx="2" />
 							</svg>
 						{:else}
 							<svg
@@ -849,6 +976,7 @@
 								fill="none"
 								stroke="currentColor"
 								stroke-width="2"
+								aria-hidden="true"
 							>
 								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
 								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -864,23 +992,40 @@
 						{$i18n.t('settings.screenshotShortcut')}
 					</div>
 					<div class="setting-desc">
-						{$i18n.t('settings.screenshotShortcutDesc') ||
-							'Touche pour prendre une capture manuelle'}
+						{$i18n.t('settings.screenshotShortcutDesc')}
 					</div>
 				</div>
-				<div class="shortcut-record-wrap">
+				<div class="shortcut-record-wrap" class:is-recording={isRecordingShortcut}>
 					<div class="shortcut-display" class:recording={isRecordingShortcut}>
-						{draft.screenshotShortcut}
+						{#if isRecordingShortcut}
+							<span class="recording-dot" aria-hidden="true"></span>
+							<span class="shortcut-text recording-label">{$i18n.t('setup.recordShortcut')}</span>
+						{/if}
+						{#if draft.screenshotShortcut}
+							<span class="keycap-group">
+								{#each draft.screenshotShortcut.split('+').filter(Boolean) as key, idx (idx)}
+									{#if idx > 0}<span class="key-sep">+</span>{/if}
+									<kbd class="keycap">{key}</kbd>
+								{/each}
+							</span>
+						{/if}
 					</div>
 					<button
+						type="button"
 						class="record-btn"
 						class:is-recording={isRecordingShortcut}
-						onclick={() => (isRecordingShortcut = !isRecordingShortcut)}
-						title={isRecordingShortcut ? 'Enregistrer' : 'Modifier'}
+						onclick={() => {
+							isRecordingHudShortcut = false;
+							isRecordingShortcut = !isRecordingShortcut;
+						}}
+						title={$i18n.t(isRecordingShortcut ? 'settings.shortcutSave' : 'settings.shortcutEdit')}
+						aria-label={$i18n.t(
+							isRecordingShortcut ? 'settings.shortcutSave' : 'settings.shortcutEdit'
+						)}
 					>
 						{#if isRecordingShortcut}
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-								<rect x="6" y="6" width="12" height="12" />
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+								<rect x="6" y="6" width="12" height="12" rx="2" />
 							</svg>
 						{:else}
 							<svg
@@ -890,6 +1035,7 @@
 								fill="none"
 								stroke="currentColor"
 								stroke-width="2"
+								aria-hidden="true"
 							>
 								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
 								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -901,12 +1047,13 @@
 
 			<div class="setting-row" style="margin-top: 20px;">
 				<div class="setting-info">
-					<div class="setting-name">Test de capture</div>
+					<div class="setting-name">{$i18n.t('settings.testCaptureTitle')}</div>
 					<div class="setting-desc">
 						{$i18n.t('settings.screenshotTestDesc')}
 					</div>
 				</div>
 				<button
+					type="button"
 					class="test-btn"
 					style="border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);"
 					onclick={async () => {
@@ -924,13 +1071,14 @@
 						fill="none"
 						stroke="currentColor"
 						stroke-width="2"
+						aria-hidden="true"
 					>
 						<path
 							d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
 						/>
 						<circle cx="12" cy="13" r="4" />
 					</svg>
-					Prendre une capture
+					{$i18n.t('settings.takeScreenshot')}
 				</button>
 			</div>
 		</section>
@@ -958,6 +1106,7 @@
 					</div>
 				</div>
 				<button
+					type="button"
 					class="test-btn"
 					disabled={$updateState.status === 'checking' || $updateState.status === 'downloading'}
 					onclick={() => checkForUpdates(false)}
@@ -981,7 +1130,7 @@
 		<div class="separator"></div>
 
 		<!-- ── Section Thème ── -->
-		<section class="settings-section">
+		<section id="sec-appearance" class="settings-section">
 			<div class="section-label">{$i18n.t('settings.appearance')}</div>
 
 			<!-- Dark / Light -->
@@ -991,6 +1140,7 @@
 				</div>
 				<div class="theme-toggle">
 					<button
+						type="button"
 						class="theme-btn"
 						class:active={draft.theme === 'dark'}
 						onclick={() => (draft.theme = 'dark')}
@@ -1008,6 +1158,7 @@
 						{$i18n.t('setup.theme.dark')}
 					</button>
 					<button
+						type="button"
 						class="theme-btn"
 						class:active={draft.theme === 'light'}
 						onclick={() => (draft.theme = 'light')}
@@ -1039,6 +1190,7 @@
 						{$i18n.t('setup.theme.light')}
 					</button>
 					<button
+						type="button"
 						class="theme-btn"
 						class:active={draft.theme === 'system'}
 						onclick={() => (draft.theme = 'system')}
@@ -1070,6 +1222,7 @@
 					<div class="accent-presets">
 						{#each accentPresets as preset (preset.value)}
 							<button
+								type="button"
 								class="accent-swatch"
 								class:active={draft.accentColor === preset.value}
 								style="background: {preset.value}"
@@ -1088,128 +1241,6 @@
 						/>
 						<span class="color-hex">{draft.accentColor}</span>
 					</div>
-				</div>
-			</div>
-
-			<!-- Profiles Management -->
-			<div
-				class="setting-row"
-				style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-soft);"
-			>
-				<div class="setting-info">
-					<div class="setting-name">Gestion des Profils</div>
-					<div class="setting-desc">{$i18n.t('settings.profilesDesc')}</div>
-				</div>
-				<div class="profile-actions">
-					<button class="profile-btn secondary" onclick={handleExport}>
-						<svg
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-								points="7 10 12 15 17 10"
-							/><line x1="12" y1="15" x2="12" y2="3" /></svg
-						>
-						JSON
-					</button>
-					<button class="profile-btn secondary" onclick={handleExportPdf}>
-						<svg
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
-								points="14 2 14 8 20 8"
-							/><line x1="16" y1="13" x2="8" y2="13" /><line
-								x1="16"
-								y1="17"
-								x2="8"
-								y2="17"
-							/><polyline points="10 9 9 9 8 9" /></svg
-						>
-						PDF
-					</button>
-					<button class="profile-btn primary" onclick={openProfilesFolder}>
-						<svg
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							><path
-								d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-							/></svg
-						>
-						Dossier exports
-					</button>
-				</div>
-			</div>
-
-			<div
-				class="setting-row"
-				style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);"
-			>
-				<div class="setting-info">
-					<div class="setting-name">{$i18n.t('settings.backupSection')}</div>
-					<div class="setting-desc">{$i18n.t('settings.backupDesc')}</div>
-				</div>
-				<div class="profile-actions">
-					<button class="profile-btn secondary" onclick={handleCreateBackup}>
-						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-							<polyline points="7 10 12 15 17 10" />
-							<line x1="12" y1="15" x2="12" y2="3" />
-						</svg>
-						{$i18n.t('settings.backupCreate')}
-					</button>
-					<button class="profile-btn primary" onclick={handleRestoreBackup}>
-						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-							<polyline points="17 8 12 3 7 8" />
-							<line x1="12" y1="3" x2="12" y2="15" />
-						</svg>
-						{$i18n.t('settings.backupRestore')}
-					</button>
-				</div>
-			</div>
-
-			<div
-				class="setting-row"
-				style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);"
-			>
-				<div class="setting-info">
-					<div class="setting-name">{$i18n.t('settings.backupSection')}</div>
-					<div class="setting-desc">{$i18n.t('settings.backupDesc')}</div>
-				</div>
-				<div class="profile-actions">
-					<button class="profile-btn secondary" onclick={handleCreateBackup}>
-						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-							<polyline points="7 10 12 15 17 10" />
-							<line x1="12" y1="15" x2="12" y2="3" />
-						</svg>
-						{$i18n.t('settings.backupCreate')}
-					</button>
-					<button class="profile-btn primary" onclick={handleRestoreBackup}>
-						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-							<polyline points="17 8 12 3 7 8" />
-							<line x1="12" y1="3" x2="12" y2="15" />
-						</svg>
-						{$i18n.t('settings.backupRestore')}
-					</button>
 				</div>
 			</div>
 
@@ -1233,6 +1264,104 @@
 				<span class="preview-badge">{rarityLabelByIndex($i18n.language, 1)} · 2.4%</span>
 				<div class="preview-bar-track"><div class="preview-bar-fill"></div></div>
 				<span class="preview-label">{$i18n.t('settings.preview')}</span>
+			</div>
+		</section>
+
+		<div class="separator"></div>
+
+		<!-- ── Section Données & Sauvegarde ── -->
+		<section id="sec-data" class="settings-section">
+			<div class="section-label">{$i18n.t('settings.backupSection')}</div>
+
+			<!-- Profiles Management -->
+			<div class="setting-row">
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.profileManagement')}</div>
+					<div class="setting-desc">{$i18n.t('settings.profilesDesc')}</div>
+				</div>
+				<div class="profile-actions">
+					<button type="button" class="profile-btn secondary" onclick={handleExport}>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+								points="7 10 12 15 17 10"
+							/><line x1="12" y1="15" x2="12" y2="3" /></svg
+						>
+						JSON
+					</button>
+					<button type="button" class="profile-btn secondary" onclick={handleExportPdf}>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
+								points="14 2 14 8 20 8"
+							/><line x1="16" y1="13" x2="8" y2="13" /><line
+								x1="16"
+								y1="17"
+								x2="8"
+								y2="17"
+							/><polyline points="10 9 9 9 8 9" /></svg
+						>
+						PDF
+					</button>
+					<button type="button" class="profile-btn primary" onclick={openProfilesFolder}>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path
+								d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+							/></svg
+						>
+						{$i18n.t('settings.exportsFolder')}
+					</button>
+				</div>
+			</div>
+
+			<div
+				class="setting-row"
+				style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);"
+			>
+				<div class="setting-info">
+					<div class="setting-name">{$i18n.t('settings.backupSection')}</div>
+					<div class="setting-desc">{$i18n.t('settings.backupDesc')}</div>
+				</div>
+				<div class="profile-actions">
+					<button type="button" class="profile-btn secondary" onclick={handleCreateBackup}>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="7 10 12 15 17 10" />
+							<line x1="12" y1="15" x2="12" y2="3" />
+						</svg>
+						{$i18n.t('settings.backupCreate')}
+					</button>
+					<button type="button" class="profile-btn primary" onclick={handleRestoreBackup}>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="17 8 12 3 7 8" />
+							<line x1="12" y1="3" x2="12" y2="15" />
+						</svg>
+						{$i18n.t('settings.backupRestore')}
+					</button>
+				</div>
 			</div>
 		</section>
 	</div>
@@ -1324,9 +1453,97 @@
 		padding: 10px 12px;
 		border: 1px solid rgba(255, 107, 107, 0.45);
 		background: rgba(255, 107, 107, 0.12);
-		color: #ffb4b4;
+		color: #ef4444;
 		border-radius: 8px;
 		font-size: 12px;
+	}
+
+	.settings-nav {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 32px;
+		border-bottom: 1px solid var(--border-soft);
+		background: var(--surface-1);
+		flex-shrink: 0;
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.settings-nav::-webkit-scrollbar {
+		display: none;
+	}
+
+	.nav-pill {
+		padding: 5px 12px;
+		border-radius: 999px;
+		border: 1px solid var(--border-soft);
+		background: var(--surface-2);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 600;
+		font-family: inherit;
+		white-space: nowrap;
+		cursor: pointer;
+		transition:
+			background 0.15s,
+			color 0.15s,
+			border-color 0.15s;
+	}
+	.nav-pill:hover {
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, var(--surface-2));
+		border-color: color-mix(in srgb, var(--accent, #c8a96e) 45%, var(--border-soft));
+		color: var(--text-primary);
+	}
+
+	.action-notice {
+		margin: 12px 32px 0;
+		padding: 10px 14px;
+		border-radius: 8px;
+		font-size: 12px;
+		font-weight: 500;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		flex-shrink: 0;
+	}
+	.action-notice.success {
+		border: 1px solid rgba(61, 220, 132, 0.4);
+		background: rgba(61, 220, 132, 0.12);
+		color: color-mix(in srgb, #3ddc84 80%, var(--text-primary));
+	}
+	.action-notice.error {
+		border: 1px solid rgba(239, 68, 68, 0.45);
+		background: rgba(239, 68, 68, 0.12);
+		color: #ef4444;
+	}
+	.action-notice.info {
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 45%, transparent);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+		color: var(--text-primary);
+	}
+	.notice-text {
+		flex: 1;
+		min-width: 0;
+		word-break: break-word;
+	}
+	.notice-close {
+		width: 22px;
+		height: 22px;
+		border-radius: 6px;
+		border: none;
+		background: transparent;
+		color: currentColor;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		opacity: 0.75;
+		flex-shrink: 0;
+	}
+	.notice-close:hover {
+		opacity: 1;
+		background: var(--surface-hover);
 	}
 
 	/* ── Body scrollable ── */
@@ -1335,7 +1552,7 @@
 		overflow-y: auto;
 		padding: 28px 32px 40px;
 		scrollbar-width: thin;
-		scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+		scrollbar-color: var(--border-soft) transparent;
 		display: flex;
 		flex-direction: column;
 		gap: 0;
@@ -1344,6 +1561,7 @@
 	/* ── Sections ── */
 	.settings-section {
 		padding: 24px 0;
+		scroll-margin-top: 12px;
 	}
 
 	.section-label {
@@ -1819,8 +2037,8 @@
 		background-color: var(--surface-hover);
 	}
 	.sound-select option {
-		background: #ffffff;
-		color: #111111;
+		background: var(--surface-1);
+		color: var(--text-primary);
 	}
 
 	.sound-preview-btn {
@@ -1913,6 +2131,7 @@
 	.volume-value {
 		font-size: 12px;
 		font-family: 'Courier New', monospace;
+		font-variant-numeric: tabular-nums;
 		color: var(--text-primary);
 		min-width: 35px;
 		text-align: right;
@@ -1965,64 +2184,147 @@
 
 	/* ── Shortcut Recorder ── */
 	.shortcut-record-wrap {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		gap: 8px;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		border-radius: 10px;
+		padding: 6px 8px 6px 12px;
+		transition:
+			border-color 0.2s,
+			box-shadow 0.2s;
+	}
+
+	.shortcut-record-wrap.is-recording {
+		border-color: rgba(239, 68, 68, 0.7);
+		box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.14);
+		animation: pulse-border 1.5s infinite;
 	}
 
 	.shortcut-display {
-		min-width: 100px;
-		height: 34px;
-		background: var(--surface-2);
-		border: 1px solid var(--border-soft);
-		border-radius: 8px;
+		min-width: 72px;
+		min-height: 24px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-family: 'Courier New', monospace;
-		font-weight: bold;
-		font-size: 13px;
+		gap: 8px;
+		font-family:
+			'Inter',
+			-apple-system,
+			BlinkMacSystemFont,
+			'SF Pro Display',
+			system-ui,
+			sans-serif;
+		font-weight: 600;
+		font-size: 12px;
 		color: var(--text-primary);
-		padding: 0 12px;
 		transition: all 0.2s;
 	}
 
 	.shortcut-display.recording {
-		border-color: #ef4444;
 		color: #ef4444;
-		box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
-		animation: pulse-border 1.5s infinite;
+	}
+
+	.recording-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: #ef4444;
+		animation: pulse-dot 1.2s ease-in-out infinite;
+		flex-shrink: 0;
+	}
+
+	.shortcut-text.recording-label {
+		font-size: 11px;
+		font-weight: 600;
+		color: #ef4444;
+		white-space: nowrap;
+	}
+
+	.keycap-group {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.keycap {
+		background: var(--surface-3);
+		border: 1px solid var(--border-specular);
+		border-bottom-width: 2px;
+		border-radius: 6px;
+		padding: 2px 7px;
+		font-family:
+			'Inter',
+			-apple-system,
+			system-ui,
+			sans-serif;
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1.3;
+		color: var(--text-primary);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+	}
+
+	.key-sep {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--text-muted);
 	}
 
 	@keyframes pulse-border {
 		0% {
-			border-color: rgba(239, 68, 68, 1);
+			border-color: rgba(239, 68, 68, 0.9);
 		}
 		50% {
-			border-color: rgba(239, 68, 68, 0.3);
+			border-color: rgba(239, 68, 68, 0.35);
 		}
 		100% {
-			border-color: rgba(239, 68, 68, 1);
+			border-color: rgba(239, 68, 68, 0.9);
+		}
+	}
+
+	@keyframes pulse-dot {
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 0.45;
+			transform: scale(0.8);
 		}
 	}
 
 	.record-btn {
-		width: 34px;
-		height: 34px;
+		width: 30px;
+		height: 30px;
 		border-radius: 8px;
 		border: 1px solid var(--border-soft);
-		background: var(--surface-2);
-		color: var(--text-muted);
+		background: var(--surface-3);
+		backdrop-filter: blur(8px);
+		-webkit-backdrop-filter: blur(8px);
+		color: var(--text-secondary);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		cursor: pointer;
-		transition: all 0.2s;
+		transition:
+			background 0.16s,
+			color 0.16s,
+			border-color 0.16s,
+			transform 0.14s var(--spring-out);
 	}
 
 	.record-btn:hover {
 		background: var(--surface-hover);
+		border-color: var(--border-specular);
 		color: var(--text-primary);
+		transform: translateY(-1px);
+	}
+
+	.record-btn:active {
+		transform: scale(0.95);
 	}
 
 	.record-btn.is-recording {
@@ -2033,6 +2335,8 @@
 
 	.record-btn.is-recording:hover {
 		background: #dc2626;
+		border-color: #dc2626;
+		color: white;
 	}
 
 	/* ── Profiles ── */
@@ -2064,13 +2368,11 @@
 		background: var(--accent);
 		color: var(--accent-text);
 		border: none;
-		box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent);
 	}
 
 	.profile-btn.primary:hover {
 		filter: brightness(1.1);
 		transform: translateY(-1px);
-		box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
 	}
 
 	.profile-btn.secondary {
