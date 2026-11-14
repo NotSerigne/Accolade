@@ -23,13 +23,11 @@ export default defineConfig({
 			'@tauri-apps/api/event',
 			'@tauri-apps/api/window',
 			'@tauri-apps/api/dpi',
-			'@tauri-apps/api/path',
 			'@tauri-apps/plugin-store',
 			'@tauri-apps/plugin-shell',
 			'@tauri-apps/plugin-dialog',
 			'@tauri-apps/plugin-updater',
-			'@tauri-apps/plugin-process',
-			'@tauri-apps/plugin-autostart'
+			'@tauri-apps/plugin-process'
 		]
 	},
 	build: {

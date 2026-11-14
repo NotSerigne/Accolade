@@ -99,11 +99,18 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
             let entry_path = entry.path();
 
             if is_achievements_file(&entry_path) {
-                let achievements = parser.parse(entry_path.to_str().unwrap_or(""));
+                let mut achievements = parser.parse(entry_path.to_str().unwrap_or(""));
                 let steam_id = extract_steam_id_from_path(&entry_path.to_string_lossy());
                 if steam_id == 0 {
                     continue;
                 }
+                crate::achievements::stats_schema::enrich_from_sibling_stats(
+                    &mut achievements,
+                    entry_path.to_str().unwrap_or(""),
+                    Some(steam_id),
+                );
+                let achievement_groups =
+                    crate::achievements::stats_schema::schema_groups_for_app(steam_id);
                 games.push(Game {
                     name: String::new(),
                     id: format!("steam_{}", steam_id),
@@ -120,6 +127,7 @@ fn find_achievements(path: &PathBuf, parser: &Box<dyn EmulatorParser>) -> Vec<Ga
                     is_favorite: false,
                     tags: Vec::new(),
                     playtime_seconds: 0,
+                    achievement_groups,
                 });
             } else if entry_path.is_dir() {
                 games.extend(find_achievements(&entry_path, parser));

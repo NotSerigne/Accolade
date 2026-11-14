@@ -59,17 +59,106 @@ fn capture_with_wgc(path: &Path) -> Result<(), String> {
 
 /// Legacy GDI capture, used only when WGC is unavailable.
 fn capture_with_gdi(path: &Path) -> Result<(), String> {
-    let screens =
-        screenshots::Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    let screen = screens
-        .iter()
-        .find(|s| s.display_info.is_primary)
-        .or(screens.first())
-        .ok_or_else(|| "No screen found".to_string())?;
-    let image = screen
-        .capture()
-        .map_err(|e| format!("Capture failed: {}", e))?;
-    write_png(path, image.width(), image.height(), image.as_raw())
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
+        GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        SRCCOPY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+
+    unsafe {
+        let width = GetSystemMetrics(SM_CXSCREEN);
+        let height = GetSystemMetrics(SM_CYSCREEN);
+        if width <= 0 || height <= 0 {
+            return Err("Invalid primary screen dimensions".to_string());
+        }
+
+        let hdc_screen = GetDC(None);
+        if hdc_screen.is_invalid() {
+            return Err("GetDC failed".to_string());
+        }
+
+        let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
+        if hdc_mem.is_invalid() {
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err("CreateCompatibleDC failed".to_string());
+        }
+
+        let hbitmap = CreateCompatibleBitmap(hdc_screen, width, height);
+        if hbitmap.is_invalid() {
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err("CreateCompatibleBitmap failed".to_string());
+        }
+
+        let old_obj = SelectObject(hdc_mem, hbitmap.into());
+        if old_obj.is_invalid() {
+            let _ = DeleteObject(hbitmap.into());
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err("SelectObject failed".to_string());
+        }
+
+        let blt_res = BitBlt(
+            hdc_mem,
+            0,
+            0,
+            width,
+            height,
+            Some(hdc_screen),
+            0,
+            0,
+            SRCCOPY,
+        );
+        let _ = SelectObject(hdc_mem, old_obj);
+
+        if let Err(e) = blt_res {
+            let _ = DeleteObject(hbitmap.into());
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+            return Err(format!("BitBlt failed: {}", e));
+        }
+
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // top-down DIB
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut buf = vec![0u8; (width as usize) * (height as usize) * 4];
+        let lines = GetDIBits(
+            hdc_mem,
+            hbitmap,
+            0,
+            height as u32,
+            Some(buf.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        let _ = DeleteObject(hbitmap.into());
+        let _ = DeleteDC(hdc_mem);
+        let _ = ReleaseDC(None, hdc_screen);
+
+        if lines == 0 {
+            return Err("GetDIBits failed".to_string());
+        }
+
+        // Convert BGRA to RGBA
+        for px in buf.chunks_exact_mut(4) {
+            px.swap(0, 2);
+            px[3] = 255;
+        }
+
+        write_png(path, width as u32, height as u32, &buf)
+    }
 }
 
 pub fn capture_screenshot<R: Runtime>(

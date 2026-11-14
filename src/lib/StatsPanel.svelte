@@ -2,6 +2,8 @@
 	// src/lib/StatsPanel.svelte
 	import {
 		games,
+		computeGameProgress,
+		getGameCompletionPct,
 		getGameHeaderUrl,
 		getGameIconUrl,
 		totalUnlockedAchievements
@@ -24,23 +26,31 @@
 		void goto(resolve('/(app)/games/[id]', { id }));
 	}
 
+	let gameProgressList = $derived(
+		$games.map((game) => ({
+			game,
+			progress: computeGameProgress(game.achievements ?? [], game.achievement_groups)
+		}))
+	);
+
 	let totalAchievements = $derived(
-		$games.reduce((acc, g) => acc + (g.achievements_total || g.achievements?.length || 0), 0)
+		gameProgressList.reduce(
+			(acc, { game, progress }) =>
+				acc + (game.achievements?.length ? progress.totalAll : game.achievements_total || 0),
+			0
+		)
 	);
 
 	let avgProgression = $derived.by(() => {
 		if ($games.length === 0) return 0;
-		const sum = $games.reduce((acc, g) => {
-			const total = g.achievements_total || g.achievements?.length || 0;
-			if (total === 0) return acc;
-			const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
-			return acc + Math.round((unlocked / total) * 100);
-		}, 0);
+		const sum = $games.reduce((acc, g) => acc + getGameCompletionPct(g), 0);
 		return Math.round(sum / $games.length);
 	});
 
 	let rarityBreakdown = $derived.by(() => {
-		const all = $games.flatMap((g) => g.achievements ?? []).filter((a) => a.unlocked);
+		const all = gameProgressList
+			.flatMap(({ progress }) => progress.sections.flatMap((s) => s.achievements))
+			.filter((a) => a.unlocked);
 		const breakdown: RarityBreakdown = {
 			mythic: 0,
 			legendary: 0,
@@ -86,15 +96,21 @@
 	});
 
 	let recentlyCompleted = $derived.by(() => {
-		return $games
-			.filter((g) => {
-				const total = g.achievements_total || g.achievements?.length || 0;
-				const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
-				return total > 0 && unlocked === total;
-			})
+		return gameProgressList
+			.filter(({ progress }) => progress.isPlatinum)
 			.sort((a, b) => {
-				const latestA = Math.max(...(a.achievements?.map((x) => x.unlocked_time ?? 0) ?? [0]));
-				const latestB = Math.max(...(b.achievements?.map((x) => x.unlocked_time ?? 0) ?? [0]));
+				const latestA = Math.max(
+					0,
+					...a.progress.sections
+						.filter((s) => !s.isDlc)
+						.flatMap((s) => s.achievements.map((x) => x.unlocked_time ?? 0))
+				);
+				const latestB = Math.max(
+					0,
+					...b.progress.sections
+						.filter((s) => !s.isDlc)
+						.flatMap((s) => s.achievements.map((x) => x.unlocked_time ?? 0))
+				);
 				return latestB - latestA;
 			})
 			.slice(0, 3);
@@ -180,8 +196,7 @@
 	<h2 class="section-title">{$i18n.t('statsPanel.recentCompleted')}</h2>
 
 	<ul class="completed-list">
-		{#each recentlyCompleted as game (game.id)}
-			{@const total = game.achievements_total || game.achievements?.length || 0}
+		{#each recentlyCompleted as { game, progress } (game.id)}
 			<li class="completed-item">
 				<button type="button" class="completed-btn" onclick={() => openGame(game.id)}>
 					<img
@@ -199,7 +214,7 @@
 					<div class="completed-info">
 						<span class="completed-name">{game.name}</span>
 						<span class="completed-sub tabular-nums">
-							100% · {total}/{total}
+							100% · {progress.unlockedBase}/{progress.totalBase}
 						</span>
 					</div>
 					<svg

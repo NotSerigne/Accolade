@@ -68,6 +68,7 @@ impl EmulatorParser for Parser {
                 hidden: false,
                 progress,
                 max_progress,
+                ..Default::default()
             });
         }
         achievements

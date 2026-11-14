@@ -67,7 +67,8 @@ pub async fn get_achievements(
                 game_id,
                 sid
             );
-            let refreshed = crate::refresh_game_achievements_schema(&app_handle, sid).await;
+            let (refreshed, refreshed_groups) =
+                crate::refresh_game_achievements_schema(&app_handle, sid).await;
             let base_schema = if !refreshed.is_empty() {
                 refreshed
             } else {
@@ -78,6 +79,12 @@ pub async fn get_achievements(
                 if let Some(stored_game) = gs.iter_mut().find(|g| g.id == game_id) {
                     stored_game.achievements = achs.clone();
                     stored_game.achievements_total = achs.len() as u32;
+                    if !refreshed_groups.is_empty() {
+                        stored_game.achievement_groups = refreshed_groups;
+                    } else if stored_game.achievement_groups.is_empty() {
+                        stored_game.achievement_groups =
+                            crate::achievements::stats_schema::schema_groups_for_app(sid);
+                    }
                 }
             }
         } else if !stored_schema.is_empty() {
@@ -603,6 +610,9 @@ pub(crate) async fn sync_steam_metadata(
                 crate::merge_schema_with_local(existing.achievements.clone(), &lg.achievements);
             existing.achievements_total = merged.len() as u32;
             existing.achievements = merged;
+            if existing.achievement_groups.is_empty() && !lg.achievement_groups.is_empty() {
+                existing.achievement_groups = lg.achievement_groups;
+            }
         }
     }
     if added_local > 0 {
@@ -714,6 +724,7 @@ pub(crate) async fn sync_steam_metadata(
                         is_favorite: false,
                         tags: Vec::new(),
                         playtime_seconds: steam_playtime_secs,
+                        achievement_groups: Vec::new(),
                     });
                     existing_ids.insert(game_id);
                     added_count += 1;

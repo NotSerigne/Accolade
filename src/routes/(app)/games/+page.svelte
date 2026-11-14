@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
-	import { games, loadGames, getGameIconUrl, getGameCompletionPct } from '$lib/stores/Games.js';
+	import {
+		games,
+		loadGames,
+		getGameIconUrl,
+		getGameCompletionPct,
+		computeGameProgress
+	} from '$lib/stores/Games.js';
 	import { applyGameTheme, selectedGameId, toggleGameFavorite } from '$lib/stores/selectedGame.js';
 	import { settings } from '$lib/stores/settings.js';
 	import { i18n } from '$lib/stores/i18n.js';
@@ -8,7 +14,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import type { Game } from '$lib/stores/Games.js';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	async function autoGroup() {
 		try {
@@ -42,13 +48,16 @@
 
 	type GameStats = {
 		completionPct: number;
+		isPlatinum: boolean;
+		unlockedAll: number;
 		lastUnlockedTs: number;
 	};
 
 	let gameStatsMap = $derived.by(() => {
-		const map = new Map<string, GameStats>();
+		const map = new SvelteMap<string, GameStats>();
 		for (const g of $games) {
 			const achs = g.achievements ?? [];
+			const progress = computeGameProgress(achs, g.achievement_groups);
 			let lastUnlockedTs = 0;
 			for (const a of achs) {
 				const t = a.unlocked_time ?? 0;
@@ -56,6 +65,8 @@
 			}
 			map.set(g.id, {
 				completionPct: getGameCompletionPct(g),
+				isPlatinum: progress.isPlatinum,
+				unlockedAll: progress.unlockedAll,
 				lastUnlockedTs
 			});
 		}
@@ -98,12 +109,13 @@
 		// Filter by status
 		if (status !== 'all') {
 			result = result.filter((g) => {
-				const total = g.achievements_total || g.achievements?.length || 0;
-				const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
+				const stats = gameStatsMap.get(g.id);
+				const isPlatinum = stats?.isPlatinum ?? false;
+				const unlocked = stats?.unlockedAll ?? 0;
 
-				if (status === 'completed') return unlocked === total && total > 0;
-				if (status === 'in-progress') return unlocked > 0 && unlocked < total;
-				if (status === 'todo') return unlocked === 0;
+				if (status === 'completed') return isPlatinum;
+				if (status === 'in-progress') return !isPlatinum && unlocked > 0;
+				if (status === 'todo') return !isPlatinum && unlocked === 0;
 				return true;
 			});
 		}
@@ -507,9 +519,8 @@
 									style:background={pct === 100 ? 'var(--completed)' : 'var(--accent)'}
 								></div>
 							</div>
-							<span
-								class="list-pct"
-								style:color={pct === 100 ? 'var(--completed)' : 'inherit'}>{pct}%</span
+							<span class="list-pct" style:color={pct === 100 ? 'var(--completed)' : 'inherit'}
+								>{pct}%</span
 							>
 						</div>
 					</div>
@@ -946,15 +957,13 @@
 		gap: 20px;
 		overflow-y: auto;
 		flex: 1;
-		padding: 4px;
+		padding: 8px 4px;
 		align-content: start;
 		align-items: start;
 	}
 
 	.game-card-container {
 		display: flex;
-		content-visibility: auto;
-		contain-intrinsic-size: 200px 260px;
 	}
 
 	.game-card {
@@ -969,6 +978,8 @@
 		justify-content: space-between;
 		width: 100%;
 		position: relative;
+		content-visibility: auto;
+		contain-intrinsic-size: auto 260px;
 	}
 
 	.game-card:hover,

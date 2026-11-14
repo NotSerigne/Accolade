@@ -1,5 +1,5 @@
 // src-tauri/src/lib.rs
-use crate::achievements::models::{Achievement, Game, SourceType};
+use crate::achievements::models::{Achievement, AchievementGroup, Game, SourceType};
 use crate::achievements::steam::{
     fetch_player_achievements, fetch_steam_metadata_with_client, is_valid_game_name,
     normalize_steam_icon_url,
@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{window::Color, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
+const ACHIEVEMENT_SCHEMA_CACHE_VERSION: u32 = 2;
+
 /// Last known-good Steam store metadata for a given AppID, persisted to disk.
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub(crate) struct CachedAppDetails {
@@ -24,6 +26,10 @@ pub(crate) struct CachedAppDetails {
     pub genres: Vec<String>,
     #[serde(default)]
     pub achievements: Vec<Achievement>,
+    #[serde(default)]
+    pub achievement_groups: Vec<AchievementGroup>,
+    #[serde(default)]
+    pub schema_version: u32,
     pub fetched_at: u64,
     #[serde(default)]
     pub language: Option<String>,
@@ -161,15 +167,15 @@ pub(crate) fn needs_achievement_schema_refresh(
     false
 }
 
-/// Fetches the latest achievement schema (localized names, descriptions, and icon URLs)
+/// Fetches the latest achievement schema (localized names, descriptions, icon URLs, and groups)
 /// from Steam for a single `steam_id`, updates `steam_appdetails_cache.json`, and returns
-/// the schema list (falling back to the on-disk cache if offline or rate-limited).
+/// `(achievements, achievement_groups)` (falling back to disk cache and local `UserGameStatsSchema` if offline).
 pub(crate) async fn refresh_game_achievements_schema(
     app_handle: &tauri::AppHandle,
     steam_id: u32,
-) -> Vec<Achievement> {
+) -> (Vec<Achievement>, Vec<AchievementGroup>) {
     if steam_id == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
     let (mut api_key, language) = {
@@ -207,20 +213,35 @@ pub(crate) async fn refresh_game_achievements_schema(
                     meta.achievements.len(),
                     steam_id
                 );
+                let groups = if meta.achievement_groups.is_empty() {
+                    crate::achievements::stats_schema::schema_groups_for_app(steam_id)
+                } else {
+                    meta.achievement_groups.clone()
+                };
                 let entry = cache.entry(steam_id).or_default();
                 entry.achievements = meta.achievements.clone();
+                entry.achievement_groups = groups.clone();
+                entry.schema_version = ACHIEVEMENT_SCHEMA_CACHE_VERSION;
                 entry.language = Some(language.clone());
                 entry.fetched_at = now_unix();
                 save_appdetails_cache(&cache_path, &cache);
-                return meta.achievements;
+                return (meta.achievements, groups);
             }
         }
     }
 
-    cache
-        .get(&steam_id)
-        .map(|c| c.achievements.clone())
-        .unwrap_or_default()
+    let cached = cache.get(&steam_id);
+    let mut achs = cached.map(|c| c.achievements.clone()).unwrap_or_default();
+    let mut groups = cached
+        .map(|c| c.achievement_groups.clone())
+        .unwrap_or_default();
+    if groups.is_empty() {
+        groups = crate::achievements::stats_schema::schema_groups_for_app(steam_id);
+    }
+    if !achs.is_empty() {
+        crate::achievements::stats_schema::enrich_achievements_with_schema(&mut achs, steam_id);
+    }
+    (achs, groups)
 }
 
 pub(crate) fn merge_schema_with_local(
@@ -273,6 +294,12 @@ pub(crate) fn merge_schema_with_local(
                     hidden: s.hidden,
                     progress: live.progress,
                     max_progress: live.max_progress,
+                    groupid: if s.groupid != 0 {
+                        s.groupid
+                    } else {
+                        live.groupid
+                    },
+                    archived: s.archived || live.archived,
                 }
             } else {
                 Achievement {
@@ -364,7 +391,8 @@ pub(crate) async fn enrich_games_with_steam(
                     .is_some_and(|l| l.eq_ignore_ascii_case(language))
             });
             let has_valid_schema = cached.is_some_and(|c| {
-                !c.achievements.is_empty()
+                c.schema_version >= ACHIEVEMENT_SCHEMA_CACHE_VERSION
+                    && !c.achievements.is_empty()
                     && c.achievements.iter().all(|a| a.icon.starts_with("http"))
             });
             // Skip GetGameAchievements & appdetails entirely on cache hit matching language & icons
@@ -456,7 +484,12 @@ pub(crate) async fn enrich_games_with_steam(
             .as_ref()
             .map(|m| m.achievements.clone())
             .unwrap_or_default();
-        let schema_source = if !live_achievements.is_empty() {
+        let live_groups = metadata
+            .as_ref()
+            .map(|m| m.achievement_groups.clone())
+            .unwrap_or_default();
+        let used_live_schema = !live_achievements.is_empty();
+        let schema_source = if used_live_schema {
             live_achievements
         } else {
             appdetails_cache
@@ -464,7 +497,24 @@ pub(crate) async fn enrich_games_with_steam(
                 .map(|c| c.achievements.clone())
                 .unwrap_or_default()
         };
+        let mut groups_source = if used_live_schema {
+            live_groups
+        } else {
+            appdetails_cache
+                .get(&steam_id)
+                .map(|c| c.achievement_groups.clone())
+                .unwrap_or_default()
+        };
         let mut merged_achievements = merge_schema_with_local(schema_source, local_state);
+        if groups_source.is_empty() && steam_id > 0 {
+            groups_source = crate::achievements::stats_schema::schema_groups_for_app(steam_id);
+        }
+        if !used_live_schema && steam_id > 0 {
+            crate::achievements::stats_schema::enrich_achievements_with_schema(
+                &mut merged_achievements,
+                steam_id,
+            );
+        }
 
         if let Some(Ok(pa)) = player_achievements_res {
             for (key, info) in pa {
@@ -498,6 +548,7 @@ pub(crate) async fn enrich_games_with_steam(
 
         game.achievements = merged_achievements;
         game.achievements_total = game.achievements.len() as u32;
+        game.achievement_groups = groups_source;
 
         let mut cache_entry = appdetails_cache.get(&steam_id).cloned().unwrap_or_default();
         let mut entry_dirty = false;
@@ -580,6 +631,8 @@ pub(crate) async fn enrich_games_with_steam(
 
             if !meta.achievements.is_empty() {
                 cache_entry.achievements = meta.achievements.clone();
+                cache_entry.achievement_groups = meta.achievement_groups.clone();
+                cache_entry.schema_version = ACHIEVEMENT_SCHEMA_CACHE_VERSION;
                 entry_dirty = true;
             }
             if is_valid_game_name(&cache_entry.name)

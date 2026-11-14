@@ -2,6 +2,8 @@
 	// src/routes/(app)/stats/+page.svelte
 	import {
 		games,
+		computeGameProgress,
+		getGameCompletionPct,
 		totalUnlockedAchievements,
 		totalPlaytimeSeconds,
 		formatPlaytime,
@@ -13,8 +15,19 @@
 
 	let activeTab = $state('overview');
 
+	let gameProgressList = $derived(
+		$games.map((game) => ({
+			game,
+			progress: computeGameProgress(game.achievements ?? [], game.achievement_groups)
+		}))
+	);
+
 	let totalPossibleAchievements = $derived(
-		$games.reduce((acc, g) => acc + (g.achievements_total || g.achievements?.length || 0), 0)
+		gameProgressList.reduce(
+			(acc, { game, progress }) =>
+				acc + (game.achievements?.length ? progress.totalAll : game.achievements_total || 0),
+			0
+		)
 	);
 
 	let globalCompletionRate = $derived(
@@ -23,19 +36,22 @@
 			: 0
 	);
 
-	let remainingAchievements = $derived(totalPossibleAchievements - $totalUnlockedAchievements);
+	let remainingAchievements = $derived(
+		Math.max(0, totalPossibleAchievements - $totalUnlockedAchievements)
+	);
 
 	let sortedByProgression = $derived.by(() => {
-		return [...$games]
-			.map((g) => {
-				const total = g.achievements_total || g.achievements?.length || 0;
-				const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
-				const pct = total > 0 ? (unlocked / total) * 100 : 0;
-				return { ...g, unlockedCount: unlocked, totalCount: total, progression: pct };
+		return gameProgressList
+			.map(({ game, progress }) => {
+				const progression = getGameCompletionPct(game);
+				return {
+					...game,
+					unlockedCount: progress.unlockedBase,
+					progression
+				};
 			})
 			.sort((a, b) => {
-				if (Math.round(b.progression) !== Math.round(a.progression))
-					return b.progression - a.progression;
+				if (b.progression !== a.progression) return b.progression - a.progression;
 				return b.unlockedCount - a.unlockedCount;
 			});
 	});
@@ -44,9 +60,12 @@
 	let podium = $derived(sortedByProgression.slice(0, 3));
 
 	let allUnlockedAchievements = $derived.by(() => {
-		return $games
-			.flatMap((g) =>
-				(g.achievements ?? []).filter((a) => a.unlocked).map((a) => ({ ...a, gameName: g.name }))
+		return gameProgressList
+			.flatMap(({ game, progress }) =>
+				progress.sections
+					.flatMap((s) => s.achievements)
+					.filter((a) => a.unlocked)
+					.map((a) => ({ ...a, gameName: game.name }))
 			)
 			.sort((a, b) => (b.unlocked_time ?? 0) - (a.unlocked_time ?? 0));
 	});
@@ -610,7 +629,9 @@
 							stroke="currentColor"
 							stroke-width="2"
 						>
-							<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+							<polygon
+								points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+							/>
 						</svg>
 					</div>
 					<div class="card-info">
@@ -723,7 +744,8 @@
 								fill="none"
 								stroke="currentColor"
 								stroke-width="2"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg
-							> {$i18n.t('stats.rarestAchievement')}</span
+							>
+							{$i18n.t('stats.rarestAchievement')}</span
 						>
 						{#if rarestAchievement}
 							<div class="rarity-item">
@@ -777,7 +799,8 @@
 								fill="none"
 								stroke="currentColor"
 								stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-							> {$i18n.t('stats.bestWeek')}</span
+							>
+							{$i18n.t('stats.bestWeek')}</span
 						>
 						<div class="best-week-val">
 							<span class="val">{bestWeek.count}</span>
@@ -792,7 +815,9 @@
 					<div class="card-header">
 						<h2>{$i18n.t('stats.tabActivity')}</h2>
 						<span class="sub"
-							>{$i18n.t('stats.achievementsOver52Weeks', { count: $totalUnlockedAchievements })}</span
+							>{$i18n.t('stats.achievementsOver52Weeks', {
+								count: $totalUnlockedAchievements
+							})}</span
 						>
 					</div>
 					<div class="heatmap-container">
@@ -867,7 +892,10 @@
 							<div class="chart-nav-group">
 								{#if cumulativeTimeframe !== 'all'}
 									<div class="window-nav">
-										<button onclick={() => currentWindowOffset++} aria-label={$i18n.t('stats.previous')}>
+										<button
+											onclick={() => currentWindowOffset++}
+											aria-label={$i18n.t('stats.previous')}
+										>
 											<svg
 												width="14"
 												height="14"

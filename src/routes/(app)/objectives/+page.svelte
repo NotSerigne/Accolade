@@ -1,6 +1,6 @@
 <script lang="ts">
 	// src/routes/(app)/objectives/+page.svelte
-	import { games, type Game } from '$lib/stores/Games.js';
+	import { games, computeGameProgress, type Game } from '$lib/stores/Games.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { i18n } from '$lib/stores/i18n.js';
@@ -10,19 +10,18 @@
 	let sortedGames = $derived.by(() => {
 		const mapped = $games
 			.map((g) => {
-				const total = g.achievements_total || g.achievements?.length || 0;
-				const unlocked = g.achievements?.filter((a) => a.unlocked).length ?? 0;
-				const remaining = total - unlocked;
-				const pct = total > 0 ? (unlocked / total) * 100 : 0;
+				const progress = computeGameProgress(g.achievements ?? [], g.achievement_groups);
+				const remaining = progress.totalBase - progress.unlockedBase;
 				return {
 					...g,
-					unlockedCount: unlocked,
-					totalCount: total,
+					unlockedCount: progress.unlockedBase,
+					totalCount: progress.totalBase,
 					remainingCount: remaining,
-					progression: pct
+					progression: progress.platinumPct,
+					isPlatinum: progress.isPlatinum
 				};
 			})
-			.filter((g) => g.totalCount > 0 && g.progression < 100);
+			.filter((g) => g.totalCount > 0 && !g.isPlatinum);
 
 		if (sortBy === 'progression') {
 			return mapped.sort((a, b) => b.progression - a.progression);
@@ -32,11 +31,21 @@
 	});
 
 	let easyAchievements = $derived.by(() => {
-		const locked = $games.flatMap((g) =>
-			(g.achievements ?? []).filter((a) => !a.unlocked).map((a) => ({ ...a, gameName: g.name }))
-		);
+		const locked = $games.flatMap((g) => {
+			const progress = computeGameProgress(g.achievements ?? [], g.achievement_groups);
+			return progress.sections
+				.filter((s) => !s.archived)
+				.flatMap((s) =>
+					s.achievements
+						.filter((a) => !a.unlocked && !a.archived)
+						.map((a) => ({ ...a, gameName: g.name }))
+				);
+		});
 		return locked
-			.sort((a, b) => parseFloat(b.completionpercentage) - parseFloat(a.completionpercentage))
+			.sort(
+				(a, b) =>
+					(parseFloat(b.completionpercentage) || 0) - (parseFloat(a.completionpercentage) || 0)
+			)
 			.slice(0, 10);
 	});
 

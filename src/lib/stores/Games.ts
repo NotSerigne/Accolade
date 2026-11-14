@@ -20,6 +20,43 @@ export interface Achievement {
 	progress?: number | null;
 	/** Target value of a progress-based achievement (always > 0 when set). */
 	max_progress?: number | null;
+	groupid?: number;
+	archived?: boolean;
+}
+
+export interface AchievementGroup {
+	groupid: number;
+	localized_name: string;
+	dlcappid: number;
+	archived: boolean;
+	developeronly: boolean;
+	ispublic: boolean;
+	order: number;
+}
+
+export interface AchievementSetSection {
+	id: string;
+	groupid: number;
+	title: string;
+	isDlc: boolean;
+	dlcappid: number;
+	archived: boolean;
+	unlocked: number;
+	total: number;
+	pct: number;
+	achievements: Achievement[];
+}
+
+export interface GameProgressSummary {
+	unlockedBase: number;
+	totalBase: number;
+	platinumPct: number;
+	isPlatinum: boolean;
+	unlockedAll: number;
+	totalAll: number;
+	globalPct: number;
+	hasDlc: boolean;
+	sections: AchievementSetSection[];
 }
 
 export type SourceType =
@@ -37,6 +74,7 @@ export interface Game {
 	background_image_url: string;
 	achievements_total: number;
 	achievements: Achievement[];
+	achievement_groups?: AchievementGroup[];
 	path_buf: string | null;
 	source: SourceType;
 	genres: string[];
@@ -141,15 +179,158 @@ export function getGameIconUrl(game: Game): string {
 	return getGameHeaderUrl(game);
 }
 
+export function filterPublicGroups(groups?: AchievementGroup[]): AchievementGroup[] {
+	if (!groups || groups.length === 0) return [];
+	return groups
+		.filter((g) => !g.developeronly && g.ispublic !== false)
+		.sort((a, b) => {
+			const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+			if (orderDiff !== 0) return orderDiff;
+			return (a.groupid ?? 0) - (b.groupid ?? 0);
+		});
+}
+
+function resolveBaseGroupTitle(group: AchievementGroup, baseGameLabel: string): string {
+	const trimmed = group.localized_name?.trim() ?? '';
+	if (!trimmed) return baseGameLabel;
+	const lower = trimmed.toLowerCase();
+	if (lower === 'base game' || lower === 'jeu de base' || lower === baseGameLabel.toLowerCase()) {
+		return baseGameLabel;
+	}
+	return trimmed;
+}
+
+export function computeGameProgress(
+	achievements: Achievement[],
+	groups?: AchievementGroup[],
+	baseGameLabel = 'Base Game'
+): GameProgressSummary {
+	const groupMap = new Map<number, AchievementGroup>();
+	for (const g of groups ?? []) {
+		groupMap.set(g.groupid, g);
+	}
+
+	const publicGroups = filterPublicGroups(groups);
+	const publicGroupMap = new Map<number, AchievementGroup>();
+	for (const g of publicGroups) {
+		publicGroupMap.set(g.groupid, g);
+	}
+
+	const hasDlc = publicGroups.some((g) => (g.dlcappid ?? 0) !== 0);
+
+	const defaultBaseSection: AchievementSetSection = {
+		id: 'base-default',
+		groupid: 0,
+		title: baseGameLabel,
+		isDlc: false,
+		dlcappid: 0,
+		archived: false,
+		unlocked: 0,
+		total: 0,
+		pct: 0,
+		achievements: []
+	};
+
+	const groupSections = new Map<number, AchievementSetSection>();
+	for (const g of publicGroups) {
+		const isDlc = (g.dlcappid ?? 0) !== 0;
+		const title = isDlc
+			? g.localized_name?.trim() || `DLC #${g.dlcappid}`
+			: resolveBaseGroupTitle(g, baseGameLabel);
+		groupSections.set(g.groupid, {
+			id: `group-${g.groupid}`,
+			groupid: g.groupid,
+			title,
+			isDlc,
+			dlcappid: g.dlcappid ?? 0,
+			archived: Boolean(g.archived),
+			unlocked: 0,
+			total: 0,
+			pct: 0,
+			achievements: []
+		});
+	}
+
+	let unlockedBase = 0;
+	let totalBase = 0;
+	let unlockedAll = 0;
+	let totalAll = 0;
+
+	for (const ach of achievements) {
+		const gid = ach.groupid ?? 0;
+		const mappedGroup = groupMap.get(gid);
+		if (
+			gid !== 0 &&
+			mappedGroup &&
+			(mappedGroup.developeronly === true || mappedGroup.ispublic === false)
+		) {
+			continue;
+		}
+
+		const publicGroup = publicGroupMap.get(gid);
+		const isDlc = Boolean(publicGroup && (publicGroup.dlcappid ?? 0) !== 0);
+		const isArchived = Boolean(ach.archived || publicGroup?.archived);
+		const targetSection = publicGroup
+			? groupSections.get(publicGroup.groupid)!
+			: defaultBaseSection;
+
+		targetSection.achievements.push(ach);
+
+		if (!(isArchived && !ach.unlocked)) {
+			totalAll += 1;
+			targetSection.total += 1;
+			if (!isDlc) totalBase += 1;
+
+			if (ach.unlocked) {
+				unlockedAll += 1;
+				targetSection.unlocked += 1;
+				if (!isDlc) unlockedBase += 1;
+			}
+		}
+	}
+
+	const sections: AchievementSetSection[] = [];
+	const finalizeSection = (section: AchievementSetSection): void => {
+		if (section.achievements.length === 0) return;
+		section.pct = section.total > 0 ? (section.unlocked / section.total) * 100 : 0;
+		sections.push(section);
+	};
+
+	finalizeSection(defaultBaseSection);
+	for (const g of publicGroups) {
+		if ((g.dlcappid ?? 0) === 0) {
+			finalizeSection(groupSections.get(g.groupid)!);
+		}
+	}
+	for (const g of publicGroups) {
+		if ((g.dlcappid ?? 0) !== 0) {
+			finalizeSection(groupSections.get(g.groupid)!);
+		}
+	}
+
+	const platinumPct = totalBase > 0 ? (unlockedBase / totalBase) * 100 : 0;
+	const isPlatinum = totalBase > 0 && unlockedBase === totalBase;
+	const globalPct = totalAll > 0 ? (unlockedAll / totalAll) * 100 : 0;
+
+	return {
+		unlockedBase,
+		totalBase,
+		platinumPct,
+		isPlatinum,
+		unlockedAll,
+		totalAll,
+		globalPct,
+		hasDlc,
+		sections
+	};
+}
+
 export function getGameCompletionPct(game: Game): number {
 	const achs = game.achievements ?? [];
-	const total = game.achievements_total || achs.length || 0;
-	if (total <= 0) return 0;
-	let unlocked = 0;
-	for (let i = 0; i < achs.length; i++) {
-		if (achs[i].unlocked) unlocked++;
-	}
-	return Math.min(100, Math.max(0, Math.round((unlocked / total) * 100)));
+	if (achs.length === 0) return 0;
+	const progress = computeGameProgress(achs, game.achievement_groups);
+	if (progress.isPlatinum) return 100;
+	return Math.min(99, Math.max(0, Math.round(progress.platinumPct)));
 }
 
 export function getRarityTier(percent?: number | string): RarityTier {
@@ -203,16 +384,15 @@ export interface ProfileRankInfo {
 export function calculateProfileRank(gamesList: Game[]): ProfileRankInfo {
 	let score = 0;
 	for (const g of gamesList) {
-		const achs = g.achievements ?? [];
-		const total = g.achievements_total || achs.length || 0;
-		let unlockedCount = 0;
-		for (const a of achs) {
-			if (a.unlocked) {
-				unlockedCount++;
-				score += getAchievementPoints(a);
+		const progress = computeGameProgress(g.achievements ?? [], g.achievement_groups);
+		for (const section of progress.sections) {
+			for (const a of section.achievements) {
+				if (a.unlocked) {
+					score += getAchievementPoints(a);
+				}
 			}
 		}
-		if (total > 0 && unlockedCount === total) {
+		if (progress.isPlatinum) {
 			score += 250; // Platinum / 100% completion bonus
 		}
 	}
@@ -244,9 +424,7 @@ export const totalUnlockedAchievements = derived(games, ($games) => {
 	for (let i = 0; i < $games.length; i++) {
 		const achs = $games[i].achievements;
 		if (!achs) continue;
-		for (let j = 0; j < achs.length; j++) {
-			if (achs[j].unlocked) count++;
-		}
+		count += computeGameProgress(achs, $games[i].achievement_groups).unlockedAll;
 	}
 	return count;
 });
@@ -255,14 +433,10 @@ export const totalCompletedGames = derived(games, ($games) => {
 	let completed = 0;
 	for (let i = 0; i < $games.length; i++) {
 		const g = $games[i];
-		const achs = g.achievements;
-		const total = g.achievements_total || achs?.length || 0;
-		if (total === 0 || !achs) continue;
-		let unlocked = 0;
-		for (let j = 0; j < achs.length; j++) {
-			if (achs[j].unlocked) unlocked++;
+		if (!g.achievements?.length) continue;
+		if (computeGameProgress(g.achievements, g.achievement_groups).isPlatinum) {
+			completed++;
 		}
-		if (unlocked === total) completed++;
 	}
 	return completed;
 });
@@ -354,10 +528,23 @@ export function setupAchievementsRealtimeSync(): void {
 			currentGames.map((game) => {
 				if (game.id !== payload.game_id) return game;
 
-				const total = payload.achievements_total ?? payload.achievements!.length;
+				const prevByKey = new Map<string, Achievement>();
+				for (const prev of game.achievements ?? []) {
+					prevByKey.set(prev.key.trim().toLowerCase(), prev);
+				}
+				const mergedAchievements = payload.achievements!.map((incoming) => {
+					const prev = prevByKey.get(incoming.key.trim().toLowerCase());
+					if (!prev) return incoming;
+					return {
+						...incoming,
+						groupid: incoming.groupid ?? prev.groupid,
+						archived: incoming.archived ?? prev.archived
+					};
+				});
+				const total = payload.achievements_total ?? mergedAchievements.length;
 				return {
 					...game,
-					achievements: payload.achievements!,
+					achievements: mergedAchievements,
 					achievements_total: total
 				};
 			})

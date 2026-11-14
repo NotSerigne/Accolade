@@ -158,6 +158,7 @@ impl AchievementProvider for RetroAchievementsProvider {
                 is_favorite: false,
                 tags: vec!["RetroAchievements".to_string()],
                 playtime_seconds: 0,
+                achievement_groups: Vec::new(),
             }
         }))
         .buffer_unordered(4)

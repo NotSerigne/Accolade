@@ -131,6 +131,12 @@ fn merge_live_achievements(
                 if s.icon_gray.is_empty() && !live_ach.icon_gray.is_empty() {
                     s.icon_gray = normalize_steam_icon_url(&live_ach.icon_gray);
                 }
+                if s.groupid == 0 && live_ach.groupid != 0 {
+                    s.groupid = live_ach.groupid;
+                }
+                if live_ach.archived {
+                    s.archived = true;
+                }
             } else if previous_live_keys.contains(&key) && !current_live_keys.contains(&key) {
                 s.unlocked = false;
                 s.unlocked_time = None;
@@ -559,9 +565,10 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 needs_schema_refresh,
                                 periodic_refresh
                             );
-                            let refreshed_schema = tauri::async_runtime::block_on(
-                                crate::refresh_game_achievements_schema(&app_handle, steam_id),
-                            );
+                            let (refreshed_schema, refreshed_groups) =
+                                tauri::async_runtime::block_on(
+                                    crate::refresh_game_achievements_schema(&app_handle, steam_id),
+                                );
                             if !refreshed_schema.is_empty() {
                                 let state = app_handle.state::<AppState>();
                                 if let Ok(mut gs) = state.games.lock() {
@@ -572,13 +579,19 @@ pub fn start(app_handle: tauri::AppHandle) {
                                         );
                                         stored.achievements_total =
                                             stored.achievements.len() as u32;
+                                        if !refreshed_groups.is_empty() {
+                                            stored.achievement_groups = refreshed_groups;
+                                        } else if stored.achievement_groups.is_empty() {
+                                            stored.achievement_groups =
+                                                crate::achievements::stats_schema::schema_groups_for_app(steam_id);
+                                        }
                                     }
                                 };
                             }
                         }
                     }
 
-                    let (ui_achievements, ui_total) = {
+                    let (ui_achievements, ui_total, ui_groups) = {
                         let state = app_handle.state::<AppState>();
                         state
                             .games
@@ -595,13 +608,19 @@ pub fn start(app_handle: tauri::AppHandle) {
                                     let total = merged.len() as u32;
                                     stored.achievements = merged.clone();
                                     stored.achievements_total = total;
-                                    (merged, total)
+                                    if stored.achievement_groups.is_empty() {
+                                        if let Some(sid) = stored.steam_id.filter(|&id| id > 0) {
+                                            stored.achievement_groups =
+                                                crate::achievements::stats_schema::schema_groups_for_app(sid);
+                                        }
+                                    }
+                                    (merged, total, stored.achievement_groups.clone())
                                 })
                             })
                             .unwrap_or_else(|| {
                                 let fallback = achievements.clone();
                                 let total = fallback.len() as u32;
-                                (fallback, total)
+                                (fallback, total, game.achievement_groups.clone())
                             })
                     };
 
@@ -624,10 +643,51 @@ pub fn start(app_handle: tauri::AppHandle) {
                         .cloned()
                         .collect();
 
-                    if !newly_unlocked.is_empty() {
-                        let total = ui_total;
-                        let unlocked_count_total = true_current_unlocked.len() as u32;
-                        let is_game_completed = total > 0 && unlocked_count_total == total;
+                    let excluded_group_ids: HashSet<u32> = ui_groups
+                        .iter()
+                        .filter(|g| g.developeronly || !g.ispublic)
+                        .map(|g| g.groupid)
+                        .collect();
+                    let archived_group_ids: HashSet<u32> = ui_groups
+                        .iter()
+                        .filter(|g| g.archived)
+                        .map(|g| g.groupid)
+                        .collect();
+                    let completion = crate::achievements::models::compute_game_completion(
+                        &ui_achievements,
+                        &ui_groups,
+                    );
+                    let total = if completion.total_all > 0 {
+                        completion.total_all
+                    } else {
+                        ui_total
+                    };
+                    let unlocked_count_total = if completion.total_all > 0 {
+                        completion.unlocked_all
+                    } else {
+                        true_current_unlocked.len() as u32
+                    };
+                    let visible_newly_unlocked: Vec<Achievement> = newly_unlocked
+                        .into_iter()
+                        .filter(|a| a.groupid == 0 || !excluded_group_ids.contains(&a.groupid))
+                        .collect();
+
+                    if !visible_newly_unlocked.is_empty() {
+                        let prev_achievements: Vec<Achievement> = ui_achievements
+                            .iter()
+                            .map(|a| {
+                                let key = a.key.trim().to_lowercase();
+                                let mut cloned = a.clone();
+                                cloned.unlocked = snapshot_previous_unlocked.contains(&key);
+                                cloned
+                            })
+                            .collect();
+                        let was_platinum = crate::achievements::models::compute_game_completion(
+                            &prev_achievements,
+                            &ui_groups,
+                        )
+                        .is_platinum;
+                        let is_game_completed = completion.is_platinum && !was_platinum;
 
                         let language = {
                             let state = app_handle.state::<AppState>();
@@ -647,8 +707,9 @@ pub fn start(app_handle: tauri::AppHandle) {
                         );
                         let enriched_game_achievements: Vec<Achievement> = ui_achievements.clone();
 
-                        let num_new = newly_unlocked.len();
-                        for (idx, ach) in newly_unlocked.iter().enumerate() {
+                        let num_new = visible_newly_unlocked.len();
+                        let base_unlocked = unlocked_count_total.saturating_sub(num_new as u32);
+                        for (idx, ach) in visible_newly_unlocked.iter().enumerate() {
                             log::info!(
                                 "[watcher] Achievement unlocked for '{}' (ID {}): {}",
                                 display_name,
@@ -687,7 +748,12 @@ pub fn start(app_handle: tauri::AppHandle) {
                             // We need to calculate the intermediate unlocked count for the UI ring
                             // If we unlock 3 at once and end at 50/50, the first should show 48/50, second 49/50, third 50/50
                             let current_unlocked_display =
-                                (unlocked_count_total - (num_new as u32)) + (idx as u32) + 1;
+                                (base_unlocked + (idx as u32) + 1).min(total);
+                            let (notif_unlocked, notif_total) = if is_platinum {
+                                (completion.unlocked_base, completion.total_base)
+                            } else {
+                                (current_unlocked_display, total)
+                            };
 
                             let payload = AchievementNotifPayload {
                                 name: ach_name,
@@ -699,8 +765,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 },
                                 rarity,
                                 completionpercentage: completion_pct,
-                                unlocked: current_unlocked_display,
-                                total,
+                                unlocked: notif_unlocked,
+                                total: notif_total,
                                 test: false,
                                 is_platinum,
                                 unlocked_time: ach.unlocked_time,
@@ -738,6 +804,12 @@ pub fn start(app_handle: tauri::AppHandle) {
                             .unwrap_or_else(|_| "fr".to_string())
                     };
                     for ach in &ui_achievements {
+                        if ach.groupid != 0 && excluded_group_ids.contains(&ach.groupid) {
+                            continue;
+                        }
+                        if ach.archived || archived_group_ids.contains(&ach.groupid) {
+                            continue;
+                        }
                         let key = ach.key.trim().to_lowercase();
                         if true_current_unlocked.contains(&key) {
                             continue;
@@ -771,8 +843,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 icon,
                                 rarity: rarity_label(completion_pct, &language),
                                 completionpercentage: completion_pct,
-                                unlocked: true_current_unlocked.len() as u32,
-                                total: ui_total,
+                                unlocked: unlocked_count_total,
+                                total,
                                 test: false,
                                 is_platinum: false,
                                 unlocked_time: None,

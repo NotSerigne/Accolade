@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { games, getGameIconUrl } from '$lib/stores/Games.js';
+	import { games, getGameCompletionPct, getGameIconUrl } from '$lib/stores/Games.js';
 	import { i18n } from '$lib/stores/i18n.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -21,13 +21,6 @@
 		});
 		return groups;
 	});
-
-	function getCompletion(game: Game): number {
-		const total = game.achievements_total || game.achievements?.length || 0;
-		if (total === 0) return 0;
-		const unlocked = game.achievements?.filter((a) => a.unlocked).length ?? 0;
-		return Math.round((unlocked / total) * 100);
-	}
 
 	function openGame(gameId: string) {
 		void goto(resolve('/(app)/games/[id]', { id: gameId }));
@@ -74,6 +67,7 @@
 				</h2>
 				<div class="games-row">
 					{#each games as game (game.id)}
+						{@const completion = getGameCompletionPct(game)}
 						<div
 							class="game-item"
 							onclick={() => openGame(game.id)}
@@ -115,8 +109,8 @@
 								<div class="progress-mini">
 									<div
 										class="bar"
-										style:width={getCompletion(game) + '%'}
-										style:background={getCompletion(game) === 100
+										style:width={completion + '%'}
+										style:background={completion === 100
 											? 'var(--completed)'
 											: 'var(--accent)'}
 									></div>

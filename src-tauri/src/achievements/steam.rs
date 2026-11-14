@@ -1,7 +1,9 @@
 // src-tauri/src/achievements/steam.rs
-use crate::achievements::models::Achievement;
+use crate::achievements::models::{
+    deserialize_bool_or_int, filter_public_groups, Achievement, AchievementGroup,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -65,6 +67,7 @@ pub struct SteamMetadata {
     pub header_image_url: String,
     pub background_image_url: String,
     pub achievements: Vec<Achievement>,
+    pub achievement_groups: Vec<AchievementGroup>,
     pub genres: Vec<String>,
 }
 
@@ -164,15 +167,54 @@ struct SteamGenre {
     description: String,
 }
 
-#[derive(Default)]
-struct RawAchievement {
+fn deserialize_optional_string_or_number<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match val {
+        Some(serde_json::Value::String(s)) => Some(s),
+        Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    })
+}
+
+#[derive(Deserialize, Default)]
+struct GetGameAchievementsEnvelope {
+    #[serde(default)]
+    response: GetGameAchievementsResponse,
+}
+
+#[derive(Deserialize, Default)]
+struct GetGameAchievementsResponse {
+    #[serde(default)]
+    achievements: Vec<SteamApiAchievement>,
+    #[serde(default)]
+    groups: Vec<AchievementGroup>,
+}
+
+#[derive(Deserialize, Default)]
+struct SteamApiAchievement {
+    #[serde(default)]
     internal_name: String,
+    #[serde(default)]
     localized_name: String,
+    #[serde(default)]
     localized_desc: String,
+    #[serde(default)]
     icon: String,
+    #[serde(default)]
     icon_gray: String,
+    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     hidden: bool,
-    player_percent_unlocked: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_number")]
+    player_percent_unlocked: Option<String>,
+    #[serde(default)]
+    groupid: u32,
+    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
+    archived: bool,
 }
 
 /// Normalizes any Steam achievement icon URL to the current `shared.fastly.steamstatic.com/community_assets`
@@ -224,71 +266,68 @@ fn build_icon_url(steam_id: u32, hash: &str) -> String {
     )
 }
 
-fn extract_xml_value(line: &str, tag: &str) -> Option<String> {
-    let open = format!("<{}>", tag);
-    let close = format!("</{}>", tag);
-    if let Some(start) = line.find(&open) {
-        let start_pos = start + open.len();
-        if let Some(end) = line[start_pos..].find(&close) {
-            return Some(line[start_pos..start_pos + end].to_string());
+/// Parses `IPlayerService/GetGameAchievements/v1` JSON into `(achievements, public_groups)`.
+/// Filters out `developeronly` / `!ispublic` groups and excludes achievements belonging to them,
+/// propagates group-level `archived` flags to their achievements, and prefixes bare icon filenames
+/// onto `shared.fastly.steamstatic.com/community_assets`.
+pub fn parse_achievements_json(
+    json: &str,
+    steam_id: u32,
+) -> Result<(Vec<Achievement>, Vec<AchievementGroup>), String> {
+    let envelope: GetGameAchievementsEnvelope =
+        serde_json::from_str(json).map_err(|e| e.to_string())?;
+
+    let excluded_group_ids: HashSet<u32> = envelope
+        .response
+        .groups
+        .iter()
+        .filter(|g| g.developeronly || !g.ispublic)
+        .map(|g| g.groupid)
+        .collect();
+    let archived_group_ids: HashSet<u32> = envelope
+        .response
+        .groups
+        .iter()
+        .filter(|g| g.archived)
+        .map(|g| g.groupid)
+        .collect();
+    let public_groups = filter_public_groups(&envelope.response.groups);
+
+    let mut achievements = Vec::with_capacity(envelope.response.achievements.len());
+    for raw in envelope.response.achievements {
+        let key = raw.internal_name.trim();
+        if key.is_empty() {
+            continue;
         }
-    }
-    None
-}
-
-fn decode_html_entities(s: &str) -> String {
-    s.replace("&apos;", "'")
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-}
-
-fn parse_achievements_xml(xml: &str, steam_id: u32) -> Vec<RawAchievement> {
-    let mut achievements = Vec::new();
-    let mut current: Option<RawAchievement> = None;
-
-    for line in xml.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.contains("<message>") {
-            current = Some(RawAchievement::default());
+        if raw.groupid != 0 && excluded_group_ids.contains(&raw.groupid) {
+            continue;
         }
+        let pct = raw
+            .player_percent_unlocked
+            .as_deref()
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .filter(|p| p.is_finite())
+            .unwrap_or(0.0);
 
-        if let Some(ref mut ach) = current {
-            if let Some(v) = extract_xml_value(trimmed, "internal_name") {
-                ach.internal_name = decode_html_entities(&v);
-            }
-            if let Some(v) = extract_xml_value(trimmed, "localized_name") {
-                ach.localized_name = decode_html_entities(&v);
-            }
-            if let Some(v) = extract_xml_value(trimmed, "localized_desc") {
-                ach.localized_desc = decode_html_entities(&v);
-            }
-            if let Some(hash) = extract_xml_value(trimmed, "icon") {
-                ach.icon = build_icon_url(steam_id, &hash);
-            }
-            if let Some(hash) = extract_xml_value(trimmed, "icon_gray") {
-                ach.icon_gray = build_icon_url(steam_id, &hash);
-            }
-            if let Some(v) = extract_xml_value(trimmed, "hidden") {
-                ach.hidden = v == "true" || v == "1";
-            }
-            if let Some(v) = extract_xml_value(trimmed, "player_percent_unlocked") {
-                ach.player_percent_unlocked = v.parse().unwrap_or(0.0);
-            }
-        }
-
-        if trimmed.contains("</message>") {
-            if let Some(ach) = current.take() {
-                if !ach.internal_name.is_empty() {
-                    achievements.push(ach);
-                }
-            }
-        }
+        achievements.push(Achievement {
+            key: key.to_string(),
+            name: raw.localized_name,
+            unlocked: false,
+            icon: build_icon_url(steam_id, &raw.icon),
+            icon_gray: build_icon_url(steam_id, &raw.icon_gray),
+            unlocked_time: None,
+            rarity: String::new(),
+            completionpercentage: format!("{:.1}", pct),
+            desc: raw.localized_desc,
+            hidden: raw.hidden,
+            progress: None,
+            max_progress: None,
+            groupid: raw.groupid,
+            archived: raw.archived || archived_group_ids.contains(&raw.groupid),
+        });
     }
 
-    achievements
+    Ok((achievements, public_groups))
 }
 
 /// Fetches `store.steampowered.com/api/appdetails` with:
@@ -561,7 +600,7 @@ pub async fn fetch_steam_metadata_with_client(
     };
 
     let lang_url = format!(
-        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language={steam_language}&format=xml"
+        "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language={steam_language}"
     );
 
     let (lang_res, details) = if need_appdetails {
@@ -574,10 +613,22 @@ pub async fn fetch_steam_metadata_with_client(
     };
 
     let mut achievements_lang = Vec::new();
+    let mut groups_lang = Vec::new();
     match lang_res {
         Ok(r) if r.status().is_success() => {
             if let Ok(text) = r.text().await {
-                achievements_lang = parse_achievements_xml(&text, steam_id);
+                match parse_achievements_json(&text, steam_id) {
+                    Ok((achs, grps)) => {
+                        achievements_lang = achs;
+                        groups_lang = grps;
+                    }
+                    Err(e) => log::warn!(
+                        "[steam metadata] Failed to parse GetGameAchievements JSON ({} lang) for AppID {}: {}",
+                        steam_language,
+                        steam_id,
+                        e
+                    ),
+                }
             }
         }
         Ok(r) => log::warn!(
@@ -596,19 +647,34 @@ pub async fn fetch_steam_metadata_with_client(
 
     let needs_english_fallback = !steam_language.eq_ignore_ascii_case("english")
         && (achievements_lang.is_empty()
-            || achievements_lang
-                .iter()
-                .any(|a| a.localized_name.trim().is_empty() || a.icon.trim().is_empty()));
+            || achievements_lang.iter().any(|a| {
+                a.name.trim().is_empty()
+                    || a.desc.trim().is_empty()
+                    || a.icon.trim().is_empty()
+                    || a.icon_gray.trim().is_empty()
+            })
+            || groups_lang.iter().any(|g| g.localized_name.trim().is_empty()));
 
     let mut achievements_en = Vec::new();
+    let mut groups_en = Vec::new();
     if needs_english_fallback {
         let en_url = format!(
-            "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english&format=xml"
+            "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?key={api_key}&appid={steam_id}&language=english"
         );
         match client.get(en_url).send().await {
             Ok(r) if r.status().is_success() => {
                 if let Ok(text) = r.text().await {
-                    achievements_en = parse_achievements_xml(&text, steam_id);
+                    match parse_achievements_json(&text, steam_id) {
+                        Ok((achs, grps)) => {
+                            achievements_en = achs;
+                            groups_en = grps;
+                        }
+                        Err(e) => log::warn!(
+                            "[steam metadata] Failed to parse GetGameAchievements JSON (english) for AppID {}: {}",
+                            steam_id,
+                            e
+                        ),
+                    }
                 }
             }
             Ok(r) => log::warn!(
@@ -624,59 +690,78 @@ pub async fn fetch_steam_metadata_with_client(
         }
     }
 
-    let en_map: HashMap<String, &RawAchievement> = achievements_en
+    let en_map: HashMap<String, &Achievement> = achievements_en
         .iter()
-        .map(|a| (a.internal_name.to_lowercase(), a))
+        .map(|a| (a.key.to_lowercase(), a))
         .collect();
 
     let source = if !achievements_lang.is_empty() {
-        &achievements_lang
+        achievements_lang
     } else {
-        &achievements_en
+        achievements_en.clone()
     };
 
     let achievements: Vec<Achievement> = source
-        .iter()
-        .map(|a| {
-            let en = en_map.get(&a.internal_name.to_lowercase());
+        .into_iter()
+        .map(|mut a| {
+            let en = en_map.get(&a.key.to_lowercase());
 
-            let name = if a.localized_name.trim().is_empty() {
-                en.map(|e| e.localized_name.clone())
-                    .unwrap_or_else(|| a.internal_name.clone())
-            } else {
-                a.localized_name.clone()
-            };
-            let desc = if a.localized_desc.trim().is_empty() {
-                en.map(|e| e.localized_desc.clone()).unwrap_or_default()
-            } else {
-                a.localized_desc.clone()
-            };
-            let icon = if a.icon.is_empty() {
-                en.map(|e| e.icon.clone()).unwrap_or_default()
-            } else {
-                a.icon.clone()
-            };
-            let icon_gray = if a.icon_gray.is_empty() {
-                en.map(|e| e.icon_gray.clone()).unwrap_or_default()
-            } else {
-                a.icon_gray.clone()
-            };
-
-            Achievement {
-                key: a.internal_name.clone(),
-                name,
-                unlocked: false,
-                icon,
-                icon_gray,
-                unlocked_time: None,
-                rarity: String::new(),
-                completionpercentage: format!("{:.1}", a.player_percent_unlocked),
-                desc,
-                hidden: a.hidden,
-                ..Default::default()
+            if a.name.trim().is_empty() {
+                a.name = en
+                    .map(|e| e.name.clone())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| a.key.clone());
             }
+            if a.desc.trim().is_empty() {
+                if let Some(en_ach) = en {
+                    a.desc = en_ach.desc.clone();
+                }
+            }
+            if a.icon.is_empty() {
+                if let Some(en_ach) = en {
+                    a.icon = en_ach.icon.clone();
+                }
+            }
+            if a.icon_gray.is_empty() {
+                if let Some(en_ach) = en {
+                    a.icon_gray = en_ach.icon_gray.clone();
+                }
+            }
+            if a.completionpercentage == "0.0" {
+                if let Some(en_ach) = en {
+                    if en_ach.completionpercentage != "0.0" {
+                        a.completionpercentage = en_ach.completionpercentage.clone();
+                    }
+                }
+            }
+
+            a
         })
         .collect();
+
+    let en_group_map: HashMap<u32, &AchievementGroup> =
+        groups_en.iter().map(|g| (g.groupid, g)).collect();
+    let achievement_groups = if groups_lang.is_empty() {
+        groups_en
+    } else {
+        let mut merged_groups: Vec<AchievementGroup> = groups_lang
+            .into_iter()
+            .map(|mut g| {
+                if g.localized_name.trim().is_empty() {
+                    if let Some(en_g) = en_group_map.get(&g.groupid) {
+                        g.localized_name = en_g.localized_name.clone();
+                    }
+                }
+                g
+            })
+            .collect();
+        for en_g in &groups_en {
+            if !merged_groups.iter().any(|g| g.groupid == en_g.groupid) {
+                merged_groups.push((*en_g).clone());
+            }
+        }
+        filter_public_groups(&merged_groups)
+    };
 
     let game_icon_url = details
         .as_ref()
@@ -714,6 +799,7 @@ pub async fn fetch_steam_metadata_with_client(
         header_image_url,
         background_image_url,
         achievements,
+        achievement_groups,
         genres: details
             .map(|d| d.genres.iter().map(|g| g.description.clone()).collect())
             .unwrap_or_default(),
@@ -750,5 +836,163 @@ mod tests {
             normalize_steam_icon_url(legacy),
             "https://shared.fastly.steamstatic.com/community_assets/images/apps/2958130/3800f6ef861ed486fa3d1eafe4cdfea0245de936.jpg"
         );
+    }
+
+    #[test]
+    fn parses_json_with_groups_dlc_archived_and_filtering() {
+        let json = r#"{
+            "response": {
+                "achievements": [
+                    {
+                        "internal_name": "BASE_1",
+                        "localized_name": "First Step",
+                        "localized_desc": "Start the game",
+                        "icon": "abc123.jpg",
+                        "icon_gray": "abc123_gray.jpg",
+                        "hidden": false,
+                        "player_percent_unlocked": "42.5",
+                        "groupid": 0,
+                        "archived": false
+                    },
+                    {
+                        "internal_name": "DLC_2_ACH",
+                        "localized_name": "Second Expansion",
+                        "localized_desc": "Beat expansion 2",
+                        "icon": "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/1234/dlc2.jpg",
+                        "icon_gray": "dlc2_gray.jpg",
+                        "hidden": true,
+                        "player_percent_unlocked": 12.34,
+                        "groupid": 2,
+                        "archived": false
+                    },
+                    {
+                        "internal_name": "GROUP_ARCHIVED_ACH",
+                        "localized_name": "Old Event",
+                        "localized_desc": "From archived set",
+                        "icon": "old.jpg",
+                        "icon_gray": "old_gray.jpg",
+                        "player_percent_unlocked": null,
+                        "groupid": 3
+                    },
+                    {
+                        "internal_name": "DEV_ONLY_ACH",
+                        "localized_name": "Internal Debug",
+                        "icon": "dev.jpg",
+                        "groupid": 4
+                    },
+                    {
+                        "internal_name": "PRIVATE_ACH",
+                        "localized_name": "Unpublished",
+                        "icon": "priv.jpg",
+                        "groupid": 5
+                    }
+                ],
+                "groups": [
+                    {
+                        "groupid": 2,
+                        "localized_name": "Expansion II",
+                        "dlcappid": 5002,
+                        "archived": false,
+                        "developeronly": false,
+                        "ispublic": true,
+                        "order": 2
+                    },
+                    {
+                        "groupid": 1,
+                        "localized_name": "Expansion I",
+                        "dlcappid": 5001,
+                        "order": 1
+                    },
+                    {
+                        "groupid": 3,
+                        "localized_name": "Retired Events",
+                        "dlcappid": 0,
+                        "archived": true,
+                        "ispublic": true,
+                        "order": 3
+                    },
+                    {
+                        "groupid": 4,
+                        "localized_name": "Dev Testing",
+                        "developeronly": true,
+                        "ispublic": true,
+                        "order": 0
+                    },
+                    {
+                        "groupid": 5,
+                        "localized_name": "Hidden Set",
+                        "developeronly": false,
+                        "ispublic": false,
+                        "order": 0
+                    }
+                ]
+            }
+        }"#;
+
+        let (achs, groups) = parse_achievements_json(json, 1234).unwrap();
+
+        let group_ids: Vec<u32> = groups.iter().map(|g| g.groupid).collect();
+        assert_eq!(group_ids, vec![1, 2, 3]);
+        assert_eq!(groups[0].dlcappid, 5001);
+        assert!(groups[0].ispublic);
+
+        assert_eq!(achs.len(), 3);
+        let base = &achs[0];
+        assert_eq!(base.key, "BASE_1");
+        assert_eq!(
+            base.icon,
+            "https://shared.fastly.steamstatic.com/community_assets/images/apps/1234/abc123.jpg"
+        );
+        assert_eq!(
+            base.icon_gray,
+            "https://shared.fastly.steamstatic.com/community_assets/images/apps/1234/abc123_gray.jpg"
+        );
+        assert_eq!(base.completionpercentage, "42.5");
+        assert_eq!(base.groupid, 0);
+        assert!(!base.archived);
+
+        let dlc2 = &achs[1];
+        assert_eq!(dlc2.key, "DLC_2_ACH");
+        assert_eq!(
+            dlc2.icon,
+            "https://shared.fastly.steamstatic.com/community_assets/images/apps/1234/dlc2.jpg"
+        );
+        assert_eq!(dlc2.completionpercentage, "12.3");
+        assert!(dlc2.hidden);
+        assert_eq!(dlc2.groupid, 2);
+        assert!(!dlc2.archived);
+
+        let arch = &achs[2];
+        assert_eq!(arch.key, "GROUP_ARCHIVED_ACH");
+        assert_eq!(arch.completionpercentage, "0.0");
+        assert_eq!(arch.groupid, 3);
+        assert!(arch.archived);
+    }
+
+    #[test]
+    fn parses_json_without_groups_backwards_compatibly() {
+        let json = r#"{
+            "response": {
+                "achievements": [
+                    {
+                        "internal_name": "LEGACY_ACH",
+                        "localized_name": "Legacy",
+                        "localized_desc": "No groups array in payload",
+                        "icon": "legacy.jpg",
+                        "icon_gray": "legacy_g.jpg",
+                        "hidden": false,
+                        "player_percent_unlocked": "88.9"
+                    }
+                ]
+            }
+        }"#;
+
+        let (achs, groups) = parse_achievements_json(json, 480).unwrap();
+        assert!(groups.is_empty());
+        assert_eq!(achs.len(), 1);
+        assert_eq!(achs[0].key, "LEGACY_ACH");
+        assert_eq!(achs[0].groupid, 0);
+        assert!(!achs[0].archived);
+        assert_eq!(achs[0].completionpercentage, "88.9");
     }
 }

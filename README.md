@@ -14,7 +14,7 @@
 
   _A Windows desktop app that tracks, enriches, and displays your achievements from emulated, cracked, and legitimate games — with real-time overlay notifications, live in-game HUD, playtime tracking, and a modern customizable UI._
 
-  [Download](#-download) • [What's New in v1.3](#-whats-new-in-v13) • [Features](#-features) • [Supported Sources](#-supported-emulators--sources) • [Setup](#-setup) • [Contributing](#-contributing)
+  [Download](#-download) • [What's New in v1.4](#-whats-new-in-v14) • [Features](#-features) • [Supported Sources](#-supported-emulators--sources) • [Setup](#-setup) • [Contributing](#-contributing)
 
 </div>
 
@@ -28,7 +28,19 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 
 ---
 
-## 🚀 What's New in v1.3
+## 🚀 What's New in v1.4
+
+- 🧩 **Steam Achievement Sets (Base Game & DLC Separation)** — Native support for Steam achievement groups (`IPlayerService/GetGameAchievements/v1` & binary `UserGameStatsSchema_*.bin` parsing), automatically separating **Base Game** achievements from **DLC / Expansion** sets.
+- 🏆 **Dual Completion Gauges (% Platinum vs. % Total with DLC)** — Independent **Platinum Progress (Base Game)** and **Total Progress (with DLC)** bars across game pages, library cards, objectives, stats, and completion filters, so DLCs never revoke an earned Base Game Platinum.
+- 🗂️ **Per-Set Filtering & Mini Progress Bars** — Interactive set selector tabs (`All Sets`, `Base Game`, and each DLC set with `DLC` badges) featuring individual unlock counts and mini progress bars on the game page.
+- 🏛️ **Archived & Developer-Only Achievement Handling** — Automatically filters out private/developer-only groups and handles **archived** achievements accurately (excluded from required totals when locked, counted with an `Archived` badge when unlocked).
+- 🖼️ **Library Hover Clipping Fixes** — Added grid padding and adjusted `content-visibility` containment on library game cards so hover elevation and glow effects render cleanly without clipping.
+- ⚡ **Dependency Pruning & Faster Compile Times** — Removed unused Rust and frontend dependencies (`scraper`, `quick-xml`, `screenshots` replaced by native Win32 GDI fallback, unused Tailwind/SvelteKit plugins) and trimmed crate feature flags, streamlining the dependency tree for faster builds and a leaner binary.
+
+<details>
+<summary>Previous release highlights (v1.3 & v1.2)</summary>
+
+### v1.3
 
 - ✨ **Refined Glassmorphic UI & Full Light/Dark Themes** — Apple-inspired translucent surfaces (`backdrop-filter`), specular borders, crisp inline SVG icons, `Inter` / `SF Pro` typography with `tabular-nums`, and seamless Light & Dark theme support.
 - 🧭 **Compact Sidebar Dock & Hover Profile Popover** — Streamlined 76px sidebar with squircle game icons, dedicated Library shortcut, and a compact user dock that reveals a floating glassmorphic profile & XP card on hover/focus without overlapping page content.
@@ -38,8 +50,7 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 - 📌 **Redesigned In-Game HUD Tracker (`Alt+O`)** — Sleek glassmorphic achievement tracker overlay with expanded `480×460` viewport sizing so up to 4 tracked achievements, rarity badges, and progress bars display cleanly without clipping.
 - ⚡ **Performance & Startup Optimizations** — Faster dev startup and Vite/WebView2 connection (`127.0.0.1`, pre-bundled Tauri deps, route warmup), O(1) indexed game lookups, debounced search filtering, and shared HTTP client pooling in Rust.
 
-<details>
-<summary>Previous release highlights (v1.2)</summary>
+### v1.2
 
 - 🕹️ **Live Process & Running Game Detection** — Automatically detects which game you are currently playing (both legitimate Steam installs and emulated/cracked games via `steam_appid.txt` + `steam_api(64).dll`, `OnlineFix.ini`, `steam_emu.ini`, `ColdClientLoader.ini`, `cream_api.ini`, `SmartSteamEmu.ini`, `ALI213.ini`) and displays a live **"Now Playing"** card in the sidebar.
 - ⏱️ **Automatic & Manual Playtime Tracker** — Tracks your playtime in real time while a game is running, merges it with Steam playtime, displays your most-played games on the Stats page, and includes an inline manual playtime editor (`Hours` / `Minutes`) per game.
@@ -67,6 +78,7 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 
 ### 📊 Library, Stats & Progression
 - **Rich Steam & SteamGridDB Metadata** — Pulls localized achievement names, descriptions, icons, global completion percentages, genres, and high-res icons from Steam and SteamGridDB (with automatic fallback if Steam rate-limits requests).
+- **Steam Achievement Sets & Dual Completion** — Separates **Base Game** and **DLC** achievement groups with per-set filter tabs and mini progress bars, handles **archived** achievements, and tracks **Platinum %** (Base Game) independently from **Total %** (with DLC).
 - **Playtime & HowLongToBeat** — Automatic background session timer, manual playtime override, and HLTB completion bars (**Main Story**, **Main + Extra**, **100% Completionist**).
 - **Gamerscore & Analytics** — XP & Level system in the sidebar, 52-week activity heatmap, rarity breakdown (*Mythic*, *Legendary*, *Epic*, *Very Rare*, *Rare*, *Uncommon*, *Common*), and Top 5 rarest unlocked achievements.
 - **Journal & Pinned Goals** — Chronological timeline of unlocked achievements, personal objectives, and a dedicated **Pinned Achievements** section with one-click unpinning.

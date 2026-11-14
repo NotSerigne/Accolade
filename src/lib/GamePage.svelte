@@ -8,6 +8,7 @@
 		loadAchievements,
 		getAchievementPoints,
 		formatPlaytime,
+		computeGameProgress,
 		type Game,
 		type Achievement,
 		type HltbData,
@@ -223,7 +224,23 @@
 			if (updated && updated.length > 0) {
 				achievements = updated;
 				games.update((list) =>
-					list.map((g) => (g.id === game.id ? { ...g, achievements: updated } : g))
+					list.map((g) => {
+						if (g.id !== game.id) return g;
+						const prevByKey = new SvelteMap<string, Achievement>();
+						for (const prev of g.achievements ?? []) {
+							prevByKey.set(prev.key.trim().toLowerCase(), prev);
+						}
+						const preserved = updated.map((u) => {
+							const prev = prevByKey.get(u.key.trim().toLowerCase());
+							if (!prev) return u;
+							return {
+								...u,
+								groupid: u.groupid ?? prev.groupid,
+								archived: u.archived ?? prev.archived
+							};
+						});
+						return { ...g, achievements: preserved };
+					})
 				);
 			} else {
 				// Update locally in case game wasn't found in state
@@ -263,10 +280,6 @@
 	});
 
 	let pinnedSet = $derived(new Set(pinnedKeys.map((k) => k.trim().toLowerCase())));
-
-	function isPinned(key: string): boolean {
-		return pinnedSet.has(key.trim().toLowerCase());
-	}
 
 	async function togglePin(key: string): Promise<void> {
 		if (!game) return;
@@ -325,16 +338,16 @@
 		if (game) {
 			try {
 				const title = game.name;
-				const unlocked = achievements.filter((a) => a.unlocked).length;
-				const total = achievements.length;
+				const unlocked = progress.unlockedAll;
+				const total = progress.totalAll;
 				let content = `Jeu: ${game.name}\n`;
 				content += `Identifiant: ${game.id}\n`;
 				content += `Source: ${typeof game.source === 'object' ? game.source.type : game.source}\n`;
-				content += `Progression: ${unlocked}/${total} (${total > 0 ? Math.round((unlocked / total) * 100) : 0}%)\n\n`;
+				content += `Progression: ${unlocked}/${total} (${total > 0 ? globalPctDisplay : 0}%)\n\n`;
 				content += 'Unlocked achievements:\n';
 				content += `--------------------------\n`;
 
-				achievements
+				publicAchievements
 					.filter((a) => a.unlocked)
 					.forEach((a) => {
 						content += `[X] ${a.name}\n`;
@@ -356,6 +369,7 @@
 
 	let achievements = $state<Achievement[]>([]);
 	let activeView = $state<'achievements' | 'map'>('achievements');
+	let activeSetId = $state<string>('all');
 	let filter = $state<'all' | 'unlocked' | 'locked'>('all');
 	let search = $state('');
 	let sort = $state<'date' | 'rarity' | 'name'>('date');
@@ -431,7 +445,7 @@
 		const stateMap = new Map<string, Achievement>(
 			achievements.map((a) => [a.key.trim().toLowerCase(), a])
 		);
-		const seenKeys = new Set<string>();
+		const seenKeys = new SvelteSet<string>();
 
 		const fromSchema: Achievement[] = schema.map((s: Achievement) => {
 			const normKey = s.key.trim().toLowerCase();
@@ -449,7 +463,9 @@
 				icon: live?.icon || s.icon || '',
 				icon_gray: live?.icon_gray || s.icon_gray || '',
 				progress: live?.progress ?? s.progress ?? null,
-				max_progress: live?.max_progress ?? s.max_progress ?? null
+				max_progress: live?.max_progress ?? s.max_progress ?? null,
+				groupid: s.groupid || live?.groupid || 0,
+				archived: Boolean(s.archived || live?.archived)
 			};
 		});
 
@@ -457,36 +473,77 @@
 			const normKey = live.key.trim().toLowerCase();
 			if (!seenKeys.has(normKey)) {
 				seenKeys.add(normKey);
-				fromSchema.push(live);
+				fromSchema.push({
+					...live,
+					groupid: live.groupid ?? 0,
+					archived: live.archived ?? false
+				});
 			}
 		}
 
 		return fromSchema;
 	});
 
+	let progress = $derived(
+		computeGameProgress(merged, game?.achievement_groups, $i18n.t('game.baseGame'))
+	);
+	let isPlatinum = $derived(progress.isPlatinum);
+	let hasSets = $derived(progress.sections.length > 1 || progress.hasDlc);
+
+	let prevSetGameId: string | null = null;
+	$effect(() => {
+		const gid = game?.id ?? null;
+		if (gid !== prevSetGameId) {
+			prevSetGameId = gid;
+			activeSetId = 'all';
+			return;
+		}
+		if (activeSetId !== 'all' && !progress.sections.some((s) => s.id === activeSetId)) {
+			activeSetId = 'all';
+		}
+	});
+
+	function formatCompletionPct(unlocked: number, total: number, rawPct: number): number {
+		if (total <= 0) return 0;
+		if (unlocked === total) return 100;
+		return Math.min(99, Math.max(0, Math.round(rawPct)));
+	}
+
+	let platinumPctDisplay = $derived(
+		formatCompletionPct(progress.unlockedBase, progress.totalBase, progress.platinumPct)
+	);
+	let globalPctDisplay = $derived(
+		formatCompletionPct(progress.unlockedAll, progress.totalAll, progress.globalPct)
+	);
+
 	let globalAchievementHighlight = $derived($searchQuery.trim().toLowerCase());
 
-	let filtered = $derived.by((): Achievement[] => {
-		let list: Achievement[] = merged;
+	function filterAndSortAchievements(
+		list: Achievement[],
+		filterMode: 'all' | 'unlocked' | 'locked',
+		query: string,
+		sortBy: 'date' | 'rarity' | 'name',
+		order: 'asc' | 'desc'
+	): Achievement[] {
+		let result = list;
 
-		if (filter === 'unlocked') list = list.filter((a) => a.unlocked);
-		if (filter === 'locked') list = list.filter((a) => !a.unlocked);
+		if (filterMode === 'unlocked') result = result.filter((a) => a.unlocked);
+		else if (filterMode === 'locked') result = result.filter((a) => !a.unlocked);
 
-		const localQuery = search.trim().toLowerCase();
+		const localQuery = query.trim().toLowerCase();
 		if (localQuery) {
-			list = list.filter(
+			result = result.filter(
 				(a) =>
 					a.name.toLowerCase().includes(localQuery) ||
 					(a.desc ?? '').toLowerCase().includes(localQuery)
 			);
 		}
 
-		list = [...list];
+		const sorted = [...result];
+		const orderMultiplier = order === 'asc' ? 1 : -1;
 
-		const orderMultiplier = sortOrder === 'asc' ? 1 : -1;
-
-		if (sort === 'date') {
-			list.sort((a: Achievement, b: Achievement) => {
+		if (sortBy === 'date') {
+			sorted.sort((a: Achievement, b: Achievement) => {
 				if (a.unlocked && b.unlocked) {
 					return ((a.unlocked_time ?? 0) - (b.unlocked_time ?? 0)) * orderMultiplier;
 				}
@@ -494,28 +551,64 @@
 				if (b.unlocked) return 1;
 				return 0;
 			});
-		} else if (sort === 'rarity') {
-			list.sort(
+		} else if (sortBy === 'rarity') {
+			sorted.sort(
 				(a: Achievement, b: Achievement) =>
 					((parseFloat(a.completionpercentage) || 100) -
 						(parseFloat(b.completionpercentage) || 100)) *
 					orderMultiplier
 			);
-		} else if (sort === 'name') {
-			list.sort((a: Achievement, b: Achievement) => a.name.localeCompare(b.name) * orderMultiplier);
+		} else if (sortBy === 'name') {
+			sorted.sort(
+				(a: Achievement, b: Achievement) => a.name.localeCompare(b.name) * orderMultiplier
+			);
 		}
 
-		return list;
-	});
+		return sorted;
+	}
 
-	let unlockedCount = $derived(merged.filter((a) => a.unlocked).length);
-	let totalCount = $derived(merged.length);
-	let progressPct = $derived(totalCount > 0 ? Math.round((unlockedCount / totalCount) * 100) : 0);
+	let activeSections = $derived(
+		activeSetId === 'all'
+			? progress.sections
+			: progress.sections.filter((s) => s.id === activeSetId)
+	);
+
+	let visibleSections = $derived(
+		activeSections.map((section) => ({
+			...section,
+			displayPct: formatCompletionPct(section.unlocked, section.total, section.pct),
+			filteredAchievements: filterAndSortAchievements(
+				section.achievements,
+				filter,
+				search,
+				sort,
+				sortOrder
+			)
+		}))
+	);
+
+	let flatFiltered = $derived(
+		visibleSections.flatMap((section) =>
+			section.filteredAchievements.map((ach) => ({
+				ach,
+				isArchived: Boolean(ach.archived || section.archived)
+			}))
+		)
+	);
+
+	let filteredCount = $derived(flatFiltered.length);
+	let visibleTotalCount = $derived(
+		activeSections.reduce((acc, s) => acc + s.achievements.length, 0)
+	);
+	let publicAchievements = $derived(progress.sections.flatMap((s) => s.achievements));
+	let unlockedCount = $derived(progress.hasDlc ? progress.unlockedAll : progress.unlockedBase);
+	let totalCount = $derived(progress.hasDlc ? progress.totalAll : progress.totalBase);
+
 	let mapAchievements = $derived.by(() => {
-		const unlocked = merged
+		const unlocked = publicAchievements
 			.filter((achievement) => achievement.unlocked || Boolean(achievement.unlocked_time))
 			.sort((a, b) => (a.unlocked_time ?? 0) - (b.unlocked_time ?? 0));
-		const locked = merged
+		const locked = publicAchievements
 			.filter((achievement) => !achievement.unlocked && !achievement.unlocked_time)
 			.sort((a, b) => {
 				const rarityA = parseFloat(a.completionpercentage);
@@ -554,6 +647,7 @@
 
 	async function openAchievementFromMap(key: string) {
 		activeView = 'achievements';
+		activeSetId = 'all';
 		filter = 'all';
 		search = '';
 
@@ -586,6 +680,8 @@
 		jumpedToken = intent.token;
 		const normalizedKey = normalizeAchievementKey(intent.achievementKey);
 
+		activeView = 'achievements';
+		activeSetId = 'all';
 		filter = 'all';
 		search = '';
 
@@ -786,12 +882,36 @@
 								)}
 							>
 								{#if game.is_favorite}
-									<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-										<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+									<svg
+										width="28"
+										height="28"
+										viewBox="0 0 24 24"
+										fill="currentColor"
+										stroke="currentColor"
+										stroke-width="1.8"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+										/>
 									</svg>
 								{:else}
-									<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-										<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+									<svg
+										width="28"
+										height="28"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.8"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+										/>
 									</svg>
 								{/if}
 							</button>
@@ -804,27 +924,85 @@
 					</div>
 
 					<div class="progress-card-container">
-						<div class="progress-card">
-							<div class="progress-left">
-								<div class="progress-stats">
-									<span class="main-count tabular-nums"
-										><strong>{unlockedCount}</strong>
-										<span class="slash">/ {totalCount}</span></span
-									>
-									<span
-										class="main-pct tabular-nums"
-										style:color={progressPct === 100 ? 'var(--completed)' : 'var(--accent)'}
-										>{progressPct}%</span
-									>
-								</div>
-								<div class="progress-bar-track">
-									<div
-										class="progress-bar-fill"
-										style="width: {progressPct}%; background: {progressPct === 100
-											? 'var(--completed)'
-											: '#3ddc84'}"
-									></div>
-								</div>
+						<div class="progress-card" class:has-dual-gauges={progress.hasDlc}>
+							<div class="progress-left" class:dual-gauges={progress.hasDlc}>
+								{#if progress.hasDlc}
+									<div class="gauge-block" class:is-platinum={isPlatinum}>
+										<div class="gauge-header">
+											<span class="gauge-title">
+												{$i18n.t('game.platinumProgress')}
+												{#if isPlatinum}
+													<span class="platinum-pill">100%</span>
+												{/if}
+											</span>
+											<div class="gauge-numbers tabular-nums">
+												<span class="gauge-count">
+													<strong>{progress.unlockedBase}</strong>
+													<span class="gauge-slash">/ {progress.totalBase}</span>
+												</span>
+												<span
+													class="gauge-pct"
+													style:color={isPlatinum ? 'var(--completed)' : '#3ddc84'}
+													>{platinumPctDisplay}%</span
+												>
+											</div>
+										</div>
+										<div class="progress-bar-track">
+											<div
+												class="progress-bar-fill"
+												style="width: {progress.platinumPct}%; background: {isPlatinum
+													? 'var(--completed)'
+													: '#3ddc84'}"
+											></div>
+										</div>
+									</div>
+
+									<div class="gauge-block">
+										<div class="gauge-header">
+											<span class="gauge-title">{$i18n.t('game.totalProgressWithDlc')}</span>
+											<div class="gauge-numbers tabular-nums">
+												<span class="gauge-count">
+													<strong>{progress.unlockedAll}</strong>
+													<span class="gauge-slash">/ {progress.totalAll}</span>
+												</span>
+												<span
+													class="gauge-pct"
+													style:color={globalPctDisplay === 100
+														? 'var(--completed)'
+														: 'var(--accent)'}>{globalPctDisplay}%</span
+												>
+											</div>
+										</div>
+										<div class="progress-bar-track secondary">
+											<div
+												class="progress-bar-fill"
+												style="width: {progress.globalPct}%; background: {globalPctDisplay === 100
+													? 'var(--completed)'
+													: 'var(--accent, #c8a96e)'}"
+											></div>
+										</div>
+									</div>
+								{:else}
+									<div class="progress-stats">
+										<span class="main-count tabular-nums"
+											><strong>{progress.unlockedBase}</strong>
+											<span class="slash">/ {progress.totalBase}</span></span
+										>
+										<span
+											class="main-pct tabular-nums"
+											style:color={isPlatinum ? 'var(--completed)' : 'var(--accent)'}
+											>{platinumPctDisplay}%</span
+										>
+									</div>
+									<div class="progress-bar-track">
+										<div
+											class="progress-bar-fill"
+											style="width: {progress.platinumPct}%; background: {isPlatinum
+												? 'var(--completed)'
+												: '#3ddc84'}"
+										></div>
+									</div>
+								{/if}
 							</div>
 							<div class="progress-right">
 								<div class="stat-item">
@@ -840,11 +1018,22 @@
 										<span class="stat-label">{$i18n.t('game.playtime')}</span>
 										<button
 											class="mini-edit-icon"
-											onclick={() => (editingPlaytime ? (editingPlaytime = false) : openPlaytimeEditor())}
+											onclick={() =>
+												editingPlaytime ? (editingPlaytime = false) : openPlaytimeEditor()}
 											title={$i18n.t('game.editPlaytime')}
 											aria-label={$i18n.t('game.editPlaytime')}
 										>
-											<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+											<svg
+												width="11"
+												height="11"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2.2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
 												<path d="M12 20h9" />
 												<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
 											</svg>
@@ -874,13 +1063,25 @@
 												onclick={saveManualPlaytime}
 												aria-label={$i18n.t('game.save')}
 											>
-												<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="3"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
 													<polyline points="20 6 9 17 4 12" />
 												</svg>
 											</button>
 										</div>
 									{:else}
-										<span class="stat-value playtime-val tabular-nums">{formatPlaytime(gamePlaytimeSeconds)}</span>
+										<span class="stat-value playtime-val tabular-nums"
+											>{formatPlaytime(gamePlaytimeSeconds)}</span
+										>
 									{/if}
 								</div>
 							</div>
@@ -896,18 +1097,40 @@
 								<div class="hltb-edit-row">
 									<label>
 										<span>{$i18n.t('game.hltb.mainShort')}</span>
-										<input type="number" step="0.5" min="0" bind:value={customHltbMain} placeholder="ex: 15" />
+										<input
+											type="number"
+											step="0.5"
+											min="0"
+											bind:value={customHltbMain}
+											placeholder="ex: 15"
+										/>
 									</label>
 									<label>
 										<span>{$i18n.t('game.hltb.extraShort')}</span>
-										<input type="number" step="0.5" min="0" bind:value={customHltbExtra} placeholder="ex: 28" />
+										<input
+											type="number"
+											step="0.5"
+											min="0"
+											bind:value={customHltbExtra}
+											placeholder="ex: 28"
+										/>
 									</label>
 									<label>
 										<span>{$i18n.t('game.hltb.compShort')}</span>
-										<input type="number" step="0.5" min="0" bind:value={customHltb100} placeholder="ex: 45" />
+										<input
+											type="number"
+											step="0.5"
+											min="0"
+											bind:value={customHltb100}
+											placeholder="ex: 45"
+										/>
 									</label>
-									<button class="hltb-btn primary" onclick={saveCustomHltb}>{$i18n.t('game.save')}</button>
-									<button class="hltb-btn" onclick={() => (editingHltb = false)}>{$i18n.t('game.cancel')}</button>
+									<button class="hltb-btn primary" onclick={saveCustomHltb}
+										>{$i18n.t('game.save')}</button
+									>
+									<button class="hltb-btn" onclick={() => (editingHltb = false)}
+										>{$i18n.t('game.cancel')}</button
+									>
 								</div>
 							{:else}
 								<div class="hltb-metrics">
@@ -915,7 +1138,11 @@
 										<div class="hltb-metric-top">
 											<span class="hltb-label">{$i18n.t('game.hltb.main')}</span>
 											<strong class="hltb-hours tabular-nums">
-												{hltbLoading ? '...' : hltbData?.main_hours ? `${hltbData.main_hours}h` : '—'}
+												{hltbLoading
+													? '...'
+													: hltbData?.main_hours
+														? `${hltbData.main_hours}h`
+														: '—'}
 											</strong>
 										</div>
 										<div class="hltb-track">
@@ -972,7 +1199,17 @@
 										title={$i18n.t('game.hltb.editManual')}
 										aria-label={$i18n.t('game.hltb.editManual')}
 									>
-										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<svg
+											width="12"
+											height="12"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
 											<path d="M12 20h9" />
 											<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
 										</svg>
@@ -984,7 +1221,17 @@
 										title={$i18n.t('game.hltb.refresh')}
 										aria-label={$i18n.t('game.hltb.refresh')}
 									>
-										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<svg
+											width="12"
+											height="12"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
 											<polyline points="23 4 23 10 17 10" />
 											<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
 										</svg>
@@ -1029,357 +1276,448 @@
 				<div class="main-section">
 					<div class="controls-bar">
 						<div class="view-tabs">
-							<button class="tab" class:active={activeView === 'achievements'} onclick={() => (activeView = 'achievements')}>{$i18n.t('game.achievementsTitle')}</button>
-							<button class="tab" class:active={activeView === 'map'} onclick={() => (activeView = 'map')}>{$i18n.t('game.shareCard')}</button>
+							<button
+								class="tab"
+								class:active={activeView === 'achievements'}
+								onclick={() => (activeView = 'achievements')}
+								>{$i18n.t('game.achievementsTitle')}</button
+							>
+							<button
+								class="tab"
+								class:active={activeView === 'map'}
+								onclick={() => (activeView = 'map')}>{$i18n.t('game.shareCard')}</button
+							>
 						</div>
 
-						<div class="controls-bottom">
-						{#if activeView === 'achievements'}
-							<div class="filter-tabs">
-								<button class="tab" class:active={filter === 'all'} onclick={() => (filter = 'all')}>{$i18n.t('game.filterAll')}</button>
-								<button class="tab" class:active={filter === 'unlocked'} onclick={() => (filter = 'unlocked')}>{$i18n.t('game.unlocked')}</button>
-								<button class="tab" class:active={filter === 'locked'} onclick={() => (filter = 'locked')}>{$i18n.t('game.locked')}</button>
-							</div>
-
-							<div class="search-wrap">
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-									<circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-								</svg>
-								<input class="search-input" type="text" placeholder={$i18n.t('game.searchAchievement')} bind:value={search} />
-								<span class="search-count tabular-nums">{filtered.length} / {totalCount}</span>
-							</div>
-
-							<select class="sort-select" bind:value={sort}>
-								<option value="date">{$i18n.t('game.sort.date')}</option>
-								<option value="rarity">{$i18n.t('game.sort.rarity')}</option>
-								<option value="name">{$i18n.t('game.sort.name')}</option>
-							</select>
-
-							<button class="order-btn" onclick={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')} title={sortOrder === 'asc' ? $i18n.t('game.sort.asc') : $i18n.t('game.sort.desc')}>
-								{#if sortOrder === 'asc'}
-									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
-								{:else}
-									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
-								{/if}
-							</button>
-
-								<button class="reveal-btn" class:active={revealed} onclick={() => (revealed = !revealed)}>
-							{#if revealed}
-								<svg
-									width="14"
-									height="14"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2.5"
+						{#if activeView === 'achievements' && hasSets}
+							<div class="set-tabs" role="tablist" aria-label={$i18n.t('game.allSets')}>
+								<button
+									type="button"
+									role="tab"
+									aria-selected={activeSetId === 'all'}
+									class="set-tab"
+									class:active={activeSetId === 'all'}
+									onclick={() => (activeSetId = 'all')}
 								>
-									<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle
-										cx="12"
-										cy="12"
-										r="3"
-									/>
-								</svg>
-								<span>{$i18n.t('game.revealed')}</span>
-							{:else}
-								<svg
-									width="14"
-									height="14"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2.5"
-								>
-									<path
-										d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
-									></path>
-									<line x1="1" y1="1" x2="23" y2="23"></line>
-								</svg>
-								<span>{$i18n.t('game.hidden')}</span>
-							{/if}
+									<span class="set-tab-name">{$i18n.t('game.allSets')}</span>
+									<span class="set-tab-count tabular-nums"
+										>{progress.unlockedAll}/{progress.totalAll}</span
+									>
 								</button>
-						{:else}
-							<div class="map-summary">
-								<span class="map-summary-title">{$i18n.t('game.progressLabel')}</span>
-								<span class="map-summary-value tabular-nums">{$i18n.t('game.stepsCount', { unlocked: unlockedCount, total: totalCount })}</span>
+								{#each progress.sections as section (section.id)}
+									<button
+										type="button"
+										role="tab"
+										aria-selected={activeSetId === section.id}
+										class="set-tab"
+										class:active={activeSetId === section.id}
+										onclick={() => (activeSetId = section.id)}
+									>
+										{#if section.isDlc}
+											<span class="set-tab-dlc">{$i18n.t('game.dlcBadge')}</span>
+										{/if}
+										<span class="set-tab-name">{section.title}</span>
+										<span class="set-tab-count tabular-nums"
+											>{section.unlocked}/{section.total}</span
+										>
+									</button>
+								{/each}
 							</div>
 						{/if}
 
-								<div class="export-actions">
+						<div class="controls-bottom">
+							{#if activeView === 'achievements'}
+								<div class="filter-tabs">
 									<button
-										type="button"
-										class="profile-btn-mini"
-										onclick={handleExportGame}
-										title={$i18n.t('game.exportJson')}
-										aria-label={$i18n.t('game.exportJson')}
+										class="tab"
+										class:active={filter === 'all'}
+										onclick={() => (filter = 'all')}>{$i18n.t('game.filterAll')}</button
 									>
-							<svg
-								width="14"
-								height="14"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2.5"
-								><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-									points="7 10 12 15 17 10"
-								/><line x1="12" y1="15" x2="12" y2="3" /></svg
-							>
-									</button>
-
 									<button
-										type="button"
-										class="profile-btn-mini"
-										onclick={handleExportGamePdf}
-										title={$i18n.t('game.exportPdf')}
-										aria-label={$i18n.t('game.exportPdf')}
+										class="tab"
+										class:active={filter === 'unlocked'}
+										onclick={() => (filter = 'unlocked')}>{$i18n.t('game.unlocked')}</button
 									>
-							<svg
-								width="14"
-								height="14"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2.5"
-								><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
-									points="14 2 14 8 20 8"
-								/><line x1="16" y1="13" x2="8" y2="13" /><line
-									x1="16"
-									y1="17"
-									x2="8"
-									y2="17"
-								/><polyline points="10 9 9 9 8 9" /></svg
-							>
-									</button>
-
 									<button
-										type="button"
-										class="profile-btn-mini"
-										onclick={openProfilesFolder}
-										title={$i18n.t('game.exportFolder')}
-										aria-label={$i18n.t('game.exportFolder')}
+										class="tab"
+										class:active={filter === 'locked'}
+										onclick={() => (filter = 'locked')}>{$i18n.t('game.locked')}</button
 									>
-							<svg
-								width="14"
-								height="14"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2.5"
-								><path
-									d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-								/></svg
-							>
-									</button>
 								</div>
+
+								<div class="search-wrap">
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2.5"
+									>
+										<circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+									</svg>
+									<input
+										class="search-input"
+										type="text"
+										placeholder={$i18n.t('game.searchAchievement')}
+										bind:value={search}
+									/>
+									<span class="search-count tabular-nums"
+										>{filteredCount} / {visibleTotalCount}</span
+									>
 								</div>
+
+								<select class="sort-select" bind:value={sort}>
+									<option value="date">{$i18n.t('game.sort.date')}</option>
+									<option value="rarity">{$i18n.t('game.sort.rarity')}</option>
+									<option value="name">{$i18n.t('game.sort.name')}</option>
+								</select>
+
+								<button
+									class="order-btn"
+									onclick={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')}
+									title={sortOrder === 'asc' ? $i18n.t('game.sort.asc') : $i18n.t('game.sort.desc')}
+								>
+									{#if sortOrder === 'asc'}
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7" /></svg
+										>
+									{:else}
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.5"><path d="M12 5v14M5 12l7 7 7-7" /></svg
+										>
+									{/if}
+								</button>
+
+								<button
+									class="reveal-btn"
+									class:active={revealed}
+									onclick={() => (revealed = !revealed)}
+								>
+									{#if revealed}
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.5"
+										>
+											<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle
+												cx="12"
+												cy="12"
+												r="3"
+											/>
+										</svg>
+										<span>{$i18n.t('game.revealed')}</span>
+									{:else}
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.5"
+										>
+											<path
+												d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+											></path>
+											<line x1="1" y1="1" x2="23" y2="23"></line>
+										</svg>
+										<span>{$i18n.t('game.hidden')}</span>
+									{/if}
+								</button>
+							{:else}
+								<div class="map-summary">
+									<span class="map-summary-title">{$i18n.t('game.progressLabel')}</span>
+									<span class="map-summary-value tabular-nums"
+										>{$i18n.t('game.stepsCount', {
+											unlocked: unlockedCount,
+											total: totalCount
+										})}</span
+									>
+								</div>
+							{/if}
+
+							<div class="export-actions">
+								<button
+									type="button"
+									class="profile-btn-mini"
+									onclick={handleExportGame}
+									title={$i18n.t('game.exportJson')}
+									aria-label={$i18n.t('game.exportJson')}
+								>
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2.5"
+										><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+											points="7 10 12 15 17 10"
+										/><line x1="12" y1="15" x2="12" y2="3" /></svg
+									>
+								</button>
+
+								<button
+									type="button"
+									class="profile-btn-mini"
+									onclick={handleExportGamePdf}
+									title={$i18n.t('game.exportPdf')}
+									aria-label={$i18n.t('game.exportPdf')}
+								>
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2.5"
+										><path
+											d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+										/><polyline points="14 2 14 8 20 8" /><line
+											x1="16"
+											y1="13"
+											x2="8"
+											y2="13"
+										/><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg
+									>
+								</button>
+
+								<button
+									type="button"
+									class="profile-btn-mini"
+									onclick={openProfilesFolder}
+									title={$i18n.t('game.exportFolder')}
+									aria-label={$i18n.t('game.exportFolder')}
+								>
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2.5"
+										><path
+											d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+										/></svg
+									>
+								</button>
+							</div>
+						</div>
 					</div>
 
 					{#if activeView === 'achievements'}
 						<!-- Liste -->
 						<div class="achievements-list">
-						{#if loading}
-							<div class="loading-state">{$i18n.t('game.loading')}</div>
-						{:else}
-							<div class="ach-grid">
-								{#each filtered as ach (ach.key)}
-									{@const isUnlocked = ach.unlocked || Boolean(ach.unlocked_time)}
-									{@const isLocked = !isUnlocked}
-									{@const isSecret = ach.hidden ?? false}
-									{@const descText = (ach.desc || '').trim()}
-									{@const showDescription =
-										Boolean(descText) && (isUnlocked || !isSecret || revealed)}
-									{@const showMaskedDescription = isLocked && isSecret && !revealed}
-									{@const palette = rarityPalette(ach.completionpercentage)}
-									{@const displayIcon = isLocked && ach.icon_gray ? ach.icon_gray : ach.icon}
-									{@const achNormalizedKey = normalizeAchievementKey(ach.key)}
-									{@const pinned = pinnedSet.has(achNormalizedKey)}
-									{@const isTopbarMatch =
-										globalAchievementHighlight &&
-										(ach.name.toLowerCase().includes(globalAchievementHighlight) ||
-											(ach.desc ?? '').toLowerCase().includes(globalAchievementHighlight))}
+							{#snippet achievementCard(ach: Achievement, isArchived: boolean)}
+								{@const isUnlocked = ach.unlocked || Boolean(ach.unlocked_time)}
+								{@const isLocked = !isUnlocked}
+								{@const isSecret = ach.hidden ?? false}
+								{@const descText = (ach.desc || '').trim()}
+								{@const showDescription =
+									Boolean(descText) && (isUnlocked || !isSecret || revealed)}
+								{@const showMaskedDescription = isLocked && isSecret && !revealed}
+								{@const palette = rarityPalette(ach.completionpercentage)}
+								{@const displayIcon = isLocked && ach.icon_gray ? ach.icon_gray : ach.icon}
+								{@const achNormalizedKey = normalizeAchievementKey(ach.key)}
+								{@const pinned = pinnedSet.has(achNormalizedKey)}
+								{@const isTopbarMatch =
+									globalAchievementHighlight &&
+									(ach.name.toLowerCase().includes(globalAchievementHighlight) ||
+										(ach.desc ?? '').toLowerCase().includes(globalAchievementHighlight))}
 
-									<div
-										class="ach-card"
-										class:is-unlocked={isUnlocked}
-										class:is-secret-hidden={showMaskedDescription}
-										class:highlighted={Boolean(isTopbarMatch)}
-										class:jump-flash={flashAchievementKey === achNormalizedKey}
-										style:border-color={palette.border}
-										use:trackAchievementRow={ach.key}
-									>
-										<div class="ach-card-inner">
-											<div class="ach-icon-box">
-												{#if displayIcon}
-													<img
-														src={displayIcon}
-														alt={ach.name}
-														class:muted-icon={isLocked}
-														loading="lazy"
-														decoding="async"
-														onerror={(event) => {
-															const target = event.currentTarget as HTMLImageElement;
-															target.style.display = 'none';
-															target.parentElement?.classList.add('icon-error');
-														}}
-													/>
-													<span class="ach-placeholder icon-fallback">
-														<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-															<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-															<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-															<path d="M4 22h16" />
-															<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-															<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-															<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-														</svg>
-													</span>
-												{:else}
-													<span class="ach-placeholder">
-														<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-															<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-															<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-															<path d="M4 22h16" />
-															<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-															<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-															<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-														</svg>
-													</span>
-												{/if}
-											</div>
+								<div
+									class="ach-card"
+									class:is-unlocked={isUnlocked}
+									class:is-archived={isArchived}
+									class:is-secret-hidden={showMaskedDescription}
+									class:highlighted={Boolean(isTopbarMatch)}
+									class:jump-flash={flashAchievementKey === achNormalizedKey}
+									style:border-color={palette.border}
+									use:trackAchievementRow={ach.key}
+								>
+									<div class="ach-card-inner">
+										<div class="ach-icon-box">
+											{#if displayIcon}
+												<img
+													src={displayIcon}
+													alt={ach.name}
+													class:muted-icon={isLocked}
+													loading="lazy"
+													decoding="async"
+													onerror={(event) => {
+														const target = event.currentTarget as HTMLImageElement;
+														target.style.display = 'none';
+														target.parentElement?.classList.add('icon-error');
+													}}
+												/>
+												<span class="ach-placeholder icon-fallback">
+													<svg
+														width="24"
+														height="24"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="1.8"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														aria-hidden="true"
+													>
+														<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+														<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+														<path d="M4 22h16" />
+														<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+														<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+														<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+													</svg>
+												</span>
+											{:else}
+												<span class="ach-placeholder">
+													<svg
+														width="24"
+														height="24"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="1.8"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														aria-hidden="true"
+													>
+														<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+														<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+														<path d="M4 22h16" />
+														<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+														<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+														<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+													</svg>
+												</span>
+											{/if}
+										</div>
 
-											<div class="ach-details">
-												<div class="ach-header-row">
+										<div class="ach-details">
+											<div class="ach-header-row">
+												<div class="ach-title-wrap">
 													<div class="ach-name" class:muted={isLocked}>
 														{isLocked && isSecret && !revealed
 															? $i18n.t('game.secretAchievement')
 															: ach.name || ach.key}
 													</div>
-													{#if isUnlocked && ach.unlocked_time}
-														<div class="ach-date tabular-nums">{formatDate(ach.unlocked_time)}</div>
+													{#if isArchived}
+														<span class="ach-archived-badge">{$i18n.t('game.archived')}</span>
 													{/if}
 												</div>
+												{#if isUnlocked && ach.unlocked_time}
+													<div class="ach-date tabular-nums">{formatDate(ach.unlocked_time)}</div>
+												{/if}
+											</div>
 
-												<div class="ach-desc-row">
-													{#if showDescription}
-														<div class="ach-desc">{descText}</div>
-													{:else if showMaskedDescription}
-														<div class="ach-desc italic">{$i18n.t('game.descHidden')}</div>
-													{/if}
-												</div>
+											<div class="ach-desc-row">
+												{#if showDescription}
+													<div class="ach-desc">{descText}</div>
+												{:else if showMaskedDescription}
+													<div class="ach-desc italic">{$i18n.t('game.descHidden')}</div>
+												{/if}
+											</div>
 
-												<div class="ach-footer-row">
-													{#if isLocked && ach.max_progress && ach.max_progress > 0}
-														{@const cur = ach.progress ?? 0}
-														{@const pct = Math.min(Math.max((cur / ach.max_progress) * 100, 0), 100)}
-														<div class="ach-progress-info">
-															<span class="ach-progress-tag tabular-nums">
-																{formatProgressVal(cur)} / {formatProgressVal(ach.max_progress)}
-															</span>
-															<div class="rarity-progress-track">
-																<div class="ach-progress-fill" style:width="{pct}%"></div>
-															</div>
+											<div class="ach-footer-row">
+												{#if isLocked && ach.max_progress && ach.max_progress > 0}
+													{@const cur = ach.progress ?? 0}
+													{@const pct = Math.min(Math.max((cur / ach.max_progress) * 100, 0), 100)}
+													<div class="ach-progress-info">
+														<span class="ach-progress-tag tabular-nums">
+															{formatProgressVal(cur)} / {formatProgressVal(ach.max_progress)}
+														</span>
+														<div class="rarity-progress-track">
+															<div class="ach-progress-fill" style:width="{pct}%"></div>
 														</div>
-													{/if}
+													</div>
+												{/if}
 
-													{#if ach.completionpercentage}
-														<div class="rarity-info">
-															<span
-																class="rarity-tag tabular-nums"
-																style:background={palette.badgeBg}
-																style:color={palette.badgeColor}
-															>
-																{rarityLabel(ach.completionpercentage)} | {parseFloat(
-																	ach.completionpercentage
-																).toFixed(1)}% · +{getAchievementPoints(ach)} G
-															</span>
-															<div class="rarity-progress-track">
-																<div
-																	class="rarity-progress-fill"
-																	style:background={palette.fill}
-																	style:width={`${Math.min(parseFloat(ach.completionpercentage), 100)}%`}
-																></div>
-															</div>
+												{#if ach.completionpercentage}
+													<div class="rarity-info">
+														<span
+															class="rarity-tag tabular-nums"
+															style:background={palette.badgeBg}
+															style:color={palette.badgeColor}
+														>
+															{rarityLabel(ach.completionpercentage)} | {parseFloat(
+																ach.completionpercentage
+															).toFixed(1)}% · +{getAchievementPoints(ach)} G
+														</span>
+														<div class="rarity-progress-track">
+															<div
+																class="rarity-progress-fill"
+																style:background={palette.fill}
+																style:width={`${Math.min(parseFloat(ach.completionpercentage), 100)}%`}
+															></div>
 														</div>
-													{/if}
+													</div>
+												{/if}
 
-													<div class="ach-actions">
-														<button
-															class="action-btn"
-															class:is-copied={editingAchKey === ach.key}
-															onclick={() => openAchievementEditor(ach)}
-															title={$i18n.t('game.editAchievementDate')}
-															aria-label={$i18n.t('game.editAchievementDate')}
+												<div class="ach-actions">
+													<button
+														class="action-btn"
+														class:is-copied={editingAchKey === ach.key}
+														onclick={() => openAchievementEditor(ach)}
+														title={$i18n.t('game.editAchievementDate')}
+														aria-label={$i18n.t('game.editAchievementDate')}
+													>
+														<svg
+															width="11"
+															height="11"
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															stroke-width="2.5"
+															stroke-linecap="round"
+															stroke-linejoin="round"
 														>
-															<svg
-																width="11"
-																height="11"
-																viewBox="0 0 24 24"
-																fill="none"
-																stroke="currentColor"
-																stroke-width="2.5"
-																stroke-linecap="round"
-																stroke-linejoin="round"
-															>
-																<path d="M12 20h9" />
-																<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-															</svg>
-															{$i18n.t('game.edit')}
-														</button>
-														<button
-															class="action-btn"
-															class:is-copied={pinned}
-															onclick={() => togglePin(ach.key)}
+															<path d="M12 20h9" />
+															<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+														</svg>
+														{$i18n.t('game.edit')}
+													</button>
+													<button
+														class="action-btn"
+														class:is-copied={pinned}
+														onclick={() => togglePin(ach.key)}
+													>
+														<svg
+															width="11"
+															height="11"
+															viewBox="0 0 24 24"
+															fill={pinned ? 'currentColor' : 'none'}
+															stroke="currentColor"
+															stroke-width="2.5"
+															stroke-linecap="round"
+															stroke-linejoin="round"
 														>
-															<svg
-																width="11"
-																height="11"
-																viewBox="0 0 24 24"
-																fill={pinned ? 'currentColor' : 'none'}
-																stroke="currentColor"
-																stroke-width="2.5"
-																stroke-linecap="round"
-																stroke-linejoin="round"
-															>
-																<line x1="12" y1="17" x2="12" y2="22" />
-																<path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-															</svg>
-															{pinned ? $i18n.t('hud.unpin') : $i18n.t('hud.pin')}
-														</button>
-														<button
-															class="action-btn"
-															class:is-copied={copiedKey === ach.key}
-															onclick={() => copyToClipboard(ach.name || ach.key, ach.key)}
-														>
-															{#if copiedKey === ach.key}
-																<svg
-																	width="11"
-																	height="11"
-																	viewBox="0 0 24 24"
-																	fill="none"
-																	stroke="currentColor"
-																	stroke-width="3"
-																>
-																	<polyline points="20 6 9 17 4 12" />
-																</svg>
-																{$i18n.t('game.copied')}
-															{:else}
-																<svg
-																	width="11"
-																	height="11"
-																	viewBox="0 0 24 24"
-																	fill="none"
-																	stroke="currentColor"
-																	stroke-width="3"
-																>
-																	<rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-																		d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-																	/>
-																</svg>
-																{$i18n.t('game.copyName')}
-															{/if}
-														</button>
-														<button
-															class="action-btn"
-															onclick={() => searchGuide(game.name, ach.name || ach.key)}
-														>
+															<line x1="12" y1="17" x2="12" y2="22" />
+															<path
+																d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"
+															/>
+														</svg>
+														{pinned ? $i18n.t('hud.unpin') : $i18n.t('hud.pin')}
+													</button>
+													<button
+														class="action-btn"
+														class:is-copied={copiedKey === ach.key}
+														onclick={() => copyToClipboard(ach.name || ach.key, ach.key)}
+													>
+														{#if copiedKey === ach.key}
 															<svg
 																width="11"
 																height="11"
@@ -1388,92 +1726,192 @@
 																stroke="currentColor"
 																stroke-width="3"
 															>
-																<path
-																	d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
-																/><polyline points="15 3 21 3 21 9" /><line
-																	x1="10"
-																	y1="14"
-																	x2="21"
-																	y2="3"
+																<polyline points="20 6 9 17 4 12" />
+															</svg>
+															{$i18n.t('game.copied')}
+														{:else}
+															<svg
+																width="11"
+																height="11"
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																stroke-width="3"
+															>
+																<rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+																	d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
 																/>
 															</svg>
-															{$i18n.t('game.findGuide')}
-														</button>
-													</div>
+															{$i18n.t('game.copyName')}
+														{/if}
+													</button>
+													<button
+														class="action-btn"
+														onclick={() => searchGuide(game.name, ach.name || ach.key)}
+													>
+														<svg
+															width="11"
+															height="11"
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															stroke-width="3"
+														>
+															<path
+																d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+															/><polyline points="15 3 21 3 21 9" /><line
+																x1="10"
+																y1="14"
+																x2="21"
+																y2="3"
+															/>
+														</svg>
+														{$i18n.t('game.findGuide')}
+													</button>
 												</div>
 											</div>
 										</div>
-
-										{#if editingAchKey === ach.key}
-											<div class="ach-editor-panel">
-												<div class="ach-editor-left">
-													<button
-														type="button"
-														class="ach-state-toggle"
-														class:unlocked={editAchUnlocked}
-														onclick={() => (editAchUnlocked = !editAchUnlocked)}
-													>
-														{#if editAchUnlocked}
-															<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-																<polyline points="20 6 9 17 4 12" />
-															</svg>
-															<span>{$i18n.t('game.stateUnlocked')}</span>
-														{:else}
-															<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-																<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-																<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-															</svg>
-															<span>{$i18n.t('game.stateLocked')}</span>
-														{/if}
-													</button>
-
-													{#if editAchUnlocked}
-														<div class="ach-dt-group">
-															<span class="ach-dt-label">{$i18n.t('game.dateTimeLabel')}</span>
-															<input
-																type="datetime-local"
-																class="ach-dt-input"
-																bind:value={editAchDateTime}
-															/>
-															<button
-																type="button"
-																class="ach-dt-now"
-																onclick={setEditDateTimeNow}
-															>
-																{$i18n.t('game.now')}
-															</button>
-														</div>
-													{/if}
-												</div>
-
-												<div class="ach-editor-right">
-													<button
-														type="button"
-														class="ach-save-btn"
-														disabled={savingAchEdit}
-														onclick={() => saveAchievementEdit(ach.key)}
-													>
-														{savingAchEdit ? '...' : $i18n.t('game.save')}
-													</button>
-													<button
-														type="button"
-														class="ach-cancel-btn"
-														onclick={() => (editingAchKey = null)}
-													>
-														{$i18n.t('game.cancel')}
-													</button>
-												</div>
-											</div>
-										{/if}
 									</div>
-								{/each}
-							</div>
 
-							{#if filtered.length === 0}
-								<div class="empty-state">{$i18n.t('game.noAchievementFound')}</div>
+									{#if editingAchKey === ach.key}
+										<div class="ach-editor-panel">
+											<div class="ach-editor-left">
+												<button
+													type="button"
+													class="ach-state-toggle"
+													class:unlocked={editAchUnlocked}
+													onclick={() => (editAchUnlocked = !editAchUnlocked)}
+												>
+													{#if editAchUnlocked}
+														<svg
+															width="12"
+															height="12"
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															stroke-width="2.8"
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															aria-hidden="true"
+														>
+															<polyline points="20 6 9 17 4 12" />
+														</svg>
+														<span>{$i18n.t('game.stateUnlocked')}</span>
+													{:else}
+														<svg
+															width="12"
+															height="12"
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															stroke-width="2.2"
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															aria-hidden="true"
+														>
+															<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+															<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+														</svg>
+														<span>{$i18n.t('game.stateLocked')}</span>
+													{/if}
+												</button>
+
+												{#if editAchUnlocked}
+													<div class="ach-dt-group">
+														<span class="ach-dt-label">{$i18n.t('game.dateTimeLabel')}</span>
+														<input
+															type="datetime-local"
+															class="ach-dt-input"
+															bind:value={editAchDateTime}
+														/>
+														<button type="button" class="ach-dt-now" onclick={setEditDateTimeNow}>
+															{$i18n.t('game.now')}
+														</button>
+													</div>
+												{/if}
+											</div>
+
+											<div class="ach-editor-right">
+												<button
+													type="button"
+													class="ach-save-btn"
+													disabled={savingAchEdit}
+													onclick={() => saveAchievementEdit(ach.key)}
+												>
+													{savingAchEdit ? '...' : $i18n.t('game.save')}
+												</button>
+												<button
+													type="button"
+													class="ach-cancel-btn"
+													onclick={() => (editingAchKey = null)}
+												>
+													{$i18n.t('game.cancel')}
+												</button>
+											</div>
+										</div>
+									{/if}
+								</div>
+							{/snippet}
+
+							{#if loading}
+								<div class="loading-state">{$i18n.t('game.loading')}</div>
+							{:else if hasSets}
+								<div class="ach-sections">
+									{#each visibleSections as section (section.id)}
+										{#if section.filteredAchievements.length > 0}
+											<section class="ach-set-section">
+												<header class="ach-set-header">
+													<div class="ach-set-title-group">
+														<h3 class="ach-set-title">{section.title}</h3>
+														{#if section.isDlc}
+															<span class="set-badge dlc">{$i18n.t('game.dlcBadge')}</span>
+														{/if}
+														{#if section.archived}
+															<span class="set-badge archived">{$i18n.t('game.archived')}</span>
+														{/if}
+													</div>
+													<div class="ach-set-progress">
+														<span class="ach-set-stats tabular-nums">
+															{section.unlocked} / {section.total} ({section.displayPct}%)
+														</span>
+														<div class="ach-set-bar-track">
+															<div
+																class="ach-set-bar-fill"
+																class:complete={section.total > 0 &&
+																	section.unlocked === section.total}
+																style:width="{section.pct}%"
+															></div>
+														</div>
+													</div>
+												</header>
+												<div class="ach-grid">
+													{#each section.filteredAchievements as ach (ach.key)}
+														{@render achievementCard(
+															ach,
+															Boolean(ach.archived || section.archived)
+														)}
+													{/each}
+												</div>
+											</section>
+										{/if}
+									{/each}
+								</div>
+
+								{#if filteredCount === 0}
+									<div class="empty-state">{$i18n.t('game.noAchievementFound')}</div>
+								{/if}
+							{:else}
+								<div class="ach-grid">
+									{#each flatFiltered as item (item.ach.key)}
+										{@render achievementCard(item.ach, item.isArchived)}
+									{/each}
+								</div>
+
+								{#if filteredCount === 0}
+									<div class="empty-state">{$i18n.t('game.noAchievementFound')}</div>
+								{/if}
 							{/if}
-						{/if}
-					</div>
+						</div>
 					{:else}
 						<div class="achievements-list">
 							<div class="progress-map">
@@ -1500,15 +1938,20 @@
 													void openAchievementFromMap(ach.key);
 												}
 											}}
-											aria-label={$i18n.t('game.viewDescriptionAria', { name: ach.name || ach.key })}
+											aria-label={$i18n.t('game.viewDescriptionAria', {
+												name: ach.name || ach.key
+											})}
 										>
 											<div
 												class="map-achievement-index"
 												class:complete={isUnlocked}
-												aria-label={$i18n.t('game.stepIndexAria', { index: index + 1, total: totalCount })}
+												aria-label={$i18n.t('game.stepIndexAria', {
+													index: index + 1,
+													total: mapAchievements.length
+												})}
 											>
 												<span>{index + 1}</span>
-												<small>/{totalCount}</small>
+												<small>/{mapAchievements.length}</small>
 											</div>
 											<div class="map-achievement-icon">
 												{#if ach.icon || ach.icon_gray}
@@ -1519,7 +1962,17 @@
 														decoding="async"
 													/>
 												{:else}
-													<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+													<svg
+														width="20"
+														height="20"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="1.8"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														aria-hidden="true"
+													>
 														<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
 														<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
 														<path d="M4 22h16" />
@@ -1531,21 +1984,47 @@
 											</div>
 											<div class="map-achievement-content">
 												<div class="map-achievement-title">{ach.name || ach.key}</div>
-												<div class="map-achievement-description">{ach.desc || $i18n.t('game.achievementToUnlock')}</div>
+												<div class="map-achievement-description">
+													{ach.desc || $i18n.t('game.achievementToUnlock')}
+												</div>
 												<div class="map-achievement-meta">
-													<span class="map-rarity tabular-nums" style:color={palette.badgeColor}>{rarityLabel(ach.completionpercentage) || $i18n.t('game.unknown')} · {parseFloat(ach.completionpercentage || '0').toFixed(1)}%</span>
+													<span class="map-rarity tabular-nums" style:color={palette.badgeColor}
+														>{rarityLabel(ach.completionpercentage) || $i18n.t('game.unknown')} · {parseFloat(
+															ach.completionpercentage || '0'
+														).toFixed(1)}%</span
+													>
 													<div class="map-rarity-track">
-														<div class="map-rarity-fill" style:width={`${Math.min(parseFloat(ach.completionpercentage) || 0, 100)}%`} style:background={palette.fill}></div>
+														<div
+															class="map-rarity-fill"
+															style:width={`${Math.min(parseFloat(ach.completionpercentage) || 0, 100)}%`}
+															style:background={palette.fill}
+														></div>
 													</div>
 												</div>
 											</div>
 											<div class="map-achievement-status" class:complete={isUnlocked}>
 												{#if isUnlocked}
-													<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+													<svg
+														width="13"
+														height="13"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="3"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														aria-hidden="true"
+													>
 														<polyline points="20 6 9 17 4 12" />
 													</svg>
 												{:else}
-													<svg width="6" height="6" viewBox="0 0 8 8" fill="currentColor" aria-hidden="true">
+													<svg
+														width="6"
+														height="6"
+														viewBox="0 0 8 8"
+														fill="currentColor"
+														aria-hidden="true"
+													>
 														<circle cx="4" cy="4" r="3" />
 													</svg>
 												{/if}
@@ -1568,11 +2047,36 @@
 				aria-live="polite"
 			>
 				{#if exportNotice.type === 'error'}
-					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+					<svg
+						width="15"
+						height="15"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line
+							x1="12"
+							y1="16"
+							x2="12.01"
+							y2="16"
+						/>
 					</svg>
 				{:else}
-					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<svg
+						width="15"
+						height="15"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.4"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
 						<polyline points="20 6 9 17 4 12" />
 					</svg>
 				{/if}
@@ -1583,7 +2087,16 @@
 					aria-label={$i18n.t('button.close')}
 					onclick={() => (exportNotice = null)}
 				>
-					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+					<svg
+						width="12"
+						height="12"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.5"
+						stroke-linecap="round"
+						aria-hidden="true"
+					>
 						<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
 					</svg>
 				</button>
@@ -2158,9 +2671,66 @@
 	}
 	.progress-left {
 		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+	}
+	.progress-left.dual-gauges {
+		gap: 14px;
+	}
+	.gauge-block {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.gauge-block.is-platinum .gauge-title {
+		color: var(--completed, #4caf6e);
+	}
+	.gauge-header {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.gauge-title {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12px;
+		font-weight: 700;
+		color: var(--text-secondary);
+		letter-spacing: 0.3px;
+	}
+	.platinum-pill {
+		font-size: 10px;
+		font-weight: 800;
+		padding: 1px 7px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--completed, #4caf6e) 18%, transparent);
+		border: 1px solid color-mix(in srgb, var(--completed, #4caf6e) 45%, transparent);
+		color: var(--completed, #4caf6e);
+	}
+	.gauge-numbers {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 10px;
+		flex-shrink: 0;
+	}
+	.gauge-count {
+		font-size: 16px;
+		font-weight: 800;
+		color: var(--text-primary);
+	}
+	.gauge-slash {
+		color: var(--text-muted);
+		font-size: 13px;
+		font-weight: 600;
+		margin-left: 2px;
+	}
+	.gauge-pct {
+		font-size: 18px;
+		font-weight: 900;
 	}
 	.progress-stats {
 		display: flex;
@@ -2191,6 +2761,9 @@
 		border-radius: 5px;
 		overflow: hidden;
 	}
+	.progress-bar-track.secondary {
+		height: 7px;
+	}
 	.progress-bar-fill {
 		height: 100%;
 		background: #3ddc84;
@@ -2203,6 +2776,7 @@
 		gap: 40px;
 		border-left: 1px solid var(--border-soft);
 		padding-left: 48px;
+		align-items: center;
 	}
 	.stat-item {
 		display: flex;
@@ -2713,7 +3287,30 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: 12px;
 		line-height: 1;
+	}
+	.ach-title-wrap {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+		flex: 1;
+	}
+	.ach-archived-badge {
+		font-size: 9px;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.6px;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+	.ach-card.is-archived:not(.is-unlocked) {
+		opacity: 0.78;
 	}
 	.ach-name {
 		font-size: 16px;
@@ -2927,5 +3524,182 @@
 	.export-toast-close:hover {
 		background: var(--surface-hover);
 		color: var(--text-primary);
+	}
+
+	.progress-card.has-dual-gauges {
+		align-items: center;
+	}
+
+	.set-tabs {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+		max-height: 112px;
+		overflow-y: auto;
+		padding: 2px 0;
+		scrollbar-width: thin;
+	}
+
+	.set-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		padding: 6px 12px;
+		border-radius: 9px;
+		border: 1px solid var(--border-soft);
+		background: var(--surface-2);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		max-width: 260px;
+		transition:
+			background 0.18s ease,
+			border-color 0.18s ease,
+			color 0.18s ease;
+	}
+
+	.set-tab:hover:not(.active) {
+		background: var(--surface-hover);
+		border-color: var(--border-specular);
+		color: var(--text-primary);
+	}
+
+	.set-tab.active {
+		background: var(--accent, #0066cc);
+		border-color: var(--accent, #0066cc);
+		color: var(--accent-text);
+	}
+
+	.set-tab-name {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.set-tab-dlc {
+		font-size: 9px;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.6px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--accent, #c8a96e) 18%, transparent);
+		color: var(--accent, #c8a96e);
+		flex-shrink: 0;
+	}
+
+	.set-tab.active .set-tab-dlc {
+		background: color-mix(in srgb, var(--accent-text) 18%, transparent);
+		color: var(--accent-text);
+	}
+
+	.set-tab-count {
+		font-size: 11px;
+		font-weight: 700;
+		padding: 1px 7px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--surface-1) 75%, transparent);
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+
+	.set-tab.active .set-tab-count {
+		background: color-mix(in srgb, var(--accent-text) 18%, transparent);
+		color: var(--accent-text);
+	}
+
+	.ach-sections {
+		display: flex;
+		flex-direction: column;
+		gap: 28px;
+	}
+
+	.ach-set-section {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+
+	.ach-set-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		flex-wrap: wrap;
+		padding: 10px 14px;
+		border-radius: 12px;
+		background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+		border: 1px solid var(--border-soft);
+	}
+
+	.ach-set-title-group {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.ach-set-title {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 800;
+		color: var(--text-primary);
+		letter-spacing: -0.1px;
+	}
+
+	.set-badge {
+		font-size: 9px;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.7px;
+		padding: 2px 7px;
+		border-radius: 999px;
+		flex-shrink: 0;
+	}
+
+	.set-badge.dlc {
+		background: color-mix(in srgb, var(--accent, #c8a96e) 16%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 35%, transparent);
+		color: var(--accent, #c8a96e);
+	}
+
+	.set-badge.archived {
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-muted);
+	}
+
+	.ach-set-progress {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-shrink: 0;
+	}
+
+	.ach-set-stats {
+		font-size: 12px;
+		font-weight: 700;
+		color: var(--text-secondary);
+	}
+
+	.ach-set-bar-track {
+		width: 110px;
+		height: 6px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		overflow: hidden;
+	}
+
+	.ach-set-bar-fill {
+		height: 100%;
+		border-radius: 999px;
+		background: var(--accent, #c8a96e);
+		transition: width 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+	}
+
+	.ach-set-bar-fill.complete {
+		background: var(--completed, #4caf6e);
 	}
 </style>
