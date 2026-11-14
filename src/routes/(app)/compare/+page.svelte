@@ -2,8 +2,9 @@
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
-	import type { Game } from '$lib/stores/Games.js';
-	import type { SteamUser } from '$lib/stores/user.js';
+	import { games, getGameIconUrl, type Game } from '$lib/stores/Games.js';
+	import { steamUser, type SteamUser } from '$lib/stores/user.js';
+	import { settings } from '$lib/stores/settings.js';
 	import { calculateAdvancedStats } from '$lib/stores/selectedGame.js';
 	import { i18n } from '$lib/stores/i18n.js';
 
@@ -19,12 +20,153 @@
 		};
 	}
 
+	interface FriendSteamProfileResponse {
+		user: SteamUser;
+		games: Game[];
+	}
+
+	interface RecentSteamFriend {
+		steamid: string;
+		personaname: string;
+		avatarfull: string;
+		lastComparedAt: number;
+	}
+
+	const RECENT_FRIENDS_STORAGE_KEY = 'accolade:compare-recent-friends:v1';
+	const MAX_RECENT_FRIENDS = 8;
+
 	let profile1 = $state<ProfileData | null>(null);
 	let profile2 = $state<ProfileData | null>(null);
 	let isDraggingOver = $state(false);
 	let dragHoverSlot = $state<1 | 2 | null>(null);
 	let slot1El: HTMLElement | null = null;
 	let slot2El: HTMLElement | null = null;
+
+	let compareMode = $state<'steam' | 'json'>('steam');
+	let steamIdentifier = $state('');
+	let isFetchingFriend = $state(false);
+	let steamError = $state<string | null>(null);
+	let recentFriends = $state<RecentSteamFriend[]>(loadRecentFriends());
+
+	function loadRecentFriends(): RecentSteamFriend[] {
+		if (typeof localStorage === 'undefined') return [];
+		try {
+			const raw = localStorage.getItem(RECENT_FRIENDS_STORAGE_KEY);
+			if (!raw) return [];
+			const parsed = JSON.parse(raw);
+			if (!Array.isArray(parsed)) return [];
+			return parsed
+				.filter(
+					(item): item is RecentSteamFriend =>
+						Boolean(item) &&
+						typeof item === 'object' &&
+						typeof item.steamid === 'string' &&
+						item.steamid.trim().length > 0 &&
+						typeof item.personaname === 'string' &&
+						typeof item.avatarfull === 'string'
+				)
+				.map((item) => ({
+					steamid: item.steamid,
+					personaname: item.personaname,
+					avatarfull: item.avatarfull,
+					lastComparedAt:
+						typeof item.lastComparedAt === 'number' && Number.isFinite(item.lastComparedAt)
+							? item.lastComparedAt
+							: 0
+				}))
+				.slice(0, MAX_RECENT_FRIENDS);
+		} catch {
+			return [];
+		}
+	}
+
+	function persistRecentFriends(list: RecentSteamFriend[]) {
+		if (typeof localStorage === 'undefined') return;
+		try {
+			localStorage.setItem(RECENT_FRIENDS_STORAGE_KEY, JSON.stringify(list));
+		} catch {
+			// Ignore storage quota errors
+		}
+	}
+
+	function saveRecentFriend(user: SteamUser) {
+		const sid = user.steamid?.trim();
+		if (!sid) return;
+		const entry: RecentSteamFriend = {
+			steamid: sid,
+			personaname: user.personaname || sid,
+			avatarfull: user.avatarfull || '',
+			lastComparedAt: Date.now()
+		};
+		const next = [entry, ...recentFriends.filter((f) => f.steamid !== sid)].slice(
+			0,
+			MAX_RECENT_FRIENDS
+		);
+		recentFriends = next;
+		persistRecentFriends(next);
+	}
+
+	function removeRecentFriend(steamid: string, e: MouseEvent) {
+		e.stopPropagation();
+		const next = recentFriends.filter((f) => f.steamid !== steamid);
+		recentFriends = next;
+		persistRecentFriends(next);
+	}
+
+	function mapSteamCompareError(err: unknown): string {
+		const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : String(err);
+		const trimmed = msg.trim();
+		if (trimmed.includes('PROFILE_PRIVATE')) {
+			return $i18n.t('compare.errorPrivate');
+		}
+		if (trimmed.includes('VANITY_NOT_FOUND') || trimmed.includes('PROFILE_NOT_FOUND')) {
+			return $i18n.t('compare.errorNotFound');
+		}
+		if (trimmed.includes('MISSING_API_KEY')) {
+			return $i18n.t('compare.errorMissingApiKey');
+		}
+		if (trimmed.includes('INVALID_IDENTIFIER')) {
+			return $i18n.t('compare.errorInvalidIdentifier');
+		}
+		return $i18n.t('compare.errorGeneric', { details: trimmed });
+	}
+
+	async function compareWithSteamFriend(targetIdentifier?: string) {
+		const query = (targetIdentifier ?? steamIdentifier).trim();
+		if (!query || isFetchingFriend) return;
+
+		if (targetIdentifier !== undefined) {
+			steamIdentifier = targetIdentifier;
+		}
+
+		isFetchingFriend = true;
+		steamError = null;
+
+		try {
+			const res = await invoke<FriendSteamProfileResponse>('fetch_friend_steam_profile', {
+				identifier: query,
+				apiKey: $settings.steamApiKey || null,
+				language: $settings.language || null
+			});
+
+			profile1 = {
+				user: $steamUser ?? undefined,
+				games: $games,
+				stats: calculateAdvancedStats($games)
+			};
+			profile2 = {
+				user: res.user,
+				games: res.games,
+				stats: calculateAdvancedStats(res.games)
+			};
+
+			saveRecentFriend(res.user);
+		} catch (err) {
+			steamError = mapSteamCompareError(err);
+		} finally {
+			isFetchingFriend = false;
+		}
+	}
 
 	function parseJsonText(rawText: string): ProfileData | null {
 		try {
@@ -206,6 +348,7 @@
 	function reset() {
 		profile1 = null;
 		profile2 = null;
+		steamError = null;
 	}
 </script>
 
@@ -259,34 +402,134 @@
 		<h1>{$i18n.t('compare.title')}</h1>
 		<p class="subtitle">{$i18n.t('compare.subtitle')}</p>
 
-		<div class="header-actions">
-			<label class="upload-btn">
-				<svg
-					width="18"
-					height="18"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-						points="17 8 12 3 7 8"
-					/><line x1="12" y1="3" x2="12" y2="15" /></svg
-				>
-				{$i18n.t('compare.selectProfiles')}
-				<input
-					type="file"
-					accept=".json"
-					multiple
-					onchange={(e) => {
-						const input = e.target as HTMLInputElement;
-						if (input.files) void handleFiles(input.files);
-					}}
-				/>
-			</label>
+		<div class="compare-mode-tabs" role="tablist">
+			<button
+				type="button"
+				role="tab"
+				aria-selected={compareMode === 'steam'}
+				class="mode-tab"
+				class:active={compareMode === 'steam'}
+				onclick={() => {
+					compareMode = 'steam';
+					steamError = null;
+				}}
+			>
+				{$i18n.t('compare.tabSteam')}
+			</button>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={compareMode === 'json'}
+				class="mode-tab"
+				class:active={compareMode === 'json'}
+				onclick={() => {
+					compareMode = 'json';
+				}}
+			>
+				{$i18n.t('compare.tabJson')}
+			</button>
 		</div>
-		<p class="drop-hint-label">{$i18n.t('compare.dropHint')}</p>
+
+		{#if compareMode === 'steam'}
+			<form
+				class="steam-compare-form"
+				onsubmit={(e) => {
+					e.preventDefault();
+					void compareWithSteamFriend();
+				}}
+			>
+				<input
+					type="text"
+					class="steam-input"
+					bind:value={steamIdentifier}
+					placeholder={$i18n.t('compare.steamInputPlaceholder')}
+					disabled={isFetchingFriend}
+				/>
+				<button
+					type="submit"
+					class="steam-compare-btn"
+					disabled={isFetchingFriend || !steamIdentifier.trim()}
+				>
+					{#if isFetchingFriend}
+						<span class="btn-spinner" aria-hidden="true"></span>
+						{$i18n.t('compare.steamComparing')}
+					{:else}
+						{$i18n.t('compare.steamCompareBtn')}
+					{/if}
+				</button>
+			</form>
+
+			{#if steamError}
+				<div class="steam-error-banner" role="alert">
+					{steamError}
+				</div>
+			{/if}
+
+			{#if recentFriends.length > 0}
+				<div class="recent-friends-section">
+					<span class="recent-friends-label">{$i18n.t('compare.recentFriends')}</span>
+					<div class="recent-friends-list">
+						{#each recentFriends as friend (friend.steamid)}
+							<div class="recent-friend-chip">
+								<button
+									type="button"
+									class="recent-friend-btn"
+									disabled={isFetchingFriend}
+									onclick={() => void compareWithSteamFriend(friend.steamid)}
+								>
+									<img
+										src={friend.avatarfull ||
+											'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg'}
+										alt=""
+										class="recent-friend-avatar"
+									/>
+									<span class="recent-friend-name">{friend.personaname}</span>
+								</button>
+								<button
+									type="button"
+									class="recent-friend-remove"
+									aria-label={$i18n.t('compare.removeRecentFriend')}
+									title={$i18n.t('compare.removeRecentFriend')}
+									disabled={isFetchingFriend}
+									onclick={(e) => removeRecentFriend(friend.steamid, e)}
+								>
+									×
+								</button>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
+		{:else}
+			<div class="header-actions">
+				<label class="upload-btn">
+					<svg
+						width="18"
+						height="18"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+							points="17 8 12 3 7 8"
+						/><line x1="12" y1="3" x2="12" y2="15" /></svg
+					>
+					{$i18n.t('compare.selectProfiles')}
+					<input
+						type="file"
+						accept=".json"
+						multiple
+						onchange={(e) => {
+							const input = e.target as HTMLInputElement;
+							if (input.files) void handleFiles(input.files);
+						}}
+					/>
+				</label>
+			</div>
+			<p class="drop-hint-label">{$i18n.t('compare.dropHint')}</p>
+		{/if}
 	</header>
 
 	<div class="profiles-overview">
@@ -326,7 +569,7 @@
 					<img
 						src={profile1.user?.avatarfull ||
 							'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg'}
-						alt="Avatar"
+						alt={$i18n.t('compare.avatarAlt')}
 						class="user-avatar"
 					/>
 					<div class="user-meta">
@@ -358,7 +601,7 @@
 			{/if}
 		</label>
 
-		<div class="vs-badge">VS</div>
+		<div class="vs-badge">{$i18n.t('compare.vs')}</div>
 
 		<label
 			class="profile-slot"
@@ -396,7 +639,7 @@
 					<img
 						src={profile2.user?.avatarfull ||
 							'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg'}
-						alt="Avatar"
+						alt={$i18n.t('compare.avatarAlt')}
 						class="user-avatar"
 					/>
 					<div class="user-meta">
@@ -435,7 +678,7 @@
 
 		<div class="stats-ribbon">
 			<div class="ribbon-item">
-				<div class="val">{statsSummary?.comp1}% vs {statsSummary?.comp2}%</div>
+				<div class="val">{statsSummary?.comp1}% {$i18n.t('compare.vsShort')} {statsSummary?.comp2}%</div>
 				<div class="lbl">{$i18n.t('compare.avgCompletion')}</div>
 			</div>
 			<div class="ribbon-item">
@@ -452,7 +695,7 @@
 					<div class="fun-label">{$i18n.t('compare.totalUnlocked')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.totalUnlocked ?? '?'}</span>
-						<span class="v-vs">vs</span>
+						<span class="v-vs">{$i18n.t('compare.vsShort')}</span>
 						<span class="v2">{s2?.totalUnlocked ?? '?'}</span>
 					</div>
 				</div>
@@ -460,7 +703,7 @@
 					<div class="fun-label">{$i18n.t('compare.recordDay')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.maxAchievementsInDay ?? '?'}</span>
-						<span class="v-vs">vs</span>
+						<span class="v-vs">{$i18n.t('compare.vsShort')}</span>
 						<span class="v2">{s2?.maxAchievementsInDay ?? '?'}</span>
 					</div>
 				</div>
@@ -468,7 +711,7 @@
 					<div class="fun-label">{$i18n.t('compare.recordWeek')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.maxAchievementsInWeek ?? '?'}</span>
-						<span class="v-vs">vs</span>
+						<span class="v-vs">{$i18n.t('compare.vsShort')}</span>
 						<span class="v2">{s2?.maxAchievementsInWeek ?? '?'}</span>
 					</div>
 				</div>
@@ -476,7 +719,7 @@
 					<div class="fun-label">{$i18n.t('compare.remaining')}</div>
 					<div class="fun-values">
 						<span class="v1">{s1?.totalRemaining ?? '?'}</span>
-						<span class="v-vs">vs</span>
+						<span class="v-vs">{$i18n.t('compare.vsShort')}</span>
 						<span class="v2">{s2?.totalRemaining ?? '?'}</span>
 					</div>
 				</div>
@@ -486,13 +729,13 @@
 						<div class="d1">
 							{s1?.rarestAchievement
 								? `${s1.rarestAchievement.name} (${s1.rarestAchievement.pct}%)`
-								: 'N/A'}
+								: $i18n.t('compare.na')}
 						</div>
 						<div class="d-vs">{$i18n.t('compare.against')}</div>
 						<div class="d2">
 							{s2?.rarestAchievement
 								? `${s2.rarestAchievement.name} (${s2.rarestAchievement.pct}%)`
-								: 'N/A'}
+								: $i18n.t('compare.na')}
 						</div>
 					</div>
 				</div>
@@ -508,7 +751,7 @@
 						{@const g2 = getGameStats(profile2!, game.id)}
 						<div class="compare-card">
 							<div class="game-header-mini">
-								<img src={game.game_icon} alt="" class="mini-icon" />
+								<img src={getGameIconUrl(game)} alt="" class="mini-icon" />
 								<span class="mini-title">{game.name}</span>
 							</div>
 							<div class="compare-bars">
@@ -630,6 +873,231 @@
 		color: var(--text-secondary);
 		opacity: 0.8;
 		margin-bottom: 24px;
+	}
+
+	.compare-mode-tabs {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		border-radius: 12px;
+		margin-bottom: 20px;
+	}
+
+	.mode-tab {
+		padding: 8px 16px;
+		border: none;
+		border-radius: 9px;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 0.9rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.mode-tab:hover {
+		color: var(--text-primary);
+		background: var(--surface-hover);
+	}
+
+	.mode-tab.active {
+		background: var(--accent);
+		color: var(--accent-text);
+		box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 28%, transparent);
+	}
+
+	.steam-compare-form {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		max-width: 620px;
+		margin: 0 auto;
+	}
+
+	.steam-input {
+		flex: 1;
+		min-width: 0;
+		padding: 12px 16px;
+		border-radius: 12px;
+		border: 1px solid var(--border-soft);
+		background: var(--surface-1);
+		color: var(--text-primary);
+		font-size: 0.95rem;
+		outline: none;
+		transition: border-color 0.2s ease, background 0.2s ease;
+	}
+
+	.steam-input::placeholder {
+		color: var(--text-muted);
+	}
+
+	.steam-input:focus {
+		border-color: var(--accent);
+		background: var(--surface-2);
+	}
+
+	.steam-input:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.steam-compare-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 12px 22px;
+		border: none;
+		border-radius: 12px;
+		background: var(--accent);
+		color: var(--accent-text);
+		font-size: 0.95rem;
+		font-weight: 700;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+		box-shadow: 0 4px 15px color-mix(in srgb, var(--accent) 30%, transparent);
+	}
+
+	.steam-compare-btn:hover:not(:disabled) {
+		transform: translateY(-2px);
+		filter: brightness(1.08);
+		box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 40%, transparent);
+	}
+
+	.steam-compare-btn:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+		box-shadow: none;
+	}
+
+	.btn-spinner {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		border: 2px solid color-mix(in srgb, var(--accent-text) 35%, transparent);
+		border-top-color: var(--accent-text);
+		animation: spin 0.75s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.steam-error-banner {
+		max-width: 620px;
+		margin: 14px auto 0;
+		padding: 10px 14px;
+		border-radius: 10px;
+		background: rgba(239, 68, 68, 0.12);
+		border: 1px solid rgba(239, 68, 68, 0.35);
+		color: #fca5a5;
+		font-size: 0.88rem;
+		font-weight: 500;
+	}
+
+	.recent-friends-section {
+		max-width: 720px;
+		margin: 18px auto 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.recent-friends-label {
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.6px;
+		color: var(--text-muted);
+		font-weight: 600;
+	}
+
+	.recent-friends-list {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 8px;
+	}
+
+	.recent-friend-chip {
+		display: inline-flex;
+		align-items: center;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		border-radius: 999px;
+		padding: 3px 6px 3px 4px;
+		gap: 4px;
+		transition: border-color 0.2s ease, background 0.2s ease;
+	}
+
+	.recent-friend-chip:hover {
+		border-color: var(--accent);
+		background: var(--surface-hover);
+	}
+
+	.recent-friend-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		border: none;
+		background: transparent;
+		color: var(--text-primary);
+		font-size: 0.85rem;
+		font-weight: 600;
+		padding: 2px 4px;
+		cursor: pointer;
+	}
+
+	.recent-friend-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.recent-friend-avatar {
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		object-fit: cover;
+	}
+
+	.recent-friend-name {
+		max-width: 140px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.recent-friend-remove {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		border: none;
+		border-radius: 50%;
+		background: transparent;
+		color: var(--text-muted);
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+		transition: background 0.15s ease, color 0.15s ease;
+	}
+
+	.recent-friend-remove:hover:not(:disabled) {
+		background: var(--surface-2);
+		color: var(--text-primary);
+	}
+
+	.recent-friend-remove:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.header-actions {
@@ -893,6 +1361,7 @@
 		width: 32px;
 		height: 32px;
 		border-radius: 6px;
+		object-fit: cover;
 	}
 	.mini-title {
 		font-weight: 600;

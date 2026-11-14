@@ -9,6 +9,9 @@
 		getAchievementPoints,
 		formatPlaytime,
 		computeGameProgress,
+		ACHIEVEMENT_TAG_KEYS,
+		normalizeAchievementTags,
+		type AchievementTagKey,
 		type Game,
 		type Achievement,
 		type HltbData,
@@ -106,6 +109,9 @@
 		editingHltb = false;
 		editingPlaytime = false;
 		editingAchKey = null;
+		editingMetaAchKey = null;
+		editNoteText = '';
+		activeAchTagFilter = 'all';
 		if (!gid || !gname) {
 			hltbData = null;
 			return;
@@ -193,6 +199,7 @@
 			editingAchKey = null;
 			return;
 		}
+		editingMetaAchKey = null;
 		editingAchKey = ach.key;
 		editAchUnlocked = ach.unlocked || Boolean(ach.unlocked_time);
 		editAchDateTime = unixToLocalDatetimeInput(ach.unlocked_time);
@@ -236,7 +243,9 @@
 							return {
 								...u,
 								groupid: u.groupid ?? prev.groupid,
-								archived: u.archived ?? prev.archived
+								archived: u.archived ?? prev.archived,
+								note: u.note !== undefined ? u.note : prev.note,
+								tags: u.tags !== undefined ? u.tags : prev.tags
 							};
 						});
 						return { ...g, achievements: preserved };
@@ -256,6 +265,114 @@
 			console.error('Failed to update achievement state:', e);
 		} finally {
 			savingAchEdit = false;
+		}
+	}
+
+	// Personal notes & hunting marker tags state
+	const TAG_I18N_KEYS: Record<
+		AchievementTagKey,
+		'game.tag.missable' | 'game.tag.multi' | 'game.tag.ngplus' | 'game.tag.buggy'
+	> = {
+		missable: 'game.tag.missable',
+		multi: 'game.tag.multi',
+		ngplus: 'game.tag.ngplus',
+		buggy: 'game.tag.buggy'
+	};
+
+	let editingMetaAchKey = $state<string | null>(null);
+	let editNoteText = $state('');
+	let savingMetaNote = $state(false);
+	let activeAchTagFilter = $state<'all' | AchievementTagKey>('all');
+
+	function openMetaEditor(ach: Achievement) {
+		if (editingMetaAchKey === ach.key) {
+			editingMetaAchKey = null;
+			return;
+		}
+		editingAchKey = null;
+		editingMetaAchKey = ach.key;
+		editNoteText = ach.note ?? '';
+	}
+
+	function updateAchievementMetaLocal(
+		gameId: string,
+		achKey: string,
+		patch: { note?: string | null; tags?: string[] }
+	) {
+		const norm = achKey.trim().toLowerCase();
+		const patchItem = (item: Achievement): Achievement =>
+			item.key.trim().toLowerCase() === norm ? { ...item, ...patch } : item;
+
+		if (game?.id === gameId) {
+			achievements = achievements.map(patchItem);
+		}
+		games.update((list) =>
+			list.map((g) =>
+				g.id === gameId ? { ...g, achievements: (g.achievements ?? []).map(patchItem) } : g
+			)
+		);
+	}
+
+	async function saveAchievementNote(achKey: string) {
+		if (!game || savingMetaNote) return;
+		const targetGameId = game.id;
+		const trimmed = editNoteText.trim();
+		const nextNote = trimmed.length > 0 ? trimmed : null;
+		savingMetaNote = true;
+		try {
+			const saved = await invoke<string | null>('set_achievement_note', {
+				gameId: targetGameId,
+				achKey,
+				note: nextNote
+			});
+			updateAchievementMetaLocal(targetGameId, achKey, { note: saved });
+			if (editingMetaAchKey === achKey) {
+				editingMetaAchKey = null;
+			}
+		} catch (e) {
+			console.error('Failed to save achievement note:', e);
+		} finally {
+			savingMetaNote = false;
+		}
+	}
+
+	async function clearAchievementNote(achKey: string) {
+		if (!game || savingMetaNote) return;
+		const targetGameId = game.id;
+		savingMetaNote = true;
+		try {
+			const saved = await invoke<string | null>('set_achievement_note', {
+				gameId: targetGameId,
+				achKey,
+				note: null
+			});
+			editNoteText = '';
+			updateAchievementMetaLocal(targetGameId, achKey, { note: saved });
+		} catch (e) {
+			console.error('Failed to clear achievement note:', e);
+		} finally {
+			savingMetaNote = false;
+		}
+	}
+
+	async function toggleAchievementTag(ach: Achievement, tagKey: AchievementTagKey) {
+		if (!game) return;
+		const targetGameId = game.id;
+		const prevTags = normalizeAchievementTags(ach.tags);
+		const nextTags = prevTags.includes(tagKey)
+			? prevTags.filter((t) => t !== tagKey)
+			: [...prevTags, tagKey];
+		updateAchievementMetaLocal(targetGameId, ach.key, { tags: nextTags });
+		try {
+			const saved = await invoke<string[]>('set_achievement_tags', {
+				gameId: targetGameId,
+				achKey: ach.key,
+				tags: nextTags
+			});
+			updateAchievementMetaLocal(targetGameId, ach.key, { tags: saved });
+		} catch (e) {
+			console.error('Failed to update achievement tags:', e);
+			updateAchievementMetaLocal(targetGameId, ach.key, { tags: prevTags });
 		}
 	}
 
@@ -329,7 +446,7 @@
 				const path = await exportGame(game);
 				showExportNotice(path, 'success');
 			} catch {
-				showExportNotice('Export failed', 'error');
+				showExportNotice(get(i18n).t('game.exportFailed'), 'error');
 			}
 		}
 	}
@@ -340,11 +457,11 @@
 				const title = game.name;
 				const unlocked = progress.unlockedAll;
 				const total = progress.totalAll;
-				let content = `Jeu: ${game.name}\n`;
-				content += `Identifiant: ${game.id}\n`;
-				content += `Source: ${typeof game.source === 'object' ? game.source.type : game.source}\n`;
-				content += `Progression: ${unlocked}/${total} (${total > 0 ? globalPctDisplay : 0}%)\n\n`;
-				content += 'Unlocked achievements:\n';
+				let content = `${get(i18n).t('game.pdf.game')}: ${game.name}\n`;
+				content += `${get(i18n).t('game.pdf.id')}: ${game.id}\n`;
+				content += `${get(i18n).t('game.pdf.source')}: ${typeof game.source === 'object' ? game.source.type : game.source}\n`;
+				content += `${get(i18n).t('game.progressLabel')}: ${unlocked}/${total} (${total > 0 ? globalPctDisplay : 0}%)\n\n`;
+				content += `${get(i18n).t('game.pdf.unlockedAchievements')}\n`;
 				content += `--------------------------\n`;
 
 				publicAchievements
@@ -465,7 +582,9 @@
 				progress: live?.progress ?? s.progress ?? null,
 				max_progress: live?.max_progress ?? s.max_progress ?? null,
 				groupid: s.groupid || live?.groupid || 0,
-				archived: Boolean(s.archived || live?.archived)
+				archived: Boolean(s.archived || live?.archived),
+				note: live ? (live.note !== undefined ? live.note : (s.note ?? null)) : (s.note ?? null),
+				tags: live ? (live.tags !== undefined ? live.tags : (s.tags ?? [])) : (s.tags ?? [])
 			};
 		});
 
@@ -476,12 +595,43 @@
 				fromSchema.push({
 					...live,
 					groupid: live.groupid ?? 0,
-					archived: live.archived ?? false
+					archived: live.archived ?? false,
+					note: live.note ?? null,
+					tags: live.tags ?? []
 				});
 			}
 		}
 
 		return fromSchema;
+	});
+
+	let achTagStats = $derived.by(() => {
+		const remaining: Record<AchievementTagKey, number> = {
+			missable: 0,
+			multi: 0,
+			ngplus: 0,
+			buggy: 0
+		};
+		const total: Record<AchievementTagKey, number> = {
+			missable: 0,
+			multi: 0,
+			ngplus: 0,
+			buggy: 0
+		};
+		let hasAnyTag = false;
+		for (const ach of merged) {
+			const tags = normalizeAchievementTags(ach.tags);
+			if (tags.length === 0) continue;
+			hasAnyTag = true;
+			const unlocked = ach.unlocked || Boolean(ach.unlocked_time);
+			for (const tag of tags) {
+				total[tag] += 1;
+				if (!unlocked) {
+					remaining[tag] += 1;
+				}
+			}
+		}
+		return { remaining, total, hasAnyTag };
 	});
 
 	let progress = $derived(
@@ -523,19 +673,25 @@
 		filterMode: 'all' | 'unlocked' | 'locked',
 		query: string,
 		sortBy: 'date' | 'rarity' | 'name',
-		order: 'asc' | 'desc'
+		order: 'asc' | 'desc',
+		tagFilter: 'all' | AchievementTagKey = 'all'
 	): Achievement[] {
 		let result = list;
 
 		if (filterMode === 'unlocked') result = result.filter((a) => a.unlocked);
 		else if (filterMode === 'locked') result = result.filter((a) => !a.unlocked);
 
+		if (tagFilter !== 'all') {
+			result = result.filter((a) => normalizeAchievementTags(a.tags).includes(tagFilter));
+		}
+
 		const localQuery = query.trim().toLowerCase();
 		if (localQuery) {
 			result = result.filter(
 				(a) =>
 					a.name.toLowerCase().includes(localQuery) ||
-					(a.desc ?? '').toLowerCase().includes(localQuery)
+					(a.desc ?? '').toLowerCase().includes(localQuery) ||
+					(a.note ?? '').toLowerCase().includes(localQuery)
 			);
 		}
 
@@ -582,7 +738,8 @@
 				filter,
 				search,
 				sort,
-				sortOrder
+				sortOrder,
+				activeAchTagFilter
 			)
 		}))
 	);
@@ -649,6 +806,7 @@
 		activeView = 'achievements';
 		activeSetId = 'all';
 		filter = 'all';
+		activeAchTagFilter = 'all';
 		search = '';
 
 		const normalizedKey = normalizeAchievementKey(key);
@@ -683,6 +841,7 @@
 		activeView = 'achievements';
 		activeSetId = 'all';
 		filter = 'all';
+		activeAchTagFilter = 'all';
 		search = '';
 
 		void (async () => {
@@ -1271,6 +1430,65 @@
 							</div>
 						</div>
 					</div>
+
+					{#if achTagStats.hasAnyTag && (achTagStats.remaining.missable > 0 || achTagStats.remaining.multi > 0 || achTagStats.remaining.ngplus > 0 || achTagStats.remaining.buggy > 0)}
+						<div class="ach-markers-summary">
+							{#if achTagStats.remaining.missable > 0}
+								<button
+									type="button"
+									class="summary-missable-btn"
+									class:active={activeAchTagFilter === 'missable'}
+									onclick={() => {
+										activeView = 'achievements';
+										activeAchTagFilter = activeAchTagFilter === 'missable' ? 'all' : 'missable';
+									}}
+								>
+									<svg
+										width="13"
+										height="13"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2.3"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
+										/>
+										<line x1="12" y1="9" x2="12" y2="13" />
+										<line x1="12" y1="17" x2="12.01" y2="17" />
+									</svg>
+									<span>
+										{achTagStats.remaining.missable === 1
+											? $i18n.t('game.tag.missableRemainingOne', { count: 1 })
+											: $i18n.t('game.tag.missableRemainingMany', {
+													count: achTagStats.remaining.missable
+												})}
+									</span>
+								</button>
+							{/if}
+
+							{#each ['multi', 'ngplus', 'buggy'] as const as summaryTag (summaryTag)}
+								{#if achTagStats.remaining[summaryTag] > 0}
+									<button
+										type="button"
+										class="summary-tag-pill"
+										data-tag={summaryTag}
+										class:active={activeAchTagFilter === summaryTag}
+										onclick={() => {
+											activeView = 'achievements';
+											activeAchTagFilter = activeAchTagFilter === summaryTag ? 'all' : summaryTag;
+										}}
+									>
+										<span>{$i18n.t(TAG_I18N_KEYS[summaryTag])}</span>
+										<strong class="tabular-nums">{achTagStats.remaining[summaryTag]}</strong>
+									</button>
+								{/if}
+							{/each}
+						</div>
+					{/if}
 				</div>
 
 				<div class="main-section">
@@ -1516,6 +1734,36 @@
 								</button>
 							</div>
 						</div>
+
+						{#if activeView === 'achievements'}
+							<div class="tag-filter-pills" role="group" aria-label={$i18n.t('game.tag.markers')}>
+								<button
+									type="button"
+									class="tag-pill"
+									class:active={activeAchTagFilter === 'all'}
+									onclick={() => (activeAchTagFilter = 'all')}
+								>
+									{$i18n.t('game.tag.all')}
+								</button>
+								{#each ACHIEVEMENT_TAG_KEYS as tagKey (tagKey)}
+									{@const tagTotal = achTagStats.total[tagKey]}
+									<button
+										type="button"
+										class="tag-pill"
+										data-tag={tagKey}
+										class:active={activeAchTagFilter === tagKey}
+										class:is-empty={tagTotal === 0}
+										onclick={() =>
+											(activeAchTagFilter = activeAchTagFilter === tagKey ? 'all' : tagKey)}
+									>
+										<span>{$i18n.t(TAG_I18N_KEYS[tagKey])}</span>
+										{#if tagTotal > 0}
+											<span class="tag-pill-count tabular-nums">{tagTotal}</span>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						{/if}
 					</div>
 
 					{#if activeView === 'achievements'}
@@ -1533,10 +1781,13 @@
 								{@const displayIcon = isLocked && ach.icon_gray ? ach.icon_gray : ach.icon}
 								{@const achNormalizedKey = normalizeAchievementKey(ach.key)}
 								{@const pinned = pinnedSet.has(achNormalizedKey)}
+								{@const achTags = normalizeAchievementTags(ach.tags)}
+								{@const noteText = (ach.note ?? '').trim()}
 								{@const isTopbarMatch =
 									globalAchievementHighlight &&
 									(ach.name.toLowerCase().includes(globalAchievementHighlight) ||
-										(ach.desc ?? '').toLowerCase().includes(globalAchievementHighlight))}
+										(ach.desc ?? '').toLowerCase().includes(globalAchievementHighlight) ||
+										noteText.toLowerCase().includes(globalAchievementHighlight))}
 
 								<div
 									class="ach-card"
@@ -1618,6 +1869,11 @@
 													{#if isArchived}
 														<span class="ach-archived-badge">{$i18n.t('game.archived')}</span>
 													{/if}
+													{#each achTags as tag (tag)}
+														<span class="ach-marker-badge" data-tag={tag}>
+															{$i18n.t(TAG_I18N_KEYS[tag])}
+														</span>
+													{/each}
 												</div>
 												{#if isUnlocked && ach.unlocked_time}
 													<div class="ach-date tabular-nums">{formatDate(ach.unlocked_time)}</div>
@@ -1631,6 +1887,34 @@
 													<div class="ach-desc italic">{$i18n.t('game.descHidden')}</div>
 												{/if}
 											</div>
+
+											{#if noteText}
+												<button
+													type="button"
+													class="ach-note-preview"
+													title={$i18n.t('game.note.edit')}
+													onclick={() => openMetaEditor(ach)}
+												>
+													<svg
+														width="11"
+														height="11"
+														viewBox="0 0 16 16"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="1.6"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														aria-hidden="true"
+													>
+														<path
+															d="M10.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V5.5Z"
+														/>
+														<path d="M10 2.5V6h3.5" />
+														<path d="M5.5 8.5h5M5.5 11h3.5" />
+													</svg>
+													<span class="ach-note-preview-text">{noteText}</span>
+												</button>
+											{/if}
 
 											<div class="ach-footer-row">
 												{#if isLocked && ach.max_progress && ach.max_progress > 0}
@@ -1668,6 +1952,34 @@
 												{/if}
 
 												<div class="ach-actions">
+													<button
+														class="action-btn"
+														class:is-copied={editingMetaAchKey === ach.key}
+														onclick={() => openMetaEditor(ach)}
+														title={$i18n.t('game.note.edit')}
+														aria-label={$i18n.t('game.note.edit')}
+													>
+														<svg
+															width="11"
+															height="11"
+															viewBox="0 0 16 16"
+															fill="none"
+															stroke="currentColor"
+															stroke-width="1.6"
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															aria-hidden="true"
+														>
+															<path
+																d="M10.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V5.5Z"
+															/>
+															<path d="M10 2.5V6h3.5" />
+															<path d="M5.5 8.5h5M5.5 11h3.5" />
+														</svg>
+														{noteText || achTags.length > 0
+															? $i18n.t('game.note.badgeTitle')
+															: $i18n.t('game.note.add')}
+													</button>
 													<button
 														class="action-btn"
 														class:is-copied={editingAchKey === ach.key}
@@ -1848,6 +2160,68 @@
 													{$i18n.t('game.cancel')}
 												</button>
 											</div>
+										</div>
+									{/if}
+
+									{#if editingMetaAchKey === ach.key}
+										<div class="ach-meta-editor-panel">
+											<div class="ach-tag-toggles">
+												<span class="ach-meta-label">{$i18n.t('game.tag.markers')}</span>
+												{#each ACHIEVEMENT_TAG_KEYS as tagKey (tagKey)}
+													<button
+														type="button"
+														class="ach-tag-toggle"
+														data-tag={tagKey}
+														class:active={achTags.includes(tagKey)}
+														onclick={() => void toggleAchievementTag(ach, tagKey)}
+													>
+														{$i18n.t(TAG_I18N_KEYS[tagKey])}
+													</button>
+												{/each}
+											</div>
+
+											<div class="ach-note-row">
+												<input
+													type="text"
+													class="ach-note-input"
+													placeholder={$i18n.t('game.note.placeholder')}
+													bind:value={editNoteText}
+													onkeydown={(event) => {
+														if (event.key === 'Enter') {
+															event.preventDefault();
+															void saveAchievementNote(ach.key);
+														} else if (event.key === 'Escape') {
+															editingMetaAchKey = null;
+														}
+													}}
+												/>
+												<button
+													type="button"
+													class="ach-save-btn"
+													disabled={savingMetaNote}
+													onclick={() => void saveAchievementNote(ach.key)}
+												>
+													{savingMetaNote ? '...' : $i18n.t('game.note.save')}
+												</button>
+												{#if noteText || editNoteText.trim()}
+													<button
+														type="button"
+														class="ach-clear-btn"
+														disabled={savingMetaNote}
+														onclick={() => void clearAchievementNote(ach.key)}
+													>
+														{$i18n.t('game.note.clear')}
+													</button>
+												{/if}
+												<button
+													type="button"
+													class="ach-cancel-btn"
+													onclick={() => (editingMetaAchKey = null)}
+												>
+													{$i18n.t('game.note.cancel')}
+												</button>
+											</div>
+											<span class="ach-hud-hint">{$i18n.t('game.note.hudHint')}</span>
 										</div>
 									{/if}
 								</div>
@@ -2593,6 +2967,274 @@
 		cursor: pointer;
 	}
 
+	/* Achievement Markers Summary, Filter Pills, Card Badges & Personal Notes */
+	.ach-markers-summary {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 10px 14px;
+		border-radius: 12px;
+		background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+		border: 1px solid var(--border-soft);
+	}
+	.summary-missable-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		padding: 5px 11px;
+		border-radius: 999px;
+		font-size: 11.5px;
+		font-weight: 700;
+		cursor: pointer;
+		background: rgba(245, 158, 11, 0.14);
+		border: 1px solid rgba(245, 158, 11, 0.42);
+		color: #fbbf24;
+		transition: all 0.15s;
+	}
+	.summary-missable-btn:hover,
+	.summary-missable-btn.active {
+		background: rgba(245, 158, 11, 0.28);
+		border-color: rgba(245, 158, 11, 0.85);
+	}
+	.summary-tag-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 10px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 700;
+		cursor: pointer;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
+		transition: all 0.15s;
+	}
+	.summary-tag-pill strong {
+		font-size: 10.5px;
+	}
+
+	.tag-filter-pills {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+	.tag-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 11px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 700;
+		cursor: pointer;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
+		transition: all 0.15s;
+	}
+	.tag-pill:hover {
+		background: var(--surface-hover);
+		color: var(--text-primary);
+	}
+	.tag-pill.is-empty:not(.active) {
+		opacity: 0.52;
+	}
+	.tag-pill.active {
+		background: var(--accent, #c8a96e);
+		border-color: var(--accent, #c8a96e);
+		color: var(--accent-text);
+	}
+	.tag-pill-count {
+		font-size: 10px;
+		opacity: 0.85;
+	}
+
+	.ach-marker-badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 7px;
+		border-radius: 999px;
+		font-size: 9.5px;
+		font-weight: 800;
+		letter-spacing: 0.4px;
+		text-transform: uppercase;
+		flex-shrink: 0;
+		border: 1px solid var(--border-soft);
+	}
+	.ach-marker-badge[data-tag='missable'],
+	.summary-tag-pill[data-tag='missable'],
+	.tag-pill[data-tag='missable'].active,
+	.ach-tag-toggle[data-tag='missable'].active {
+		background: rgba(245, 158, 11, 0.16);
+		border-color: rgba(245, 158, 11, 0.55);
+		color: #fbbf24;
+	}
+	.ach-marker-badge[data-tag='multi'],
+	.summary-tag-pill[data-tag='multi'],
+	.tag-pill[data-tag='multi'].active,
+	.ach-tag-toggle[data-tag='multi'].active {
+		background: rgba(56, 189, 248, 0.15);
+		border-color: rgba(56, 189, 248, 0.52);
+		color: #38bdf8;
+	}
+	.ach-marker-badge[data-tag='ngplus'],
+	.summary-tag-pill[data-tag='ngplus'],
+	.tag-pill[data-tag='ngplus'].active,
+	.ach-tag-toggle[data-tag='ngplus'].active {
+		background: rgba(192, 132, 252, 0.15);
+		border-color: rgba(192, 132, 252, 0.52);
+		color: #c084fc;
+	}
+	.ach-marker-badge[data-tag='buggy'],
+	.summary-tag-pill[data-tag='buggy'],
+	.tag-pill[data-tag='buggy'].active,
+	.ach-tag-toggle[data-tag='buggy'].active {
+		background: rgba(248, 113, 113, 0.15);
+		border-color: rgba(248, 113, 113, 0.52);
+		color: #f87171;
+	}
+	.summary-tag-pill[data-tag].active {
+		box-shadow: 0 0 0 1px currentColor;
+	}
+
+	:global([data-theme='light']) .summary-missable-btn,
+	:global([data-theme='light']) .ach-marker-badge[data-tag='missable'],
+	:global([data-theme='light']) .summary-tag-pill[data-tag='missable'],
+	:global([data-theme='light']) .tag-pill[data-tag='missable'].active,
+	:global([data-theme='light']) .ach-tag-toggle[data-tag='missable'].active {
+		color: #b45309;
+	}
+	:global([data-theme='light']) .ach-marker-badge[data-tag='multi'],
+	:global([data-theme='light']) .summary-tag-pill[data-tag='multi'],
+	:global([data-theme='light']) .tag-pill[data-tag='multi'].active,
+	:global([data-theme='light']) .ach-tag-toggle[data-tag='multi'].active {
+		color: #0369a1;
+	}
+	:global([data-theme='light']) .ach-marker-badge[data-tag='ngplus'],
+	:global([data-theme='light']) .summary-tag-pill[data-tag='ngplus'],
+	:global([data-theme='light']) .tag-pill[data-tag='ngplus'].active,
+	:global([data-theme='light']) .ach-tag-toggle[data-tag='ngplus'].active {
+		color: #7e22ce;
+	}
+	:global([data-theme='light']) .ach-marker-badge[data-tag='buggy'],
+	:global([data-theme='light']) .summary-tag-pill[data-tag='buggy'],
+	:global([data-theme='light']) .tag-pill[data-tag='buggy'].active,
+	:global([data-theme='light']) .ach-tag-toggle[data-tag='buggy'].active {
+		color: #b91c1c;
+	}
+
+	.ach-note-preview {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		align-self: flex-start;
+		max-width: 100%;
+		padding: 3px 8px;
+		border-radius: 6px;
+		background: rgba(251, 191, 36, 0.1);
+		border: 1px solid rgba(251, 191, 36, 0.28);
+		color: #fbbf24;
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+		text-align: left;
+		transition: background 0.15s;
+	}
+	.ach-note-preview:hover {
+		background: rgba(251, 191, 36, 0.18);
+	}
+	.ach-note-preview svg {
+		flex-shrink: 0;
+	}
+	.ach-note-preview-text {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	:global([data-theme='light']) .ach-note-preview {
+		color: #b45309;
+		background: rgba(245, 158, 11, 0.12);
+		border-color: rgba(217, 119, 6, 0.32);
+	}
+
+	.ach-meta-editor-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 12px 16px;
+		border-top: 1px solid var(--border-soft);
+		background: var(--surface-2);
+		border-radius: 0 0 14px 14px;
+	}
+	.ach-tag-toggles {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.ach-meta-label {
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--text-secondary);
+		margin-right: 4px;
+	}
+	.ach-tag-toggle {
+		padding: 4px 10px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 700;
+		cursor: pointer;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		color: var(--text-secondary);
+		transition: all 0.15s;
+	}
+	.ach-tag-toggle:hover {
+		background: var(--surface-hover);
+		color: var(--text-primary);
+	}
+	.ach-note-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.ach-note-input {
+		flex: 1 1 240px;
+		min-width: 0;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		border-radius: 8px;
+		padding: 6px 10px;
+		color: var(--text-primary);
+		font-size: 12px;
+		outline: none;
+	}
+	.ach-note-input:focus {
+		border-color: var(--accent, #c8a96e);
+	}
+	.ach-clear-btn {
+		background: rgba(248, 113, 113, 0.14);
+		border: 1px solid rgba(248, 113, 113, 0.35);
+		color: #f87171;
+		border-radius: 6px;
+		padding: 5px 10px;
+		font-size: 11px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	:global([data-theme='light']) .ach-clear-btn {
+		color: #b91c1c;
+	}
+	.ach-hud-hint {
+		font-size: 10.5px;
+		color: var(--text-muted);
+	}
+
 	.tags-section {
 		display: flex;
 		align-items: center;
@@ -3238,7 +3880,7 @@
 		display: flex;
 		gap: 16px;
 		padding: 10px 16px;
-		height: 88px;
+		min-height: 88px;
 		box-sizing: border-box;
 		position: relative;
 	}
@@ -3281,7 +3923,8 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: space-between;
-		height: 68px;
+		min-height: 68px;
+		gap: 4px;
 	}
 	.ach-header-row {
 		display: flex;
@@ -3293,7 +3936,9 @@
 	.ach-title-wrap {
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
 		gap: 8px;
+		row-gap: 4px;
 		min-width: 0;
 		flex: 1;
 	}

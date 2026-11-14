@@ -1,11 +1,17 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { invoke } from '@tauri-apps/api/core';
 	import {
 		games,
 		loadGames,
 		getGameIconUrl,
 		getGameCompletionPct,
-		computeGameProgress
+		computeGameProgress,
+		computeRemainingCompletionistHours,
+		formatRemainingTimeHours,
+		type Game,
+		type HltbData
 	} from '$lib/stores/Games.js';
 	import { applyGameTheme, selectedGameId, toggleGameFavorite } from '$lib/stores/selectedGame.js';
 	import { settings } from '$lib/stores/settings.js';
@@ -13,8 +19,62 @@
 	import { gameFilters } from '$lib/stores/uiPreferences.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import type { Game } from '$lib/stores/Games.js';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+
+	let hltbMap = $state<Record<string, HltbData>>({});
+
+	onMount(() => {
+		let cancelled = false;
+
+		void (async () => {
+			let initialMap: Record<string, HltbData> = {};
+			try {
+				const cached = await invoke<Record<string, HltbData>>('get_cached_hltb_data');
+				if (cancelled) return;
+				if (cached && typeof cached === 'object') {
+					initialMap = cached;
+					hltbMap = cached;
+				}
+			} catch {
+				// Ignore cache load failure and still allow page to render
+			}
+
+			const missingCandidates = get(games)
+				.map((g) => {
+					const progress = computeGameProgress(g.achievements ?? [], g.achievement_groups);
+					return {
+						game: g,
+						totalCount: progress.totalBase,
+						isPlatinum: progress.isPlatinum,
+						progression: progress.platinumPct
+					};
+				})
+				.filter((item) => item.totalCount > 0 && !item.isPlatinum && !initialMap[item.game.id])
+				.sort((a, b) => b.progression - a.progression)
+				.slice(0, 25);
+
+			for (const item of missingCandidates) {
+				if (cancelled) return;
+				try {
+					const fetched = await invoke<HltbData>('get_hltb_data', {
+						gameId: item.game.id,
+						gameName: item.game.name,
+						forceRefresh: false
+					});
+					if (cancelled) return;
+					if (fetched) {
+						hltbMap = { ...hltbMap, [item.game.id]: fetched };
+					}
+				} catch {
+					// Skip individual HLTB lookup errors cleanly
+				}
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	async function autoGroup() {
 		try {
@@ -51,6 +111,7 @@
 		isPlatinum: boolean;
 		unlockedAll: number;
 		lastUnlockedTs: number;
+		remainingHours: number | null;
 	};
 
 	let gameStatsMap = $derived.by(() => {
@@ -63,11 +124,18 @@
 				const t = a.unlocked_time ?? 0;
 				if (t > lastUnlockedTs) lastUnlockedTs = t;
 			}
+			const remainingHours = progress.isPlatinum
+				? null
+				: computeRemainingCompletionistHours(
+						hltbMap[g.id]?.completionist_hours,
+						g.playtime_seconds ?? 0
+					);
 			map.set(g.id, {
 				completionPct: getGameCompletionPct(g),
 				isPlatinum: progress.isPlatinum,
 				unlockedAll: progress.unlockedAll,
-				lastUnlockedTs
+				lastUnlockedTs,
+				remainingHours
 			});
 		}
 		return map;
@@ -135,7 +203,13 @@
 		// Sort
 		result.sort((a, b) => {
 			let cmp = 0;
-			if (sortBy === 'name') {
+			if (sortBy === 'remaining_time') {
+				const remA = gameStatsMap.get(a.id)?.remainingHours ?? null;
+				const remB = gameStatsMap.get(b.id)?.remainingHours ?? null;
+				if (remA !== null && remB === null) return -1;
+				if (remA === null && remB !== null) return 1;
+				cmp = remA !== null && remB !== null ? remA - remB : a.name.localeCompare(b.name);
+			} else if (sortBy === 'name') {
 				cmp = a.name.localeCompare(b.name);
 			} else if (sortBy === 'completion') {
 				cmp =
@@ -227,6 +301,7 @@
 						<option value="date">{$i18n.t('games.sort.date')}</option>
 						<option value="completion">{$i18n.t('games.sort.completion')}</option>
 						<option value="exe_name">{$i18n.t('games.sort.exe')}</option>
+						<option value="remaining_time">{$i18n.t('objectives.sort.remainingTime')}</option>
 					</select>
 					<button
 						class="sort-order-btn"
@@ -328,10 +403,36 @@
 		{$i18n.t('games.results', { count: filteredGames.length })}
 	</div>
 
+	{#snippet remainingTimeBadge(hours: number, compact = false)}
+		<div class="card-remaining-time" class:compact>
+			<svg
+				width={compact ? 10 : 11}
+				height={compact ? 10 : 11}
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<circle cx="12" cy="12" r="9" />
+				<polyline points="12 7 12 12 15 14" />
+			</svg>
+			<span>
+				{$i18n.t('objectives.remainingTimeBadge', {
+					time: formatRemainingTimeHours(hours)
+				})}
+			</span>
+		</div>
+	{/snippet}
+
 	{#if $gameFilters.displayMode === 'grid'}
 		<div class="games-grid">
 			{#each filteredGames as game (game.id)}
-				{@const pct = gameStatsMap.get(game.id)?.completionPct ?? 0}
+				{@const stats = gameStatsMap.get(game.id)}
+				{@const pct = stats?.completionPct ?? 0}
+				{@const remainingHours = stats?.remainingHours ?? null}
 				<div class="game-card-container">
 					<div
 						class="game-card"
@@ -376,6 +477,9 @@
 									style:color={pct === 100 ? 'var(--completed)' : 'var(--accent)'}>{pct}%</span
 								>
 							</div>
+							{#if remainingHours !== null}
+								{@render remainingTimeBadge(remainingHours)}
+							{/if}
 							<div class="card-actions">
 								<button
 									class="action-btn theme-btn"
@@ -481,6 +585,7 @@
 				{@const stats = gameStatsMap.get(game.id)}
 				{@const pct = stats?.completionPct ?? 0}
 				{@const lastTs = stats?.lastUnlockedTs ?? 0}
+				{@const remainingHours = stats?.remainingHours ?? null}
 				<div
 					class="list-item"
 					class:selected={$selectedGameId === game.id}
@@ -523,6 +628,9 @@
 								>{pct}%</span
 							>
 						</div>
+						{#if remainingHours !== null}
+							{@render remainingTimeBadge(remainingHours, true)}
+						{/if}
 					</div>
 					<div class="col-date">
 						<span class="date-text">{formatDate(lastTs)}</span>
@@ -630,6 +738,7 @@
 							{@const stats = gameStatsMap.get(game.id)}
 							{@const pct = stats?.completionPct ?? 0}
 							{@const lastTs = stats?.lastUnlockedTs ?? 0}
+							{@const remainingHours = stats?.remainingHours ?? null}
 							<div class="timeline-item" class:selected={$selectedGameId === game.id}>
 								<div class="timeline-dot"></div>
 								<div
@@ -671,6 +780,9 @@
 												>{pct}%</span
 											>
 										</div>
+										{#if remainingHours !== null}
+											{@render remainingTimeBadge(remainingHours, true)}
+										{/if}
 									</div>
 									<div class="timeline-actions">
 										<button
@@ -1064,6 +1176,44 @@
 		min-width: 35px;
 		text-align: right;
 		font-variant-numeric: tabular-nums;
+	}
+
+	.card-remaining-time {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		align-self: flex-start;
+		max-width: 100%;
+		font-size: 11px;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+		color: var(--accent, #c8a96e);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 32%, transparent);
+		padding: 2px 8px;
+		border-radius: 999px;
+		line-height: 1.35;
+	}
+
+	.card-remaining-time svg {
+		flex-shrink: 0;
+	}
+
+	.card-remaining-time span {
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.card-remaining-time.compact {
+		margin-top: 4px;
+		font-size: 10.5px;
+		padding: 1px 7px;
+	}
+
+	.timeline-info .card-remaining-time.compact {
+		margin-top: 0;
 	}
 
 	.card-actions {

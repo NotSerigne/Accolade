@@ -11,13 +11,14 @@
 //! Results are cached per executable path, so the filesystem is only probed the
 //! first time a given executable is seen.
 
+use crate::achievements::models::{Achievement, Game};
 use crate::achievements::steam::is_valid_game_name;
-use crate::user_data::{load_user_data, save_user_data};
+use crate::user_data::{PlaySession, MIN_SESSION_DURATION_SECS};
 use crate::AppState;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{Emitter, Manager};
 
@@ -32,6 +33,7 @@ const MANIFEST_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub const RUNNING_GAME_EVENT: &str = "running-game-changed";
 pub const PLAYTIME_UPDATED_EVENT: &str = "playtime-updated";
+pub const PLAY_SESSION_RECORDED_EVENT: &str = "play-session-recorded";
 
 /// Processes that live next to a game (or in Steam) but are never the game itself.
 const IGNORED_PROCESS_NAMES: &[&str] = &[
@@ -614,40 +616,187 @@ impl Detector {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ActiveSession {
+    appid: u32,
+    game_id: String,
+    started_at: u64,
+    started_instant: Instant,
+    initial_unlocked_keys: HashSet<String>,
+    snapshot_resolved: bool,
+}
+
+fn current_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn find_game_index(games: &[Game], game_id: &str, app_id: u32) -> Option<usize> {
+    games
+        .iter()
+        .position(|g| g.id == game_id)
+        .or_else(|| games.iter().position(|g| app_id > 0 && g.steam_id == Some(app_id)))
+}
+
+fn is_achievement_unlocked(ach: &Achievement) -> bool {
+    ach.unlocked || ach.unlocked_time.is_some_and(|t| t > 0)
+}
+
+fn achievement_key(ach: &Achievement) -> &str {
+    let key = ach.key.trim();
+    if key.is_empty() {
+        ach.name.trim()
+    } else {
+        key
+    }
+}
+
+/// Returns deduplicated achievement keys unlocked during `[started_at, ended_at]`.
+/// When `baseline_known` is `true`, compares against `initial_unlocked_keys` or matches
+/// unlock timestamps inside the session window (with a 5-second clock-skew grace period);
+/// when `false`, only timestamped unlocks inside the window are included.
+fn collect_unlocked_during_session<'a>(
+    achievements: impl IntoIterator<Item = &'a Achievement>,
+    started_at: u64,
+    ended_at: u64,
+    initial_unlocked_keys: &HashSet<String>,
+    baseline_known: bool,
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut unlocked = Vec::new();
+    let window_end = ended_at.saturating_add(5);
+
+    for ach in achievements {
+        if !is_achievement_unlocked(ach) {
+            continue;
+        }
+        let raw_key = achievement_key(ach);
+        if raw_key.is_empty() {
+            continue;
+        }
+        let normalized = raw_key.to_lowercase();
+        let unlocked_in_window = ach
+            .unlocked_time
+            .is_some_and(|t| t > 0 && t >= started_at && t <= window_end);
+        let is_new_unlock = if baseline_known {
+            !initial_unlocked_keys.contains(&normalized) || unlocked_in_window
+        } else {
+            unlocked_in_window
+        };
+        if is_new_unlock && seen.insert(normalized) {
+            unlocked.push(raw_key.to_string());
+        }
+    }
+
+    unlocked
+}
+
+fn snapshot_unlocked_keys(
+    app: &tauri::AppHandle,
+    game_id: &str,
+    appid: u32,
+) -> Option<HashSet<String>> {
+    let state = app.state::<AppState>();
+    let games = state.games.lock().ok()?;
+    let idx = find_game_index(&games, game_id, appid)?;
+    let keys = games[idx]
+        .achievements
+        .iter()
+        .filter(|ach| is_achievement_unlocked(ach))
+        .map(|ach| achievement_key(ach).to_lowercase())
+        .filter(|k| !k.is_empty())
+        .collect();
+    Some(keys)
+}
+
+fn finalize_active_session(app: &tauri::AppHandle, session: ActiveSession) {
+    let duration_seconds = session.started_instant.elapsed().as_secs();
+    if duration_seconds < MIN_SESSION_DURATION_SECS {
+        return;
+    }
+
+    let ended_at = current_unix_secs();
+
+    // Read achievements and drop the `state.games` lock before reading/writing `user_data`.
+    let (resolved_game_id, unlocked_achievements) = app
+        .state::<AppState>()
+        .games
+        .lock()
+        .ok()
+        .and_then(|games| {
+            let idx = find_game_index(&games, &session.game_id, session.appid)?;
+            let game = &games[idx];
+            let unlocked = collect_unlocked_during_session(
+                &game.achievements,
+                session.started_at,
+                ended_at,
+                &session.initial_unlocked_keys,
+                session.snapshot_resolved,
+            );
+            Some((game.id.clone(), unlocked))
+        })
+        .unwrap_or_else(|| (session.game_id.clone(), Vec::new()));
+
+    let play_session = PlaySession {
+        appid: session.appid,
+        game_id: resolved_game_id,
+        started_at: session.started_at,
+        duration_seconds,
+        unlocked_achievements,
+    };
+
+    if let Err(err) = crate::user_data::update(app, |user_data| {
+        user_data.play_sessions.push(play_session.clone());
+        Ok(())
+    }) {
+        log::warn!("[game-detector] Failed to save play session: {}", err);
+    }
+
+    if let Err(err) = app.emit(PLAY_SESSION_RECORDED_EVENT, &play_session) {
+        log::warn!("[game-detector] Failed to emit play session event: {}", err);
+    }
+}
+
 fn flush_playtime(app_handle: &tauri::AppHandle, game_id: &str, app_id: u32, delta_secs: u64) {
     if delta_secs == 0 {
         return;
     }
-    let mut user_data = load_user_data(app_handle);
-    let mut in_mem_total = 0u64;
+
+    let in_mem_total = app_handle
+        .state::<AppState>()
+        .games
+        .lock()
+        .ok()
+        .and_then(|mut games| {
+            let idx = find_game_index(&games, game_id, app_id)?;
+            games[idx].playtime_seconds = games[idx].playtime_seconds.saturating_add(delta_secs);
+            Some(games[idx].playtime_seconds)
+        })
+        .unwrap_or(0);
+
+    let total = match crate::user_data::update(app_handle, |user_data| {
+        let entry = user_data
+            .playtime_seconds
+            .entry(game_id.to_string())
+            .or_insert(0);
+        *entry = entry.saturating_add(delta_secs).max(in_mem_total);
+        Ok(*entry)
+    }) {
+        Ok(total) => total,
+        Err(err) => {
+            log::warn!("[game-detector] Failed to flush playtime: {}", err);
+            return;
+        }
+    };
 
     if let Ok(mut games) = app_handle.state::<AppState>().games.lock() {
-        if let Some(g) = games
-            .iter_mut()
-            .find(|g| g.id == game_id || g.steam_id == Some(app_id))
-        {
-            g.playtime_seconds = g.playtime_seconds.saturating_add(delta_secs);
-            in_mem_total = g.playtime_seconds;
+        if let Some(idx) = find_game_index(&games, game_id, app_id) {
+            games[idx].playtime_seconds = total;
         }
     }
 
-    let entry = user_data
-        .playtime_seconds
-        .entry(game_id.to_string())
-        .or_insert(0);
-    *entry = entry.saturating_add(delta_secs).max(in_mem_total);
-    let total = *entry;
-
-    if let Ok(mut games) = app_handle.state::<AppState>().games.lock() {
-        if let Some(g) = games
-            .iter_mut()
-            .find(|g| g.id == game_id || g.steam_id == Some(app_id))
-        {
-            g.playtime_seconds = total;
-        }
-    }
-
-    let _ = save_user_data(app_handle, &user_data);
     let _ = app_handle.emit(
         PLAYTIME_UPDATED_EVENT,
         serde_json::json!({
@@ -663,6 +812,7 @@ pub fn start(app_handle: tauri::AppHandle) {
         let mut last_tick = Instant::now();
         let mut unsaved_secs = 0u64;
         let mut active_game_key: Option<(String, u32)> = None;
+        let mut active_session: Option<ActiveSession> = None;
 
         loop {
             let elapsed = last_tick.elapsed().as_secs();
@@ -677,32 +827,51 @@ pub fn start(app_handle: tauri::AppHandle) {
             }
 
             if let Some(next) = detector.scan(&app_handle) {
-                // Flush any remaining seconds for the previous running game before switching
-                if let Some((ref prev_id, prev_appid)) = active_game_key {
-                    if unsaved_secs > 0 {
-                        flush_playtime(&app_handle, prev_id, prev_appid, unsaved_secs);
-                        unsaved_secs = 0;
-                    }
-                }
+                let next_key = next.as_ref().map(|game| {
+                    let gid = game
+                        .game_id
+                        .clone()
+                        .unwrap_or_else(|| format!("steam_{}", game.app_id));
+                    (gid, game.app_id)
+                });
 
-                match &next {
-                    Some(game) => {
-                        log::info!(
-                            "[game-detector] Running: '{}' (AppID {}, pid {}, via {})",
-                            game.name,
-                            game.app_id,
-                            game.pid,
-                            game.detected_via
-                        );
-                        let gid = game
-                            .game_id
-                            .clone()
-                            .unwrap_or_else(|| format!("steam_{}", game.app_id));
-                        active_game_key = Some((gid, game.app_id));
+                if next_key != active_game_key {
+                    // Flush remaining seconds and finalize the previous session before switching.
+                    if let Some((ref prev_id, prev_appid)) = active_game_key {
+                        if unsaved_secs > 0 {
+                            flush_playtime(&app_handle, prev_id, prev_appid, unsaved_secs);
+                            unsaved_secs = 0;
+                        }
                     }
-                    None => {
-                        log::info!("[game-detector] No game running");
-                        active_game_key = None;
+                    if let Some(prev_session) = active_session.take() {
+                        finalize_active_session(&app_handle, prev_session);
+                    }
+
+                    match (&next, next_key) {
+                        (Some(game), Some((gid, app_id))) => {
+                            log::info!(
+                                "[game-detector] Running: '{}' (AppID {}, pid {}, via {})",
+                                game.name,
+                                game.app_id,
+                                game.pid,
+                                game.detected_via
+                            );
+                            let snapshot = snapshot_unlocked_keys(&app_handle, &gid, app_id);
+                            let snapshot_resolved = snapshot.is_some();
+                            active_session = Some(ActiveSession {
+                                appid: app_id,
+                                game_id: gid.clone(),
+                                started_at: current_unix_secs(),
+                                started_instant: Instant::now(),
+                                initial_unlocked_keys: snapshot.unwrap_or_default(),
+                                snapshot_resolved,
+                            });
+                            active_game_key = Some((gid, app_id));
+                        }
+                        _ => {
+                            log::info!("[game-detector] No game running");
+                            active_game_key = None;
+                        }
                     }
                 }
                 if let Ok(mut current) = app_handle.state::<AppState>().running_game.lock() {
@@ -710,6 +879,18 @@ pub fn start(app_handle: tauri::AppHandle) {
                 }
                 let _ = app_handle.emit(RUNNING_GAME_EVENT, &next);
             }
+
+            if let Some(ref mut session) = active_session {
+                if !session.snapshot_resolved {
+                    if let Some(keys) =
+                        snapshot_unlocked_keys(&app_handle, &session.game_id, session.appid)
+                    {
+                        session.initial_unlocked_keys = keys;
+                        session.snapshot_resolved = true;
+                    }
+                }
+            }
+
             std::thread::sleep(SCAN_INTERVAL);
         }
     });
@@ -865,5 +1046,107 @@ mod tests {
             &win
         ));
         assert!(!is_ignored_exe(Path::new("E:\\Jeux\\JWE3\\JWE3.exe"), &win));
+    }
+
+    fn make_test_ach(key: &str, name: &str, unlocked: bool, unlocked_time: Option<u64>) -> Achievement {
+        Achievement {
+            key: key.to_string(),
+            name: name.to_string(),
+            unlocked,
+            unlocked_time,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn collects_unlocked_achievements_by_key_diff_and_timestamp_window() {
+        let initial: HashSet<String> = ["ach_old", "ach_reunlocked", "ach_after"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+
+        let started_at = 1_000;
+        let ended_at = 1_200;
+
+        let achievements = vec![
+            // Locked achievement (including Steam's Some(0) placeholder) -> ignored
+            make_test_ach("ACH_LOCKED", "Locked", false, Some(0)),
+            // Pre-existing unlock outside window -> ignored
+            make_test_ach("ACH_OLD", "Old", true, Some(900)),
+            // New unlock without timestamp (key diff) -> collected
+            make_test_ach("ACH_NEW_NO_TS", "New No TS", true, None),
+            // Pre-existing key whose unlock timestamp falls within [started_at, ended_at + 5] -> collected
+            make_test_ach("ACH_REUNLOCKED", "Reunlocked", true, Some(1_204)),
+            // Pre-existing key unlocked after grace window -> ignored
+            make_test_ach("ACH_AFTER", "After", true, Some(1_206)),
+            // Duplicate (different casing) -> deduplicated preserving first occurrence
+            make_test_ach("ach_new_no_ts", "New No TS", true, Some(1_050)),
+            // Fallback to name when key is empty
+            make_test_ach("  ", "ACH_FALLBACK_NAME", true, Some(1_100)),
+        ];
+
+        let collected = collect_unlocked_during_session(
+            &achievements,
+            started_at,
+            ended_at,
+            &initial,
+            true,
+        );
+        assert_eq!(
+            collected,
+            vec!["ACH_NEW_NO_TS", "ACH_REUNLOCKED", "ACH_FALLBACK_NAME"]
+        );
+    }
+
+    #[test]
+    fn unknown_baseline_ignores_untimestamped_and_catches_in_window_unlocks() {
+        let initial = HashSet::new();
+        let started_at = 1_000;
+        let ended_at = 1_200;
+
+        let achievements = vec![
+            // Pre-existing unlock without timestamp or with Some(0) -> ignored
+            make_test_ach("ACH_PRE_NONE", "Pre None", true, None),
+            make_test_ach("ACH_PRE_ZERO", "Pre Zero", true, Some(0)),
+            // Pre-existing unlock before session -> ignored
+            make_test_ach("ACH_PRE_OLD", "Pre Old", true, Some(999)),
+            // Unlocked during session -> collected
+            make_test_ach("ACH_SESSION_START", "Start", true, Some(1_000)),
+            make_test_ach("ACH_SESSION_GRACE", "Grace", true, Some(1_205)),
+            // Unlocked after grace period -> ignored
+            make_test_ach("ACH_AFTER_GRACE", "After", true, Some(1_206)),
+        ];
+
+        let collected = collect_unlocked_during_session(
+            &achievements,
+            started_at,
+            ended_at,
+            &initial,
+            false,
+        );
+        assert_eq!(
+            collected,
+            vec!["ACH_SESSION_START", "ACH_SESSION_GRACE"]
+        );
+    }
+
+    #[test]
+    fn find_game_index_prefers_exact_game_id_over_steam_id_fallback() {
+        let games = vec![
+            Game {
+                id: "goldberg_500".to_string(),
+                steam_id: Some(500),
+                ..Default::default()
+            },
+            Game {
+                id: "steam_500".to_string(),
+                steam_id: Some(500),
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(find_game_index(&games, "steam_500", 500), Some(1));
+        assert_eq!(find_game_index(&games, "unknown_500", 500), Some(0));
+        assert_eq!(find_game_index(&games, "unknown_999", 999), None);
     }
 }

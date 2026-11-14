@@ -1,17 +1,57 @@
 <script lang="ts">
 	// src/routes/(app)/stats/+page.svelte
+	import { onDestroy, onMount, tick } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import {
 		games,
 		computeGameProgress,
 		getGameCompletionPct,
+		getGameIconUrl,
+		getRarityPalette,
 		totalUnlockedAchievements,
+		totalCompletedGames,
 		totalPlaytimeSeconds,
 		formatPlaytime,
 		profileRank,
-		type Achievement
+		type Achievement,
+		type Game,
+		type GameProgressSummary
 	} from '$lib/stores/Games.js';
-	import { SvelteDate, SvelteMap } from 'svelte/reactivity';
+	import { steamUser } from '$lib/stores/user.js';
+	import { settings } from '$lib/stores/settings.js';
+	import { settingsOpen } from '$lib/stores/ui.js';
+	import { SvelteDate, SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { i18n } from '$lib/stores/i18n.js';
+
+	interface ShowcaseAchievementRef {
+		game_id: string;
+		ach_key: string;
+	}
+
+	interface ProfileShowcase {
+		games: string[];
+		achievements: ShowcaseAchievementRef[];
+	}
+
+	interface ShowcaseGameItem {
+		game: Game;
+		progress: GameProgressSummary;
+	}
+
+	interface ShowcaseAchievementItem {
+		game: Game;
+		ach: Achievement;
+		achKey: string;
+		rarityValue: number;
+	}
+
+	type ShowcasePickerState = {
+		kind: 'game' | 'achievement';
+		slotIndex: number;
+	} | null;
+
+	const SHOWCASE_SLOTS = [0, 1, 2] as const;
+	const MAX_PICKER_ACHIEVEMENTS = 150;
 
 	let activeTab = $state('overview');
 
@@ -485,7 +525,1017 @@
 	function hideTooltip() {
 		tooltip.show = false;
 	}
+
+	let profileShowcase = $state<ProfileShowcase>({ games: [], achievements: [] });
+	let hasUserMutatedShowcase = false;
+	let showcaseSaving = $state(false);
+	let isExportingPng = $state(false);
+	let showcaseToast = $state('');
+	let showcaseToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	let pickerState = $state<ShowcasePickerState>(null);
+	let pickerSearch = $state('');
+	let pickerModalEl: HTMLDivElement | undefined = $state();
+	let pickerSearchInputEl: HTMLInputElement | undefined = $state();
+	let lastPickerTriggerEl: HTMLElement | null = null;
+	const failedImages = new SvelteSet<string>();
+
+	function normalizeShowcase(raw: Partial<ProfileShowcase> | null | undefined): ProfileShowcase {
+		const gamesList: string[] = [];
+		const seenGames = new SvelteSet<string>();
+		for (const rawId of raw?.games ?? []) {
+			const id = typeof rawId === 'string' ? rawId.trim() : '';
+			if (!id || seenGames.has(id)) continue;
+			seenGames.add(id);
+			gamesList.push(id);
+			if (gamesList.length >= 3) break;
+		}
+
+		const achList: ShowcaseAchievementRef[] = [];
+		const seenAchs = new SvelteSet<string>();
+		for (const item of raw?.achievements ?? []) {
+			const gameId = typeof item?.game_id === 'string' ? item.game_id.trim() : '';
+			const achKey = typeof item?.ach_key === 'string' ? item.ach_key.trim() : '';
+			if (!gameId || !achKey) continue;
+			const dedupKey = `${gameId}:${achKey.toLowerCase()}`;
+			if (seenAchs.has(dedupKey)) continue;
+			seenAchs.add(dedupKey);
+			achList.push({ game_id: gameId, ach_key: achKey });
+			if (achList.length >= 3) break;
+		}
+
+		return { games: gamesList, achievements: achList };
+	}
+
+	onMount(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const loaded = await invoke<ProfileShowcase>('get_profile_showcase');
+				if (cancelled || hasUserMutatedShowcase) return;
+				profileShowcase = normalizeShowcase(loaded);
+			} catch (err) {
+				console.error('Failed to load profile showcase:', err);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	onDestroy(() => {
+		if (showcaseToastTimer !== null) {
+			clearTimeout(showcaseToastTimer);
+			showcaseToastTimer = null;
+		}
+	});
+
+	function showShowcaseToast(message: string) {
+		showcaseToast = message;
+		if (showcaseToastTimer !== null) {
+			clearTimeout(showcaseToastTimer);
+		}
+		showcaseToastTimer = setTimeout(() => {
+			showcaseToast = '';
+			showcaseToastTimer = null;
+		}, 3500);
+	}
+
+	function parseRarityValue(raw?: string | null): number {
+		const n = parseFloat(raw ?? '');
+		return Number.isFinite(n) && n > 0 ? n : 100;
+	}
+
+	function formatRarityPct(raw?: string | null): string {
+		const n = parseFloat(raw ?? '');
+		if (!Number.isFinite(n) || n <= 0) return '—';
+		return n < 0.1 ? `${n.toFixed(2)}%` : `${n.toFixed(1)}%`;
+	}
+
+	function getInitials(label: string): string {
+		const words = label
+			.trim()
+			.split(/\s+/)
+			.filter(Boolean);
+		if (words.length === 0) return '?';
+		if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+		return `${words[0][0]}${words[1][0]}`.toUpperCase();
+	}
+
+	function getGameThumbCandidates(game: Game): string[] {
+		const raw = [
+			game.steamgrid_icon_url?.trim(),
+			game.game_icon?.trim() ? getGameIconUrl(game) : '',
+			game.header_image_url?.trim(),
+			game.steam_id
+				? `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`
+				: ''
+		].filter((u): u is string => Boolean(u));
+		return [...new Set(raw)];
+	}
+
+	function getGameCardCandidates(game: Game): string[] {
+		const raw = [
+			game.header_image_url?.trim(),
+			game.steam_id
+				? `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_id}/header.jpg`
+				: '',
+			getGameIconUrl(game)
+		].filter((u): u is string => Boolean(u));
+		return [...new Set(raw)];
+	}
+
+	function getBestGameImage(game: Game): string | null {
+		for (const url of getGameThumbCandidates(game)) {
+			if (!failedImages.has(url)) return url;
+		}
+		return null;
+	}
+
+	let platinumGameItems = $derived.by<ShowcaseGameItem[]>(() =>
+		gameProgressList
+			.filter((item) => item.progress.isPlatinum)
+			.sort((a, b) => a.game.name.localeCompare(b.game.name))
+	);
+
+	let unlockedAchievementsByRarity = $derived.by<ShowcaseAchievementItem[]>(() => {
+		const seen = new SvelteSet<string>();
+		const items: ShowcaseAchievementItem[] = [];
+		for (const { game, progress } of gameProgressList) {
+			for (const section of progress.sections) {
+				for (const ach of section.achievements) {
+					if (!ach.unlocked) continue;
+					const achKey = (ach.key || ach.name).trim();
+					if (!achKey) continue;
+					const dedupId = `${game.id}:${achKey.toLowerCase()}`;
+					if (seen.has(dedupId)) continue;
+					seen.add(dedupId);
+					items.push({
+						game,
+						ach,
+						achKey,
+						rarityValue: parseRarityValue(ach.completionpercentage)
+					});
+				}
+			}
+		}
+		return items.sort((a, b) => {
+			if (a.rarityValue !== b.rarityValue) return a.rarityValue - b.rarityValue;
+			return (b.ach.unlocked_time ?? 0) - (a.ach.unlocked_time ?? 0);
+		});
+	});
+
+	let validShowcaseGames = $derived.by<ShowcaseGameItem[]>(() => {
+		const byId = new Map(platinumGameItems.map((item) => [item.game.id, item]));
+		const resolved: ShowcaseGameItem[] = [];
+		for (const gameId of profileShowcase.games) {
+			const match = byId.get(gameId);
+			if (match) resolved.push(match);
+			if (resolved.length >= 3) break;
+		}
+		return resolved;
+	});
+
+	let validShowcaseAchievements = $derived.by<ShowcaseAchievementItem[]>(() => {
+		const byGameId = new Map(gameProgressList.map((entry) => [entry.game.id, entry]));
+		const resolved: ShowcaseAchievementItem[] = [];
+		const seen = new SvelteSet<string>();
+
+		for (const ref of profileShowcase.achievements) {
+			const entry = byGameId.get(ref.game_id);
+			if (!entry) continue;
+			const targetKey = ref.ach_key.trim().toLowerCase();
+			if (!targetKey) continue;
+
+			const sectionPool = entry.progress.sections.flatMap((s) => s.achievements);
+			const matchAch =
+				sectionPool.find(
+					(a) =>
+						a.unlocked &&
+						((a.key || a.name).toLowerCase() === targetKey || a.name.toLowerCase() === targetKey)
+				) ??
+				(entry.game.achievements ?? []).find(
+					(a) =>
+						a.unlocked &&
+						((a.key || a.name).toLowerCase() === targetKey || a.name.toLowerCase() === targetKey)
+				);
+
+			if (!matchAch) continue;
+			const achKey = matchAch.key || matchAch.name;
+			const dedupKey = `${entry.game.id}:${achKey.toLowerCase()}`;
+			if (seen.has(dedupKey)) continue;
+			seen.add(dedupKey);
+
+			resolved.push({
+				game: entry.game,
+				ach: matchAch,
+				achKey,
+				rarityValue: parseRarityValue(matchAch.completionpercentage)
+			});
+			if (resolved.length >= 3) break;
+		}
+
+		return resolved;
+	});
+
+	let filteredPickerGames = $derived.by(() => {
+		const query = pickerSearch.trim().toLowerCase();
+		if (!query) return platinumGameItems;
+		return platinumGameItems.filter((item) => item.game.name.toLowerCase().includes(query));
+	});
+
+	let filteredPickerAchievementsAll = $derived.by(() => {
+		const query = pickerSearch.trim().toLowerCase();
+		if (!query) return unlockedAchievementsByRarity;
+		return unlockedAchievementsByRarity.filter(
+			(item) =>
+				item.ach.name.toLowerCase().includes(query) ||
+				item.game.name.toLowerCase().includes(query) ||
+				(item.ach.desc && item.ach.desc.toLowerCase().includes(query))
+		);
+	});
+
+	let filteredPickerAchievements = $derived(
+		filteredPickerAchievementsAll.slice(0, MAX_PICKER_ACHIEVEMENTS)
+	);
+
+	function isSameAchRef(a: ShowcaseAchievementRef, gameId: string, achKey: string): boolean {
+		return a.game_id === gameId && a.ach_key.toLowerCase() === achKey.toLowerCase();
+	}
+
+	async function persistShowcase(next: ProfileShowcase) {
+		hasUserMutatedShowcase = true;
+		const normalized = normalizeShowcase(next);
+		profileShowcase = normalized;
+		showcaseSaving = true;
+		try {
+			const saved = await invoke<ProfileShowcase>('set_profile_showcase', { showcase: normalized });
+			profileShowcase = normalizeShowcase(saved);
+		} catch (err) {
+			console.error('Failed to save profile showcase:', err);
+		} finally {
+			showcaseSaving = false;
+		}
+	}
+
+	function openGamePicker(slotIndex: number) {
+		lastPickerTriggerEl =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		pickerSearch = '';
+		pickerState = { kind: 'game', slotIndex };
+		void tick().then(() => {
+			if (pickerSearchInputEl) pickerSearchInputEl.focus();
+			else pickerModalEl?.focus();
+		});
+	}
+
+	function openAchPicker(slotIndex: number) {
+		lastPickerTriggerEl =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		pickerSearch = '';
+		pickerState = { kind: 'achievement', slotIndex };
+		void tick().then(() => {
+			if (pickerSearchInputEl) pickerSearchInputEl.focus();
+			else pickerModalEl?.focus();
+		});
+	}
+
+	function closePicker() {
+		pickerState = null;
+		pickerSearch = '';
+		const trigger = lastPickerTriggerEl;
+		lastPickerTriggerEl = null;
+		void tick().then(() => {
+			trigger?.focus();
+		});
+	}
+
+	function handleWindowKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && pickerState && !$settingsOpen) {
+			event.preventDefault();
+			closePicker();
+		}
+	}
+
+	async function selectGameForSlot(gameId: string) {
+		if (!pickerState || pickerState.kind !== 'game') return;
+		const slotIndex = pickerState.slotIndex;
+		const currentIds = validShowcaseGames.map((item) => item.game.id);
+		const filteredOther = currentIds.filter((id, idx) => idx === slotIndex || id !== gameId);
+		const nextIds = [...filteredOther];
+		if (slotIndex < nextIds.length) {
+			nextIds[slotIndex] = gameId;
+		} else {
+			nextIds.push(gameId);
+		}
+		const currentAchs: ShowcaseAchievementRef[] = validShowcaseAchievements.map((item) => ({
+			game_id: item.game.id,
+			ach_key: item.achKey
+		}));
+		closePicker();
+		await persistShowcase({ games: nextIds, achievements: currentAchs });
+	}
+
+	async function removeGameSlot(slotIndex: number) {
+		const nextIds = validShowcaseGames
+			.filter((_, idx) => idx !== slotIndex)
+			.map((item) => item.game.id);
+		const currentAchs: ShowcaseAchievementRef[] = validShowcaseAchievements.map((item) => ({
+			game_id: item.game.id,
+			ach_key: item.achKey
+		}));
+		await persistShowcase({ games: nextIds, achievements: currentAchs });
+	}
+
+	async function selectAchForSlot(item: ShowcaseAchievementItem) {
+		if (!pickerState || pickerState.kind !== 'achievement') return;
+		const slotIndex = pickerState.slotIndex;
+		const currentIds = validShowcaseGames.map((g) => g.game.id);
+		const newRef: ShowcaseAchievementRef = {
+			game_id: item.game.id,
+			ach_key: item.achKey
+		};
+		const currentAchs: ShowcaseAchievementRef[] = validShowcaseAchievements.map((entry) => ({
+			game_id: entry.game.id,
+			ach_key: entry.achKey
+		}));
+		const nextAchs = currentAchs.filter(
+			(ref, idx) => idx === slotIndex || !isSameAchRef(ref, newRef.game_id, newRef.ach_key)
+		);
+		if (slotIndex < nextAchs.length) {
+			nextAchs[slotIndex] = newRef;
+		} else {
+			nextAchs.push(newRef);
+		}
+		closePicker();
+		await persistShowcase({ games: currentIds, achievements: nextAchs });
+	}
+
+	async function removeAchSlot(slotIndex: number) {
+		const currentIds = validShowcaseGames.map((g) => g.game.id);
+		const nextAchs: ShowcaseAchievementRef[] = validShowcaseAchievements
+			.filter((_, idx) => idx !== slotIndex)
+			.map((item) => ({ game_id: item.game.id, ach_key: item.achKey }));
+		await persistShowcase({ games: currentIds, achievements: nextAchs });
+	}
+
+	async function autoFillShowcase() {
+		const sortedPlatinums = [...platinumGameItems].sort(
+			(a, b) =>
+				b.progress.totalBase - a.progress.totalBase ||
+				b.progress.unlockedAll - a.progress.unlockedAll ||
+				(b.game.playtime_seconds ?? 0) - (a.game.playtime_seconds ?? 0)
+		);
+
+		const bothFull = validShowcaseGames.length >= 3 && validShowcaseAchievements.length >= 3;
+
+		let nextGameIds: string[];
+		if (bothFull || validShowcaseGames.length === 0) {
+			nextGameIds = sortedPlatinums.slice(0, 3).map((item) => item.game.id);
+		} else {
+			nextGameIds = validShowcaseGames.map((item) => item.game.id);
+			const existingIds = new SvelteSet(nextGameIds);
+			for (const item of sortedPlatinums) {
+				if (nextGameIds.length >= 3) break;
+				if (!existingIds.has(item.game.id)) {
+					nextGameIds.push(item.game.id);
+					existingIds.add(item.game.id);
+				}
+			}
+		}
+
+		let nextAchs: ShowcaseAchievementRef[];
+		if (bothFull || validShowcaseAchievements.length === 0) {
+			nextAchs = unlockedAchievementsByRarity.slice(0, 3).map((item) => ({
+				game_id: item.game.id,
+				ach_key: item.achKey
+			}));
+		} else {
+			nextAchs = validShowcaseAchievements.map((item) => ({
+				game_id: item.game.id,
+				ach_key: item.achKey
+			}));
+			for (const item of unlockedAchievementsByRarity) {
+				if (nextAchs.length >= 3) break;
+				if (!nextAchs.some((ref) => isSameAchRef(ref, item.game.id, item.achKey))) {
+					nextAchs.push({ game_id: item.game.id, ach_key: item.achKey });
+				}
+			}
+		}
+
+		await persistShowcase({ games: nextGameIds, achievements: nextAchs });
+	}
+
+	function loadImg(src: string): Promise<HTMLImageElement | null> {
+		return new Promise((resolve) => {
+			if (!src) return resolve(null);
+			let settled = false;
+			const img = new Image();
+			const timer = setTimeout(() => {
+				if (settled) return;
+				settled = true;
+				resolve(null);
+			}, 5000);
+			img.crossOrigin = 'anonymous';
+			img.onload = () => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				resolve(img);
+			};
+			img.onerror = () => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				resolve(null);
+			};
+			img.src = src;
+		});
+	}
+
+	async function loadFirstAvailableImg(urls: readonly string[]): Promise<HTMLImageElement | null> {
+		for (const url of urls) {
+			const img = await loadImg(url);
+			if (img) return img;
+		}
+		return null;
+	}
+
+	function drawRoundedRect(
+		ctx: CanvasRenderingContext2D,
+		x: number,
+		y: number,
+		w: number,
+		h: number,
+		r: number
+	) {
+		ctx.beginPath();
+		ctx.roundRect(x, y, w, h, r);
+	}
+
+	function drawImageCover(
+		ctx: CanvasRenderingContext2D,
+		img: HTMLImageElement,
+		x: number,
+		y: number,
+		w: number,
+		h: number
+	) {
+		const scale = Math.max(w / img.width, h / img.height);
+		const dw = img.width * scale;
+		const dh = img.height * scale;
+		ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+	}
+
+	function truncateCanvasText(
+		ctx: CanvasRenderingContext2D,
+		text: string,
+		maxWidth: number
+	): string {
+		if (!text) return '';
+		if (ctx.measureText(text).width <= maxWidth) return text;
+		const ellipsis = '…';
+		let low = 0;
+		let high = text.length;
+		while (low < high) {
+			const mid = Math.ceil((low + high) / 2);
+			const candidate = text.slice(0, mid).trimEnd() + ellipsis;
+			if (ctx.measureText(candidate).width <= maxWidth) {
+				low = mid;
+			} else {
+				high = mid - 1;
+			}
+		}
+		return text.slice(0, low).trimEnd() + ellipsis;
+	}
+
+	async function exportGlobalProfileCard() {
+		if (isExportingPng) return;
+		isExportingPng = true;
+
+		try {
+			const W = 1280;
+			const H = 720;
+			const canvas = document.createElement('canvas');
+			canvas.width = W;
+			canvas.height = H;
+			const ctx = canvas.getContext('2d');
+			if (!ctx) return;
+
+			const showcaseGames = validShowcaseGames.slice(0, 3);
+			const showcaseAchs = validShowcaseAchievements.slice(0, 3);
+
+			const [avatarImg, gameImgs, achImgs] = await Promise.all([
+				$steamUser?.avatarfull ? loadImg($steamUser.avatarfull) : Promise.resolve(null),
+				Promise.all(showcaseGames.map((item) => loadFirstAvailableImg(getGameCardCandidates(item.game)))),
+				Promise.all(showcaseAchs.map((item) => loadImg(item.ach.icon)))
+			]);
+
+			// Background base gradient
+			const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+			bgGrad.addColorStop(0, '#0b0d12');
+			bgGrad.addColorStop(0.5, '#12151f');
+			bgGrad.addColorStop(1, '#0c0e14');
+			ctx.fillStyle = bgGrad;
+			ctx.fillRect(0, 0, W, H);
+
+			// Ambient radial glows
+			const goldGlow = ctx.createRadialGradient(180, 110, 10, 180, 110, 520);
+			goldGlow.addColorStop(0, 'rgba(200, 169, 110, 0.16)');
+			goldGlow.addColorStop(1, 'rgba(200, 169, 110, 0)');
+			ctx.fillStyle = goldGlow;
+			ctx.fillRect(0, 0, W, H);
+
+			const coolGlow = ctx.createRadialGradient(1120, 620, 10, 1120, 620, 460);
+			coolGlow.addColorStop(0, 'rgba(78, 168, 222, 0.1)');
+			coolGlow.addColorStop(1, 'rgba(78, 168, 222, 0)');
+			ctx.fillStyle = coolGlow;
+			ctx.fillRect(0, 0, W, H);
+
+			// Outer Accolade glassmorphic gold-bordered card
+			ctx.save();
+			ctx.fillStyle = 'rgba(18, 20, 27, 0.84)';
+			ctx.strokeStyle = 'rgba(200, 169, 110, 0.42)';
+			ctx.lineWidth = 2;
+			drawRoundedRect(ctx, 24, 24, W - 48, H - 48, 24);
+			ctx.fill();
+			ctx.stroke();
+
+			ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+			ctx.lineWidth = 1;
+			drawRoundedRect(ctx, 27, 27, W - 54, H - 54, 21);
+			ctx.stroke();
+			ctx.restore();
+
+			// Player Header Panel
+			const hx = 52;
+			const hy = 48;
+			const hw = W - 104;
+			const hh = 132;
+			ctx.save();
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.035)';
+			ctx.strokeStyle = 'rgba(200, 169, 110, 0.28)';
+			ctx.lineWidth = 1.5;
+			drawRoundedRect(ctx, hx, hy, hw, hh, 18);
+			ctx.fill();
+			ctx.stroke();
+			ctx.restore();
+
+			const username =
+				$steamUser?.personaname || $settings.raUsername || $i18n.t('settings.unknownPlayer');
+			const avatarCx = hx + 66;
+			const avatarCy = hy + hh / 2;
+			const avatarR = 42;
+
+			// Avatar circular clip + gold ring
+			ctx.save();
+			ctx.beginPath();
+			ctx.arc(avatarCx, avatarCy, avatarR + 4, 0, Math.PI * 2);
+			ctx.strokeStyle = '#c8a96e';
+			ctx.lineWidth = 3;
+			ctx.stroke();
+
+			ctx.beginPath();
+			ctx.arc(avatarCx, avatarCy, avatarR, 0, Math.PI * 2);
+			ctx.clip();
+			if (avatarImg) {
+				drawImageCover(
+					ctx,
+					avatarImg,
+					avatarCx - avatarR,
+					avatarCy - avatarR,
+					avatarR * 2,
+					avatarR * 2
+				);
+			} else {
+				const fallbackGrad = ctx.createLinearGradient(
+					avatarCx - avatarR,
+					avatarCy - avatarR,
+					avatarCx + avatarR,
+					avatarCy + avatarR
+				);
+				fallbackGrad.addColorStop(0, '#2b2418');
+				fallbackGrad.addColorStop(1, '#181a22');
+				ctx.fillStyle = fallbackGrad;
+				ctx.fillRect(avatarCx - avatarR, avatarCy - avatarR, avatarR * 2, avatarR * 2);
+				ctx.fillStyle = '#e7c98a';
+				ctx.font = '800 30px "Segoe UI", system-ui, sans-serif';
+				ctx.textAlign = 'center';
+				ctx.textBaseline = 'middle';
+				ctx.fillText(getInitials(username).slice(0, 1), avatarCx, avatarCy + 1);
+			}
+			ctx.restore();
+
+			// Username & Level badge
+			const infoX = hx + 132;
+			ctx.textAlign = 'left';
+			ctx.textBaseline = 'alphabetic';
+			ctx.font = '800 28px "Segoe UI", system-ui, sans-serif';
+			const displayName = truncateCanvasText(ctx, username, 460);
+			ctx.fillStyle = '#ffffff';
+			ctx.fillText(displayName, infoX, hy + 46);
+
+			const nameW = ctx.measureText(displayName).width;
+			const levelLabel = $i18n.t('stats.showcase.cardLevel', { level: $profileRank.level });
+			ctx.font = '800 13px "Segoe UI", system-ui, sans-serif';
+			const lvlTextW = ctx.measureText(levelLabel).width;
+			const lvlPillX = infoX + nameW + 16;
+			const lvlPillY = hy + 24;
+			const lvlPillW = lvlTextW + 22;
+			const lvlPillH = 26;
+
+			ctx.save();
+			ctx.fillStyle = 'rgba(200, 169, 110, 0.16)';
+			ctx.strokeStyle = 'rgba(200, 169, 110, 0.52)';
+			ctx.lineWidth = 1.25;
+			drawRoundedRect(ctx, lvlPillX, lvlPillY, lvlPillW, lvlPillH, 13);
+			ctx.fill();
+			ctx.stroke();
+			ctx.fillStyle = '#f3d38b';
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.fillText(levelLabel, lvlPillX + lvlPillW / 2, lvlPillY + lvlPillH / 2 + 0.5);
+			ctx.restore();
+
+			// Gamerscore + Unlocked achievements line
+			ctx.textAlign = 'left';
+			ctx.textBaseline = 'alphabetic';
+			const scoreStr = `${$profileRank.score.toLocaleString($i18n.locale)} G`;
+			ctx.font = '800 16px "Segoe UI", system-ui, sans-serif';
+			ctx.fillStyle = '#c8a96e';
+			ctx.fillText(scoreStr, infoX, hy + 76);
+			const scoreW = ctx.measureText(scoreStr).width;
+
+			const unlockedSummary = `  ·  ${$totalUnlockedAchievements.toLocaleString($i18n.locale)} ${$i18n.t('stats.unlockedAchievementsLabel')}`;
+			ctx.font = '600 14px "Segoe UI", system-ui, sans-serif';
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+			ctx.fillText(truncateCanvasText(ctx, unlockedSummary, 430), infoX + scoreW, hy + 76);
+
+			// XP Progress Bar
+			const xpBarX = infoX;
+			const xpBarY = hy + 94;
+			const xpBarW = 360;
+			const xpBarH = 10;
+			ctx.save();
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+			drawRoundedRect(ctx, xpBarX, xpBarY, xpBarW, xpBarH, 5);
+			ctx.fill();
+
+			const fillPct = Math.max(0, Math.min(100, $profileRank.progressPct));
+			if (fillPct > 0) {
+				const fillW = Math.max(10, (xpBarW * fillPct) / 100);
+				const xpGrad = ctx.createLinearGradient(xpBarX, 0, xpBarX + fillW, 0);
+				xpGrad.addColorStop(0, '#c8a96e');
+				xpGrad.addColorStop(1, '#f3d38b');
+				ctx.fillStyle = xpGrad;
+				drawRoundedRect(ctx, xpBarX, xpBarY, fillW, xpBarH, 5);
+				ctx.fill();
+			}
+			ctx.restore();
+
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.56)';
+			ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
+			const xpCaption = `${$profileRank.currentLevelXp.toLocaleString($i18n.locale)} / ${$profileRank.nextLevelXp.toLocaleString($i18n.locale)} XP (${$profileRank.progressPct}%)`;
+			ctx.fillText(xpCaption, xpBarX + xpBarW + 14, xpBarY + 9);
+
+			// Right side: Completion % badge + Total Platinums badge
+			const platBadgeW = 176;
+			const platBadgeH = 92;
+			const platBadgeX = hx + hw - platBadgeW - 22;
+			const platBadgeY = hy + 20;
+
+			const rateBadgeW = 148;
+			const rateBadgeX = platBadgeX - rateBadgeW - 14;
+			const rateBadgeY = hy + 20;
+
+			ctx.save();
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+			ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+			ctx.lineWidth = 1.25;
+			drawRoundedRect(ctx, rateBadgeX, rateBadgeY, rateBadgeW, platBadgeH, 14);
+			ctx.fill();
+			ctx.stroke();
+
+			ctx.textAlign = 'center';
+			ctx.fillStyle = '#ffffff';
+			ctx.font = '800 26px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText(`${globalCompletionRate}%`, rateBadgeX + rateBadgeW / 2, rateBadgeY + 48);
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+			ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText(
+				truncateCanvasText(ctx, $i18n.t('stats.completionLabel').toUpperCase(), rateBadgeW - 16),
+				rateBadgeX + rateBadgeW / 2,
+				rateBadgeY + 72
+			);
+
+			// Total Platinums badge
+			ctx.fillStyle = 'rgba(200, 169, 110, 0.12)';
+			ctx.strokeStyle = 'rgba(200, 169, 110, 0.48)';
+			ctx.lineWidth = 1.5;
+			drawRoundedRect(ctx, platBadgeX, platBadgeY, platBadgeW, platBadgeH, 14);
+			ctx.fill();
+			ctx.stroke();
+
+			ctx.fillStyle = '#f3d38b';
+			ctx.font = '800 30px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText(String($totalCompletedGames), platBadgeX + platBadgeW / 2, platBadgeY + 48);
+			ctx.fillStyle = 'rgba(243, 211, 139, 0.85)';
+			ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText(
+				truncateCanvasText(
+					ctx,
+					$i18n.t('stats.showcase.cardPlatinums').toUpperCase(),
+					platBadgeW - 16
+				),
+				platBadgeX + platBadgeW / 2,
+				platBadgeY + 72
+			);
+			ctx.restore();
+
+			// Two Showcase Panels
+			const panelY = 202;
+			const panelH = 446;
+			const panelW = 576;
+			const leftX = 52;
+			const rightX = 652;
+
+			const drawPanelFrame = (px: number, title: string, count: number) => {
+				ctx.save();
+				ctx.fillStyle = 'rgba(255, 255, 255, 0.028)';
+				ctx.strokeStyle = 'rgba(255, 255, 255, 0.09)';
+				ctx.lineWidth = 1.25;
+				drawRoundedRect(ctx, px, panelY, panelW, panelH, 18);
+				ctx.fill();
+				ctx.stroke();
+
+				// Accent marker
+				ctx.fillStyle = '#c8a96e';
+				ctx.beginPath();
+				ctx.arc(px + 26, panelY + 29, 4, 0, Math.PI * 2);
+				ctx.fill();
+
+				ctx.textAlign = 'left';
+				ctx.textBaseline = 'middle';
+				ctx.fillStyle = '#c8a96e';
+				ctx.font = '800 13px "Segoe UI", system-ui, sans-serif';
+				ctx.fillText(truncateCanvasText(ctx, title.toUpperCase(), panelW - 110), px + 38, panelY + 30);
+
+				ctx.textAlign = 'right';
+				ctx.fillStyle = 'rgba(255, 255, 255, 0.48)';
+				ctx.font = '700 12px "Segoe UI", system-ui, sans-serif';
+				ctx.fillText(`${count} / 3`, px + panelW - 22, panelY + 30);
+
+				// Header divider
+				ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+				ctx.beginPath();
+				ctx.moveTo(px + 20, panelY + 52);
+				ctx.lineTo(px + panelW - 20, panelY + 52);
+				ctx.stroke();
+				ctx.restore();
+			};
+
+			// Left Panel: Platinum Games
+			drawPanelFrame(leftX, $i18n.t('stats.showcase.platinumGamesTitle'), showcaseGames.length);
+			for (let idx = 0; idx < 3; idx++) {
+				const rowX = leftX + 20;
+				const rowY = panelY + 68 + idx * 124;
+				const rowW = panelW - 40;
+				const rowH = 110;
+				const slot = showcaseGames[idx];
+
+				if (slot) {
+					ctx.save();
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.045)';
+					ctx.strokeStyle = 'rgba(200, 169, 110, 0.34)';
+					ctx.lineWidth = 1.25;
+					drawRoundedRect(ctx, rowX, rowY, rowW, rowH, 14);
+					ctx.fill();
+					ctx.stroke();
+					ctx.restore();
+
+					const thumbX = rowX + 14;
+					const thumbY = rowY + 14;
+					const thumbW = 136;
+					const thumbH = 82;
+					const gameImg = gameImgs[idx];
+
+					ctx.save();
+					drawRoundedRect(ctx, thumbX, thumbY, thumbW, thumbH, 10);
+					ctx.clip();
+					if (gameImg) {
+						drawImageCover(ctx, gameImg, thumbX, thumbY, thumbW, thumbH);
+					} else {
+						ctx.fillStyle = 'rgba(200, 169, 110, 0.12)';
+						ctx.fillRect(thumbX, thumbY, thumbW, thumbH);
+						ctx.fillStyle = '#e7c98a';
+						ctx.font = '800 22px "Segoe UI", system-ui, sans-serif';
+						ctx.textAlign = 'center';
+						ctx.textBaseline = 'middle';
+						ctx.fillText(getInitials(slot.game.name), thumbX + thumbW / 2, thumbY + thumbH / 2);
+					}
+					ctx.restore();
+
+					const tx = thumbX + thumbW + 18;
+					const maxTextW = rowX + rowW - tx - 16;
+
+					ctx.textAlign = 'left';
+					ctx.textBaseline = 'alphabetic';
+					ctx.fillStyle = '#ffffff';
+					ctx.font = '700 18px "Segoe UI", system-ui, sans-serif';
+					ctx.fillText(truncateCanvasText(ctx, slot.game.name, maxTextW), tx, rowY + 38);
+
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.68)';
+					ctx.font = '600 14px "Segoe UI", system-ui, sans-serif';
+					ctx.fillText(`${slot.progress.unlockedBase} / ${slot.progress.totalBase}`, tx, rowY + 62);
+
+					// 100% PLATINUM badge
+					ctx.save();
+					const badgeText = $i18n.t('stats.showcase.platinumBadge');
+					ctx.font = '800 11px "Segoe UI", system-ui, sans-serif';
+					const badgeW = ctx.measureText(badgeText).width + 20;
+					const badgeY = rowY + 73;
+					ctx.fillStyle = 'rgba(228, 180, 65, 0.16)';
+					ctx.strokeStyle = 'rgba(228, 180, 65, 0.48)';
+					ctx.lineWidth = 1;
+					drawRoundedRect(ctx, tx, badgeY, badgeW, 23, 999);
+					ctx.fill();
+					ctx.stroke();
+					ctx.fillStyle = '#f3d38b';
+					ctx.textBaseline = 'middle';
+					ctx.fillText(badgeText, tx + 10, badgeY + 11.5);
+					ctx.restore();
+				} else {
+					ctx.save();
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+					ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+					ctx.lineWidth = 1.25;
+					ctx.setLineDash([6, 6]);
+					drawRoundedRect(ctx, rowX, rowY, rowW, rowH, 14);
+					ctx.fill();
+					ctx.stroke();
+					ctx.setLineDash([]);
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+					ctx.font = '600 14px "Segoe UI", system-ui, sans-serif';
+					ctx.textAlign = 'center';
+					ctx.textBaseline = 'middle';
+					ctx.fillText($i18n.t('stats.showcase.emptyGameSlot'), rowX + rowW / 2, rowY + rowH / 2);
+					ctx.restore();
+				}
+			}
+
+			// Right Panel: Rarest Achievements
+			drawPanelFrame(rightX, $i18n.t('stats.showcase.rareAchievementsTitle'), showcaseAchs.length);
+			for (let idx = 0; idx < 3; idx++) {
+				const rowX = rightX + 20;
+				const rowY = panelY + 68 + idx * 124;
+				const rowW = panelW - 40;
+				const rowH = 110;
+				const slot = showcaseAchs[idx];
+
+				if (slot) {
+					const palette = getRarityPalette(slot.ach.completionpercentage);
+					ctx.save();
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.045)';
+					ctx.strokeStyle = palette.border;
+					ctx.lineWidth = 1.25;
+					drawRoundedRect(ctx, rowX, rowY, rowW, rowH, 14);
+					ctx.fill();
+					ctx.stroke();
+					ctx.restore();
+
+					const iconX = rowX + 16;
+					const iconY = rowY + 17;
+					const iconSize = 76;
+					const achImg = achImgs[idx];
+
+					ctx.save();
+					drawRoundedRect(ctx, iconX, iconY, iconSize, iconSize, 12);
+					ctx.clip();
+					if (achImg) {
+						drawImageCover(ctx, achImg, iconX, iconY, iconSize, iconSize);
+					} else {
+						ctx.fillStyle = palette.bg;
+						ctx.fillRect(iconX, iconY, iconSize, iconSize);
+						ctx.fillStyle = palette.color;
+						ctx.font = '800 22px "Segoe UI", system-ui, sans-serif';
+						ctx.textAlign = 'center';
+						ctx.textBaseline = 'middle';
+						ctx.fillText(
+							getInitials(slot.ach.name || slot.ach.key),
+							iconX + iconSize / 2,
+							iconY + iconSize / 2
+						);
+					}
+					ctx.restore();
+
+					// Rarity % pill on right
+					const rarityLabel = formatRarityPct(slot.ach.completionpercentage);
+					ctx.save();
+					ctx.font = '800 13px "Segoe UI", system-ui, sans-serif';
+					const pillW = Math.max(66, ctx.measureText(rarityLabel).width + 22);
+					const pillH = 30;
+					const pillX = rowX + rowW - pillW - 16;
+					const pillY = rowY + (rowH - pillH) / 2;
+					ctx.fillStyle = palette.bg;
+					ctx.strokeStyle = palette.border;
+					ctx.lineWidth = 1.25;
+					drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 999);
+					ctx.fill();
+					ctx.stroke();
+					ctx.fillStyle = palette.color;
+					ctx.textAlign = 'center';
+					ctx.textBaseline = 'middle';
+					ctx.fillText(rarityLabel, pillX + pillW / 2, pillY + pillH / 2 + 0.5);
+					ctx.restore();
+
+					const tx = iconX + iconSize + 16;
+					const maxTextW = rowX + rowW - tx - pillW - 30;
+
+					ctx.textAlign = 'left';
+					ctx.textBaseline = 'alphabetic';
+					ctx.fillStyle = '#ffffff';
+					ctx.font = '700 17px "Segoe UI", system-ui, sans-serif';
+					ctx.fillText(
+						truncateCanvasText(ctx, slot.ach.name || slot.ach.key, maxTextW),
+						tx,
+						rowY + 40
+					);
+
+					ctx.fillStyle = '#c8a96e';
+					ctx.font = '600 13px "Segoe UI", system-ui, sans-serif';
+					ctx.fillText(truncateCanvasText(ctx, slot.game.name, maxTextW), tx, rowY + 63);
+
+					if (slot.ach.desc) {
+						ctx.fillStyle = 'rgba(255, 255, 255, 0.54)';
+						ctx.font = '500 12px "Segoe UI", system-ui, sans-serif';
+						ctx.fillText(truncateCanvasText(ctx, slot.ach.desc, maxTextW), tx, rowY + 84);
+					}
+				} else {
+					ctx.save();
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+					ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+					ctx.lineWidth = 1.25;
+					ctx.setLineDash([6, 6]);
+					drawRoundedRect(ctx, rowX, rowY, rowW, rowH, 14);
+					ctx.fill();
+					ctx.stroke();
+					ctx.setLineDash([]);
+					ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+					ctx.font = '600 14px "Segoe UI", system-ui, sans-serif';
+					ctx.textAlign = 'center';
+					ctx.textBaseline = 'middle';
+					ctx.fillText($i18n.t('stats.showcase.emptyAchSlot'), rowX + rowW / 2, rowY + rowH / 2);
+					ctx.restore();
+				}
+			}
+
+			// Footer
+			ctx.textAlign = 'left';
+			ctx.textBaseline = 'middle';
+			ctx.fillStyle = 'rgba(200, 169, 110, 0.88)';
+			ctx.font = '800 12px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText(`ACCOLADE  •  ${$i18n.t('stats.showcase.cardTitle')}`, 52, H - 46);
+
+			ctx.textAlign = 'right';
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+			ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
+			ctx.fillText(formatDate(new Date(), $i18n.locale), W - 52, H - 46);
+
+			const blob = await new Promise<Blob | null>((resolve) => {
+				try {
+					canvas.toBlob((b) => resolve(b), 'image/png');
+				} catch (err) {
+					console.error('Failed to serialize profile card canvas:', err);
+					resolve(null);
+				}
+			});
+			if (!blob) return;
+
+			try {
+				if (navigator.clipboard && 'ClipboardItem' in window) {
+					await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+				}
+			} catch {
+				// Clipboard write may fail without focus/permissions; download still proceeds
+			}
+
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = 'accolade-profile-card.png';
+			a.click();
+			setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+			showShowcaseToast($i18n.t('stats.showcase.exportedToast'));
+		} catch (err) {
+			console.error('Failed to generate profile showcase PNG:', err);
+		} finally {
+			isExportingPng = false;
+		}
+	}
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <main class="stats-page">
 	{#if tooltip.show}
@@ -667,6 +1717,301 @@
 						<span class="sub">{$i18n.t('stats.playtimeSub')}</span>
 					</div>
 				</div>
+
+				<!-- Profile Showcase / Trophy Cabinet -->
+				<section class="card showcase-section" aria-labelledby="showcase-heading">
+					<div class="showcase-header">
+						<div class="showcase-title-group">
+							<div class="showcase-icon-badge" aria-hidden="true">
+								<svg
+									width="18"
+									height="18"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<path
+										d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+									/>
+								</svg>
+							</div>
+							<div class="showcase-heading-text">
+								<h2 id="showcase-heading">{$i18n.t('stats.showcase.title')}</h2>
+								<p class="showcase-subtitle">{$i18n.t('stats.showcase.subtitle')}</p>
+							</div>
+						</div>
+
+						<div class="showcase-actions">
+							{#if showcaseToast}
+								<span class="showcase-toast" role="status">{showcaseToast}</span>
+							{/if}
+							<button
+								type="button"
+								class="showcase-btn secondary"
+								disabled={showcaseSaving ||
+									(platinumGameItems.length === 0 && unlockedAchievementsByRarity.length === 0)}
+								onclick={() => void autoFillShowcase()}
+							>
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path
+										d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"
+									/>
+								</svg>
+								<span>{$i18n.t('stats.showcase.autoFill')}</span>
+							</button>
+							<button
+								type="button"
+								class="showcase-btn primary"
+								disabled={isExportingPng}
+								onclick={() => void exportGlobalProfileCard()}
+							>
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+									<polyline points="7 10 12 15 17 10" />
+									<line x1="12" x2="12" y1="15" y2="3" />
+								</svg>
+								<span>
+									{isExportingPng
+										? $i18n.t('stats.showcase.exportingPng')
+										: $i18n.t('stats.showcase.exportPng')}
+								</span>
+							</button>
+						</div>
+					</div>
+
+					<div class="showcase-columns">
+						<!-- Platinum / 100% Games Column -->
+						<div class="showcase-group">
+							<div class="showcase-group-header">
+								<h3>
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										aria-hidden="true"
+									>
+										<polygon
+											points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+										/>
+									</svg>
+									{$i18n.t('stats.showcase.platinumGamesTitle')}
+								</h3>
+								<span class="showcase-count-pill tabular-nums">{validShowcaseGames.length}/3</span>
+							</div>
+							<div class="showcase-slots">
+								{#each SHOWCASE_SLOTS as slotIdx (slotIdx)}
+									{@const slotGame = validShowcaseGames[slotIdx] ?? null}
+									{#if slotGame}
+										{@const thumbUrl = getBestGameImage(slotGame.game)}
+										<div class="showcase-slot filled">
+											<button
+												type="button"
+												class="showcase-slot-main"
+												onclick={() => openGamePicker(slotIdx)}
+											>
+												{#if thumbUrl}
+													<img
+														class="slot-game-thumb"
+														src={thumbUrl}
+														alt={slotGame.game.name}
+														loading="lazy"
+														decoding="async"
+														onerror={() => failedImages.add(thumbUrl)}
+													/>
+												{:else}
+													<div class="slot-game-fallback" aria-hidden="true">
+														{getInitials(slotGame.game.name)}
+													</div>
+												{/if}
+												<div class="slot-info">
+													<span class="slot-title">{slotGame.game.name}</span>
+													<span class="slot-meta tabular-nums">
+														{slotGame.progress.unlockedBase}/{slotGame.progress.totalBase}
+													</span>
+												</div>
+												<span class="slot-platinum-badge tabular-nums">100%</span>
+											</button>
+											<button
+												type="button"
+												class="slot-remove-btn"
+												title={$i18n.t('stats.showcase.removeSlot')}
+												aria-label={$i18n.t('stats.showcase.removeSlot')}
+												disabled={showcaseSaving}
+												onclick={() => void removeGameSlot(slotIdx)}
+											>
+												<svg
+													width="14"
+													height="14"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<line x1="18" y1="6" x2="6" y2="18" />
+													<line x1="6" y1="6" x2="18" y2="18" />
+												</svg>
+											</button>
+										</div>
+									{:else}
+										<button
+											type="button"
+											class="showcase-slot empty"
+											onclick={() => openGamePicker(slotIdx)}
+										>
+											<span class="slot-plus" aria-hidden="true">+</span>
+											<span class="slot-empty-label">{$i18n.t('stats.showcase.emptyGameSlot')}</span>
+										</button>
+									{/if}
+								{/each}
+							</div>
+						</div>
+
+						<!-- Rarest Achievements Column -->
+						<div class="showcase-group">
+							<div class="showcase-group-header">
+								<h3>
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										aria-hidden="true"
+									>
+										<path d="M6 3h12l4 6-10 13L2 9Z" />
+										<path d="M11 3 8 9l4 13 4-13-3-6" />
+										<path d="M2 9h20" />
+									</svg>
+									{$i18n.t('stats.showcase.rareAchievementsTitle')}
+								</h3>
+								<span class="showcase-count-pill tabular-nums"
+									>{validShowcaseAchievements.length}/3</span
+								>
+							</div>
+							<div class="showcase-slots">
+								{#each SHOWCASE_SLOTS as slotIdx (slotIdx)}
+									{@const slotAch = validShowcaseAchievements[slotIdx] ?? null}
+									{#if slotAch}
+										{@const palette = getRarityPalette(slotAch.ach.completionpercentage)}
+										{@const achIcon =
+											slotAch.ach.icon && !failedImages.has(slotAch.ach.icon)
+												? slotAch.ach.icon
+												: null}
+										<div class="showcase-slot filled">
+											<button
+												type="button"
+												class="showcase-slot-main"
+												onclick={() => openAchPicker(slotIdx)}
+											>
+												{#if achIcon}
+													<img
+														class="slot-ach-icon"
+														src={achIcon}
+														alt={slotAch.ach.name || slotAch.ach.key}
+														loading="lazy"
+														decoding="async"
+														onerror={() => failedImages.add(achIcon)}
+													/>
+												{:else}
+													<div
+														class="slot-ach-fallback"
+														style="color: {palette.color}; background: {palette.bg};"
+														aria-hidden="true"
+													>
+														<svg
+															width="18"
+															height="18"
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															stroke-width="2"
+														>
+															<path
+																d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55.47.98.97 1.21C11.47 18.44 12 19 12 19s.53-.56 1.03-.79c.5-.23.97-.66.97-1.21v-2.34M7 2h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+															/>
+														</svg>
+													</div>
+												{/if}
+												<div class="slot-info">
+													<span class="slot-title">{slotAch.ach.name || slotAch.ach.key}</span>
+													<span class="slot-meta">{slotAch.game.name}</span>
+												</div>
+												<span
+													class="slot-rarity-badge tabular-nums"
+													style="color: {palette.color}; background: {palette.bg}; border-color: {palette.border};"
+												>
+													{formatRarityPct(slotAch.ach.completionpercentage)}
+												</span>
+											</button>
+											<button
+												type="button"
+												class="slot-remove-btn"
+												title={$i18n.t('stats.showcase.removeSlot')}
+												aria-label={$i18n.t('stats.showcase.removeSlot')}
+												disabled={showcaseSaving}
+												onclick={() => void removeAchSlot(slotIdx)}
+											>
+												<svg
+													width="14"
+													height="14"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<line x1="18" y1="6" x2="6" y2="18" />
+													<line x1="6" y1="6" x2="18" y2="18" />
+												</svg>
+											</button>
+										</div>
+									{:else}
+										<button
+											type="button"
+											class="showcase-slot empty"
+											onclick={() => openAchPicker(slotIdx)}
+										>
+											<span class="slot-plus" aria-hidden="true">+</span>
+											<span class="slot-empty-label">{$i18n.t('stats.showcase.emptyAchSlot')}</span>
+										</button>
+									{/if}
+								{/each}
+							</div>
+						</div>
+					</div>
+				</section>
 
 				<!-- Main Grid Row -->
 				<div class="card top-games">
@@ -1090,6 +2435,223 @@
 			</section>
 		{/if}
 	</div>
+
+	{#if pickerState}
+		<div class="showcase-modal-overlay">
+			<button
+				type="button"
+				class="showcase-modal-backdrop"
+				aria-label={$i18n.t('button.close')}
+				tabindex="-1"
+				onclick={closePicker}
+			></button>
+			<div
+				class="showcase-modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="showcase-picker-title"
+				tabindex="-1"
+				bind:this={pickerModalEl}
+			>
+				<div class="showcase-modal-header">
+					<h2 id="showcase-picker-title">
+						{pickerState.kind === 'game'
+							? $i18n.t('stats.showcase.selectGameModalTitle')
+							: $i18n.t('stats.showcase.selectAchModalTitle')}
+					</h2>
+					<button
+						type="button"
+						class="showcase-modal-close"
+						aria-label={$i18n.t('button.close')}
+						onclick={closePicker}
+					>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<line x1="18" y1="6" x2="6" y2="18" />
+							<line x1="6" y1="6" x2="18" y2="18" />
+						</svg>
+					</button>
+				</div>
+
+				{#if pickerState.kind === 'game'}
+					{#if platinumGameItems.length === 0}
+						<div class="showcase-modal-empty">
+							<p>{$i18n.t('stats.showcase.noPlatinumYet')}</p>
+						</div>
+					{:else}
+						<div class="showcase-modal-search">
+							<svg
+								width="15"
+								height="15"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								aria-hidden="true"
+							>
+								<circle cx="11" cy="11" r="8" />
+								<path d="m21 21-4.3-4.3" />
+							</svg>
+							<input
+								type="search"
+								bind:this={pickerSearchInputEl}
+								bind:value={pickerSearch}
+								aria-label={$i18n.t('stats.showcase.searchPlaceholder')}
+								placeholder={$i18n.t('stats.showcase.searchPlaceholder')}
+							/>
+						</div>
+
+						<div class="showcase-modal-list">
+							{#if filteredPickerGames.length === 0}
+								<div class="showcase-modal-empty">
+									<p>{$i18n.t('games.results', { count: 0 })}</p>
+								</div>
+							{:else}
+								{#each filteredPickerGames as item (item.game.id)}
+									{@const isCurrent =
+										validShowcaseGames[pickerState.slotIndex]?.game.id === item.game.id}
+									{@const isUsedElsewhere = validShowcaseGames.some(
+										(g, idx) => idx !== pickerState?.slotIndex && g.game.id === item.game.id
+									)}
+									{@const thumbUrl = getBestGameImage(item.game)}
+									<button
+										type="button"
+										class="picker-item"
+										class:current={isCurrent}
+										disabled={isUsedElsewhere || showcaseSaving}
+										onclick={() => void selectGameForSlot(item.game.id)}
+									>
+										{#if thumbUrl}
+											<img
+												class="picker-game-thumb"
+												src={thumbUrl}
+												alt={item.game.name}
+												loading="lazy"
+												decoding="async"
+												onerror={() => {
+													if (thumbUrl) failedImages.add(thumbUrl);
+												}}
+											/>
+										{:else}
+											<div class="picker-game-fallback" aria-hidden="true">
+												{getInitials(item.game.name)}
+											</div>
+										{/if}
+										<div class="picker-item-info">
+											<span class="picker-item-title">{item.game.name}</span>
+											<span class="picker-item-sub tabular-nums">
+												{item.progress.unlockedBase}/{item.progress.totalBase}
+											</span>
+										</div>
+										<span class="slot-platinum-badge tabular-nums">100%</span>
+									</button>
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				{:else if unlockedAchievementsByRarity.length === 0}
+					<div class="showcase-modal-empty">
+						<p>{$i18n.t('stats.showcase.noUnlockedAchYet')}</p>
+					</div>
+				{:else}
+					<div class="showcase-modal-search">
+						<svg
+							width="15"
+							height="15"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<circle cx="11" cy="11" r="8" />
+							<path d="m21 21-4.3-4.3" />
+						</svg>
+						<input
+							type="search"
+							bind:this={pickerSearchInputEl}
+							bind:value={pickerSearch}
+							aria-label={$i18n.t('stats.showcase.searchPlaceholder')}
+							placeholder={$i18n.t('stats.showcase.searchPlaceholder')}
+						/>
+					</div>
+
+					<div class="showcase-modal-list">
+						{#if filteredPickerAchievements.length === 0}
+							<div class="showcase-modal-empty">
+								<p>{$i18n.t('games.results', { count: 0 })}</p>
+							</div>
+						{:else}
+							{#each filteredPickerAchievements as item (item.game.id + ':' + item.achKey.toLowerCase())}
+								{@const currentEntry = validShowcaseAchievements[pickerState.slotIndex]}
+								{@const isCurrent = Boolean(
+									currentEntry &&
+										currentEntry.game.id === item.game.id &&
+										currentEntry.achKey.toLowerCase() === item.achKey.toLowerCase()
+								)}
+								{@const isUsedElsewhere = validShowcaseAchievements.some(
+									(entry, idx) =>
+										idx !== pickerState?.slotIndex &&
+										entry.game.id === item.game.id &&
+										entry.achKey.toLowerCase() === item.achKey.toLowerCase()
+								)}
+								{@const palette = getRarityPalette(item.ach.completionpercentage)}
+								{@const achIcon =
+									item.ach.icon && !failedImages.has(item.ach.icon) ? item.ach.icon : null}
+								<button
+									type="button"
+									class="picker-item"
+									class:current={isCurrent}
+									disabled={isUsedElsewhere || showcaseSaving}
+									onclick={() => void selectAchForSlot(item)}
+								>
+									{#if achIcon}
+										<img
+											class="picker-ach-icon"
+											src={achIcon}
+											alt={item.ach.name || item.ach.key}
+											loading="lazy"
+											decoding="async"
+											onerror={() => {
+												if (achIcon) failedImages.add(achIcon);
+											}}
+										/>
+									{:else}
+										<div
+											class="picker-ach-fallback"
+											style="color: {palette.color}; background: {palette.bg};"
+											aria-hidden="true"
+										>
+											{getInitials(item.ach.name || item.ach.key)}
+										</div>
+									{/if}
+									<div class="picker-item-info">
+										<span class="picker-item-title">{item.ach.name || item.ach.key}</span>
+										<span class="picker-item-sub">{item.game.name}</span>
+									</div>
+									<span
+										class="slot-rarity-badge tabular-nums"
+										style="color: {palette.color}; background: {palette.bg}; border-color: {palette.border};"
+									>
+										{formatRarityPct(item.ach.completionpercentage)}
+									</span>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
 </main>
 
 <style>
@@ -1166,7 +2728,7 @@
 	.grid-overview {
 		display: grid;
 		grid-template-columns: repeat(6, minmax(0, 1fr));
-		grid-template-rows: auto 1fr;
+		grid-auto-rows: auto;
 		gap: 12px;
 		width: 100%;
 		min-width: 0;
@@ -1925,6 +3487,541 @@
 		color: var(--text-muted);
 	}
 
+	/* Profile Showcase / Trophy Cabinet */
+	.showcase-section {
+		grid-column: 1 / -1;
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+		border-color: color-mix(in srgb, var(--accent, #c8a96e) 24%, var(--border-soft));
+		background:
+			radial-gradient(
+				circle at 0% 0%,
+				color-mix(in srgb, var(--accent, #c8a96e) 7%, transparent),
+				transparent 52%
+			),
+			var(--surface-1);
+	}
+
+	.showcase-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 14px;
+	}
+
+	.showcase-title-group {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.showcase-icon-badge {
+		width: 38px;
+		height: 38px;
+		border-radius: 10px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		color: var(--accent, #c8a96e);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 28%, transparent);
+	}
+
+	.showcase-heading-text {
+		min-width: 0;
+	}
+
+	.showcase-heading-text h2 {
+		font-size: 16px;
+		font-weight: 700;
+		color: var(--text-primary);
+		margin: 0 0 2px 0;
+	}
+
+	.showcase-subtitle {
+		font-size: 12px;
+		color: var(--text-muted);
+		margin: 0;
+	}
+
+	.showcase-actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.showcase-toast {
+		font-size: 12px;
+		font-weight: 600;
+		color: #3ddc84;
+		background: rgba(61, 220, 132, 0.12);
+		border: 1px solid rgba(61, 220, 132, 0.28);
+		padding: 5px 10px;
+		border-radius: 8px;
+	}
+
+	.showcase-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		padding: 7px 13px;
+		border-radius: 8px;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.showcase-btn.secondary {
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-primary);
+	}
+
+	.showcase-btn.secondary:hover:not(:disabled) {
+		background: var(--surface-hover);
+		border-color: color-mix(in srgb, var(--accent, #c8a96e) 40%, var(--border-soft));
+	}
+
+	.showcase-btn.primary {
+		background: color-mix(in srgb, var(--accent, #c8a96e) 18%, var(--surface-2));
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 48%, transparent);
+		color: var(--accent, #c8a96e);
+	}
+
+	.showcase-btn.primary:hover:not(:disabled) {
+		background: var(--accent, #c8a96e);
+		color: var(--accent-text, #111111);
+	}
+
+	.showcase-btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	.showcase-columns {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 16px;
+		min-width: 0;
+	}
+
+	.showcase-group {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		min-width: 0;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		border-radius: 10px;
+		padding: 14px;
+	}
+
+	.showcase-group-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.showcase-group-header h3 {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		margin: 0;
+	}
+
+	.showcase-group-header h3 svg {
+		color: var(--accent, #c8a96e);
+		flex-shrink: 0;
+	}
+
+	.showcase-count-pill {
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--text-muted);
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		padding: 2px 8px;
+		border-radius: 999px;
+	}
+
+	.showcase-slots {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.showcase-slot.filled {
+		display: flex;
+		align-items: stretch;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.showcase-slot-main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition:
+			border-color 0.2s,
+			background 0.2s,
+			transform 0.15s;
+	}
+
+	.showcase-slot-main:hover {
+		background: var(--surface-hover);
+		border-color: color-mix(in srgb, var(--accent, #c8a96e) 45%, var(--border-soft));
+	}
+
+	.slot-game-thumb,
+	.slot-game-fallback {
+		width: 56px;
+		height: 38px;
+		border-radius: 7px;
+		flex-shrink: 0;
+		object-fit: cover;
+		background: var(--surface-3);
+	}
+
+	.slot-game-fallback,
+	.slot-ach-fallback,
+	.picker-game-fallback,
+	.picker-ach-fallback {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 12px;
+		font-weight: 800;
+		color: var(--accent, #c8a96e);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
+	}
+
+	.slot-ach-icon,
+	.slot-ach-fallback {
+		width: 40px;
+		height: 40px;
+		border-radius: 8px;
+		flex-shrink: 0;
+		object-fit: cover;
+	}
+
+	.slot-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.slot-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.slot-meta {
+		font-size: 11px;
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.slot-platinum-badge {
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--completed, #e4b441);
+		background: color-mix(in srgb, var(--completed, #e4b441) 14%, transparent);
+		border: 1px solid color-mix(in srgb, var(--completed, #e4b441) 36%, transparent);
+		padding: 2px 8px;
+		border-radius: 999px;
+		flex-shrink: 0;
+	}
+
+	.slot-rarity-badge {
+		font-size: 11px;
+		font-weight: 700;
+		border: 1px solid transparent;
+		padding: 2px 8px;
+		border-radius: 999px;
+		flex-shrink: 0;
+	}
+
+	.slot-remove-btn {
+		width: 34px;
+		border-radius: 10px;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		color: var(--text-muted);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		flex-shrink: 0;
+		transition: all 0.2s;
+	}
+
+	.slot-remove-btn:hover:not(:disabled) {
+		color: #ef4444;
+		border-color: rgba(239, 68, 68, 0.4);
+		background: rgba(239, 68, 68, 0.1);
+	}
+
+	.slot-remove-btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	.showcase-slot.empty {
+		width: 100%;
+		min-height: 60px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 10px 14px;
+		border-radius: 10px;
+		background: transparent;
+		border: 1px dashed var(--border-soft);
+		color: var(--text-muted);
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.showcase-slot.empty:hover {
+		color: var(--accent, #c8a96e);
+		border-color: color-mix(in srgb, var(--accent, #c8a96e) 55%, transparent);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 6%, transparent);
+	}
+
+	.slot-plus {
+		width: 22px;
+		height: 22px;
+		border-radius: 999px;
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 1;
+	}
+
+	/* Showcase Picker Modal */
+	.showcase-modal-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 1200;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 24px;
+	}
+
+	.showcase-modal-backdrop {
+		position: absolute;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.72);
+		backdrop-filter: blur(8px);
+		border: none;
+		padding: 0;
+		cursor: default;
+	}
+
+	.showcase-modal-backdrop:active {
+		transform: none;
+	}
+
+	.showcase-modal {
+		position: relative;
+		z-index: 1;
+		width: min(560px, 100%);
+		max-height: min(640px, 84vh);
+		background: var(--surface-1);
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 32%, var(--border-soft));
+		border-radius: 16px;
+		box-shadow: var(--shadow-elevated, 0 24px 60px rgba(0, 0, 0, 0.65));
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.showcase-modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 18px 20px;
+		border-bottom: 1px solid var(--border-soft);
+	}
+
+	.showcase-modal-header h2 {
+		font-size: 16px;
+		font-weight: 700;
+		color: var(--text-primary);
+		margin: 0;
+	}
+
+	.showcase-modal-close {
+		width: 32px;
+		height: 32px;
+		border-radius: 8px;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-muted);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.showcase-modal-close:hover {
+		background: var(--surface-hover);
+		color: var(--text-primary);
+	}
+
+	.showcase-modal-search {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin: 14px 20px 6px;
+		padding: 8px 12px;
+		border-radius: 10px;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: var(--text-muted);
+	}
+
+	.showcase-modal-search:focus-within {
+		border-color: var(--accent, #c8a96e);
+	}
+
+	.showcase-modal-search input {
+		flex: 1;
+		min-width: 0;
+		background: transparent;
+		border: none;
+		color: var(--text-primary);
+		font-size: 13px;
+		outline: none;
+	}
+
+	.showcase-modal-list {
+		flex: 1;
+		overflow-y: auto;
+		padding: 10px 20px 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.showcase-modal-empty {
+		padding: 36px 20px;
+		text-align: center;
+		color: var(--text-muted);
+		font-size: 13px;
+	}
+
+	.picker-item {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		background: var(--surface-2);
+		border: 1px solid var(--border-soft);
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.picker-item:hover:not(:disabled) {
+		background: var(--surface-hover);
+		border-color: color-mix(in srgb, var(--accent, #c8a96e) 45%, var(--border-soft));
+	}
+
+	.picker-item.current {
+		border-color: var(--accent, #c8a96e);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, var(--surface-2));
+	}
+
+	.picker-item:disabled {
+		opacity: 0.42;
+		cursor: not-allowed;
+	}
+
+	.picker-game-thumb,
+	.picker-game-fallback {
+		width: 56px;
+		height: 36px;
+		border-radius: 6px;
+		flex-shrink: 0;
+		object-fit: cover;
+	}
+
+	.picker-ach-icon,
+	.picker-ach-fallback {
+		width: 40px;
+		height: 40px;
+		border-radius: 8px;
+		flex-shrink: 0;
+		object-fit: cover;
+	}
+
+	.picker-item-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.picker-item-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.picker-item-sub {
+		font-size: 11px;
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
 	.scrollable::-webkit-scrollbar {
 		width: 6px;
 	}
@@ -1950,6 +4047,12 @@
 
 	@media (max-width: 1180px) {
 		.charts-row {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	@media (max-width: 960px) {
+		.showcase-columns {
 			grid-template-columns: 1fr;
 		}
 	}

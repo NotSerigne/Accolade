@@ -944,6 +944,26 @@ pub fn set_custom_hltb_data(
     Ok(data)
 }
 
+/// Compute estimated remaining hours to reach 100% completion from HLTB
+/// completionist estimate and tracked playtime in seconds.
+pub fn compute_remaining_completionist_hours(
+    completionist_hours: Option<f32>,
+    playtime_seconds: u64,
+) -> Option<f32> {
+    let comp = completionist_hours?;
+    if !comp.is_finite() || comp <= 0.0 {
+        return None;
+    }
+    let played_hours = (playtime_seconds as f64) / 3600.0;
+    let remaining = (f64::from(comp) - played_hours).max(0.0);
+    Some(remaining as f32)
+}
+
+#[tauri::command]
+pub fn get_cached_hltb_data(app_handle: AppHandle) -> HashMap<String, HltbData> {
+    load_hltb_cache(&app_handle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1030,5 +1050,32 @@ mod tests {
         "#;
         assert_eq!(extract_hltb_game_ids_from_html(html), vec![141414, 99999]);
         assert!(title_similarity("007 First Light", "007: First Light") >= 0.45);
+    }
+
+    #[test]
+    fn computes_remaining_completionist_hours() {
+        assert_eq!(
+            compute_remaining_completionist_hours(Some(10.0), 7200),
+            Some(8.0)
+        );
+        assert_eq!(
+            compute_remaining_completionist_hours(Some(2.25), 0),
+            Some(2.25)
+        );
+        assert_eq!(
+            compute_remaining_completionist_hours(Some(5.0), 36000),
+            Some(0.0)
+        );
+        assert_eq!(compute_remaining_completionist_hours(None, 3600), None);
+        assert_eq!(compute_remaining_completionist_hours(Some(0.0), 0), None);
+        assert_eq!(compute_remaining_completionist_hours(Some(-2.5), 0), None);
+        assert_eq!(
+            compute_remaining_completionist_hours(Some(f32::NAN), 0),
+            None
+        );
+        assert_eq!(
+            compute_remaining_completionist_hours(Some(f32::INFINITY), 0),
+            None
+        );
     }
 }

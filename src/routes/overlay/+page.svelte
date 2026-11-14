@@ -8,6 +8,7 @@
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import AchievementNotif from '$lib/AchievementNotif.svelte';
 	import HudTracker from '$lib/HudTracker.svelte';
+	import { DEFAULTS, normalizeNotifStyle, type NotifStyle } from '$lib/stores/settings.js';
 
 	type WindowPosition =
 		| 'top-left'
@@ -32,6 +33,7 @@
 		is_progress?: boolean;
 		progress_current?: number;
 		progress_max?: number;
+		progress_milestone?: number;
 	}
 
 	interface HudAchievement {
@@ -47,6 +49,8 @@
 		rarity?: number | string | null;
 		completionpercentage?: string | number | null;
 		pinned?: boolean;
+		note?: string | null;
+		tags?: string[];
 	}
 
 	interface HudData {
@@ -54,6 +58,7 @@
 		game_name: string;
 		achievements: HudAchievement[];
 		pinned_keys: string[];
+		remaining_hours?: number | null;
 	}
 
 	const NOTIF_WIDTH = 480;
@@ -83,24 +88,41 @@
 
 	async function getOverlayPreferences(): Promise<{
 		windowPosition: WindowPosition;
+		notifStyle: NotifStyle;
 		notificationSound: string;
+		progressSound: string;
+		platinumSound: string;
 		notificationVolume: number;
 		accentColor: string;
 		theme: 'dark' | 'light';
 	}> {
 		try {
 			const store = await getSettingsStore();
-			const [windowPosition, notificationSound, notificationVolume, accentColor, rawTheme] =
-				await Promise.all([
-					store.get<WindowPosition>('windowPosition'),
-					store.get<string>('notificationSound'),
-					store.get<number>('notificationVolume'),
-					store.get<string>('accentColor'),
-					store.get<string>('theme')
-				]);
+			const [
+				windowPosition,
+				rawNotifStyle,
+				notificationSound,
+				progressSound,
+				platinumSound,
+				notificationVolume,
+				accentColor,
+				rawTheme
+			] = await Promise.all([
+				store.get<WindowPosition>('windowPosition'),
+				store.get<unknown>('notif_style'),
+				store.get<string>('notificationSound'),
+				store.get<string>('progressSound'),
+				store.get<string>('platinumSound'),
+				store.get<number>('notificationVolume'),
+				store.get<string>('accentColor'),
+				store.get<string>('theme')
+			]);
 			return {
 				windowPosition: windowPosition ?? DEFAULT_POSITION,
+				notifStyle: normalizeNotifStyle(rawNotifStyle),
 				notificationSound: notificationSound ?? DEFAULT_SOUND,
+				progressSound: progressSound ?? DEFAULTS.progressSound,
+				platinumSound: platinumSound ?? DEFAULTS.platinumSound,
 				notificationVolume: notificationVolume ?? DEFAULT_VOLUME,
 				accentColor: accentColor || DEFAULT_ACCENT,
 				theme: resolveThemeValue(rawTheme)
@@ -109,7 +131,10 @@
 			settingsStorePromise = null;
 			return {
 				windowPosition: DEFAULT_POSITION,
+				notifStyle: DEFAULTS.notif_style,
 				notificationSound: DEFAULT_SOUND,
+				progressSound: DEFAULTS.progressSound,
+				platinumSound: DEFAULTS.platinumSound,
 				notificationVolume: DEFAULT_VOLUME,
 				accentColor: DEFAULT_ACCENT,
 				theme: resolveThemeValue('system')
@@ -185,6 +210,7 @@
 	let achievement = $state<Achievement | null>(null);
 	let visible = $state(false);
 	let position = $state<WindowPosition>('top-right');
+	let notifStyle = $state<NotifStyle>(DEFAULTS.notif_style);
 	let accentColor = $state(DEFAULT_ACCENT);
 	let overlayTheme = $state<'dark' | 'light'>('dark');
 
@@ -194,11 +220,13 @@
 	let hudTotalCount = $state(0);
 	let hudUnlockedCount = $state(0);
 	let hudPinnedKeys = $state<string[]>([]);
+	let hudRemainingHours = $state<number | null>(null);
 
 	async function refreshAppearancePreferences(): Promise<void> {
 		const prefs = await getOverlayPreferences();
 		accentColor = prefs.accentColor;
 		overlayTheme = prefs.theme;
+		notifStyle = prefs.notifStyle;
 	}
 
 	async function refreshHudData(): Promise<void> {
@@ -215,6 +243,7 @@
 				hudTotalCount = 0;
 				hudUnlockedCount = 0;
 				hudPinnedKeys = [];
+				hudRemainingHours = null;
 				return;
 			}
 			hudGameName = data.game_name;
@@ -223,6 +252,7 @@
 				(a) => a.unlocked || Boolean(a.unlocked_time)
 			).length;
 			hudPinnedKeys = data.pinned_keys ?? [];
+			hudRemainingHours = data.remaining_hours ?? null;
 
 			const pinSet = new Set(hudPinnedKeys.map((k) => k.trim().toLowerCase()));
 			if (pinSet.size > 0) {
@@ -231,9 +261,7 @@
 					.slice(0, 4)
 					.map((a) => ({ ...a, pinned: true }));
 			} else {
-				hudItems = data.achievements
-					.filter((a) => !a.unlocked && !a.unlocked_time)
-					.slice(0, 3);
+				hudItems = data.achievements.filter((a) => !a.unlocked && !a.unlocked_time).slice(0, 3);
 			}
 		} catch (e) {
 			console.error('Failed to refresh HUD data:', e);
@@ -267,11 +295,15 @@
 			const prefs = await getOverlayPreferences();
 			accentColor = prefs.accentColor;
 			overlayTheme = prefs.theme;
+			notifStyle = prefs.notifStyle;
 			const resolvedPosition = await positionOverlay(prefs.windowPosition);
 
-			if (!payload.is_progress) {
-				playNotificationSound(prefs.notificationSound, prefs.notificationVolume);
-			}
+			const soundToPlay = payload.is_progress
+				? prefs.progressSound
+				: payload.is_platinum
+					? prefs.platinumSound
+					: prefs.notificationSound;
+			playNotificationSound(soundToPlay, prefs.notificationVolume);
 
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -316,10 +348,15 @@
 
 		void refreshAppearancePreferences();
 
-		listen<Achievement>('achievement-notif', (event) => {
+		const enqueueAchievement = (event: { payload: Achievement }) => {
 			queue.push(event.payload);
 			processQueue();
-		}).then((fn) => cleanups.push(fn));
+		};
+
+		listen<Achievement>('achievement-notif', enqueueAchievement).then((fn) => cleanups.push(fn));
+		listen<Achievement>('achievement-progress-notif', enqueueAchievement).then((fn) =>
+			cleanups.push(fn)
+		);
 
 		listen('toggle-hud', () => {
 			void toggleHud();
@@ -356,7 +393,7 @@
 	style:--accent={accentColor}
 >
 	{#if visible && achievement}
-		<AchievementNotif {achievement} {visible} {position} />
+		<AchievementNotif {achievement} {visible} {position} {notifStyle} />
 	{:else if hudVisible}
 		<HudTracker
 			visible={hudVisible}
@@ -365,6 +402,7 @@
 			totalCount={hudTotalCount}
 			unlockedCount={hudUnlockedCount}
 			pinnedKeys={hudPinnedKeys}
+			remainingHours={hudRemainingHours}
 		/>
 	{/if}
 </div>

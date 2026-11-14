@@ -321,17 +321,17 @@
 							style="background: {preset};"
 							onclick={() => (draft.accentColor = preset)}
 							aria-label={preset === '#c8a96e'
-								? 'Gold'
+								? $i18n.t('settings.accent.gold')
 								: preset === '#4ac8ff'
-									? 'Cyan'
+									? $i18n.t('settings.accent.blue')
 									: preset === '#3ddc84'
-										? 'Green'
+										? $i18n.t('settings.accent.green')
 										: preset === '#a78bfa'
-											? 'Purple'
+											? $i18n.t('settings.accent.purple')
 											: preset === '#ff6b6b'
-												? 'Red'
+												? $i18n.t('settings.accent.red')
 												: preset === '#fb923c'
-													? 'Orange'
+													? $i18n.t('settings.accent.orange')
 													: preset}
 						></button>
 					{/each}

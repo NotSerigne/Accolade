@@ -324,6 +324,8 @@ pub fn parse_achievements_json(
             max_progress: None,
             groupid: raw.groupid,
             archived: raw.archived || archived_group_ids.contains(&raw.groupid),
+            note: None,
+            tags: Vec::new(),
         });
     }
 
@@ -401,6 +403,96 @@ async fn fetch_appdetails_throttled(
     }
 
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SteamIdentifier {
+    SteamId64(String),
+    Vanity(String),
+}
+
+fn is_valid_steam_id64(input: &str) -> bool {
+    input.len() == 17
+        && input.chars().all(|c| c.is_ascii_digit())
+        && input.parse::<u64>().is_ok_and(|n| n > 76561197960265728)
+}
+
+pub fn parse_steam_identifier(input: &str) -> Result<SteamIdentifier, String> {
+    let trimmed = input.trim().trim_end_matches('/').trim();
+    if trimmed.is_empty() {
+        return Err("INVALID_IDENTIFIER".to_string());
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+
+    const PROFILES_MARKER: &str = "steamcommunity.com/profiles/";
+    if let Some(pos) = lower.find(PROFILES_MARKER) {
+        let after = &trimmed[pos + PROFILES_MARKER.len()..];
+        let segment = after.split(['/', '?', '#']).next().unwrap_or("");
+        if is_valid_steam_id64(segment) {
+            return Ok(SteamIdentifier::SteamId64(segment.to_string()));
+        }
+        return Err("INVALID_IDENTIFIER".to_string());
+    }
+
+    const ID_MARKER: &str = "steamcommunity.com/id/";
+    if let Some(pos) = lower.find(ID_MARKER) {
+        let after = &trimmed[pos + ID_MARKER.len()..];
+        let segment = after.split(['/', '?', '#']).next().unwrap_or("");
+        if !segment.is_empty() && !segment.chars().any(char::is_whitespace) {
+            return Ok(SteamIdentifier::Vanity(segment.to_string()));
+        }
+        return Err("INVALID_IDENTIFIER".to_string());
+    }
+
+    if is_valid_steam_id64(trimmed) {
+        return Ok(SteamIdentifier::SteamId64(trimmed.to_string()));
+    }
+
+    if !trimmed.contains('/') && !trimmed.contains(char::is_whitespace) {
+        return Ok(SteamIdentifier::Vanity(trimmed.to_string()));
+    }
+
+    Err("INVALID_IDENTIFIER".to_string())
+}
+
+#[derive(Deserialize)]
+struct ResolveVanityEnvelope {
+    response: ResolveVanityData,
+}
+
+#[derive(Deserialize)]
+struct ResolveVanityData {
+    success: u32,
+    steamid: Option<String>,
+    #[allow(dead_code)]
+    message: Option<String>,
+}
+
+pub fn parse_resolve_vanity_json(json: &str) -> Result<String, String> {
+    let env: ResolveVanityEnvelope =
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse ResolveVanityURL: {e}"))?;
+    if env.response.success == 1 {
+        if let Some(sid) = env.response.steamid.filter(|s| !s.trim().is_empty()) {
+            return Ok(sid);
+        }
+    }
+    Err("VANITY_NOT_FOUND".to_string())
+}
+
+pub async fn resolve_vanity_url(api_key: &str, vanity: &str) -> Result<String, String> {
+    let client = steam_http_client();
+    let url = reqwest::Url::parse_with_params(
+        "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/",
+        &[("key", api_key), ("vanityurl", vanity)],
+    )
+    .map_err(|e| e.to_string())?;
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Steam API HTTP {}", resp.status()));
+    }
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    parse_resolve_vanity_json(&text)
 }
 
 pub async fn fetch_steam_user(
@@ -994,5 +1086,80 @@ mod tests {
         assert_eq!(achs[0].groupid, 0);
         assert!(!achs[0].archived);
         assert_eq!(achs[0].completionpercentage, "88.9");
+    }
+
+    #[test]
+    fn parses_steam_identifiers_id64_urls_and_vanity() {
+        assert_eq!(
+            parse_steam_identifier("76561198000000001").unwrap(),
+            SteamIdentifier::SteamId64("76561198000000001".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("  https://steamcommunity.com/profiles/76561198000000001/  ")
+                .unwrap(),
+            SteamIdentifier::SteamId64("76561198000000001".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("https://STEAMCOMMUNITY.COM/profiles/76561198000000001?tab=all")
+                .unwrap(),
+            SteamIdentifier::SteamId64("76561198000000001".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("steamcommunity.com/id/gabelogannewell/games?tab=all").unwrap(),
+            SteamIdentifier::Vanity("gabelogannewell".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("https://steamcommunity.com/id/gabelogannewell#section")
+                .unwrap(),
+            SteamIdentifier::Vanity("gabelogannewell".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("gabelogannewell").unwrap(),
+            SteamIdentifier::Vanity("gabelogannewell".to_string())
+        );
+
+        assert_eq!(
+            parse_steam_identifier(""),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("   /  "),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("https://steamcommunity.com/id/gabe logan"),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("https://steamcommunity.com/profiles/12345"),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("https://steamcommunity.com/profiles/76561197960265728"),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("https://example.com/user"),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+        assert_eq!(
+            parse_steam_identifier("gabe logan"),
+            Err("INVALID_IDENTIFIER".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_resolve_vanity_url_responses() {
+        let ok_json = r#"{"response":{"steamid":"76561198000000001","success":1}}"#;
+        assert_eq!(
+            parse_resolve_vanity_json(ok_json).unwrap(),
+            "76561198000000001"
+        );
+
+        let not_found_json = r#"{"response":{"success":42,"message":"No match"}}"#;
+        assert_eq!(
+            parse_resolve_vanity_json(not_found_json),
+            Err("VANITY_NOT_FOUND".to_string())
+        );
     }
 }

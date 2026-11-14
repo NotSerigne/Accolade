@@ -252,7 +252,7 @@
 			// Achievement name
 			ctx.fillStyle = '#ffffff';
 			ctx.font = '800 24px "Segoe UI", system-ui, sans-serif';
-			const achTitle = ach ? ach.name || ach.key : 'Capture Accolade';
+			const achTitle = ach ? ach.name || ach.key : $i18n.t('screenshots.defaultAchTitle');
 			ctx.fillText(achTitle, textX, by + 65);
 
 			// Description & points
@@ -297,7 +297,7 @@
 				a.download = `accolade-card-${screenshot.filename.replace(/\.(png|gif)$/i, '')}.png`;
 				a.click();
 				URL.revokeObjectURL(url);
-				shareToast = copied ? 'Carte copi\u00e9e et t\u00e9l\u00e9charg\u00e9e !' : 'Carte t\u00e9l\u00e9charg\u00e9e !';
+				shareToast = copied ? $i18n.t('screenshots.toastCopiedAndDownloaded') : $i18n.t('screenshots.toastDownloaded');
 				setTimeout(() => (shareToast = ''), 3000);
 			}, 'image/png');
 		} catch (e) {
@@ -385,7 +385,7 @@
 							decoding="async"
 						/>
 						{#if screenshot.filename.toLowerCase().endsWith('.gif')}
-							<span class="gif-badge">REPLAY GIF</span>
+							<span class="gif-badge">{$i18n.t('screenshots.replayGifBadge')}</span>
 						{/if}
 						<div class="overlay">
 							<button
@@ -503,7 +503,7 @@
 										<img
 											class="game-icon"
 											src={game.steamgrid_icon_url || game.game_icon}
-											alt={game?.name || 'Game icon'}
+											alt={game?.name || $i18n.t('screenshots.gameIconAlt')}
 											loading="lazy"
 											decoding="async"
 										/>
@@ -522,7 +522,7 @@
 											<img
 												class="ach-icon"
 												src={ach.icon}
-												alt={ach.name || 'Achievement icon'}
+												alt={ach.name || $i18n.t('screenshots.achievementIconAlt')}
 												loading="lazy"
 												decoding="async"
 												onerror={(e) => {

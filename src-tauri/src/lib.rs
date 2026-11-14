@@ -300,6 +300,12 @@ pub(crate) fn merge_schema_with_local(
                         live.groupid
                     },
                     archived: s.archived || live.archived,
+                    note: live.note.clone().or(s.note),
+                    tags: if live.tags.is_empty() {
+                        s.tags
+                    } else {
+                        live.tags.clone()
+                    },
                 }
             } else {
                 Achievement {
@@ -1224,11 +1230,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::test_achievement_notif,
+            commands::test_progress_notif,
             commands::get_achievements,
             commands::get_all_games,
             commands::sync_steam_metadata,
             commands::get_steam_user,
             commands::get_steam_owned_games,
+            commands::fetch_friend_steam_profile,
             commands::extract_game_theme_color,
             commands::export_to_json,
             commands::export_to_pdf,
@@ -1256,7 +1264,13 @@ pub fn run() {
             commands::restore_backup_zip,
             commands::set_manual_playtime,
             commands::set_achievement_state,
+            commands::set_achievement_note,
+            commands::set_achievement_tags,
+            commands::get_profile_showcase,
+            commands::set_profile_showcase,
+            commands::get_play_sessions,
             hltb::get_hltb_data,
+            hltb::get_cached_hltb_data,
             hltb::set_custom_hltb_data,
             commands::toggle_pinned_achievement,
             overlay::raise_overlay,

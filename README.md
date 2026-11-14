@@ -14,7 +14,7 @@
 
   _A Windows desktop app that tracks, enriches, and displays your achievements from emulated, cracked, and legitimate games — with real-time overlay notifications, live in-game HUD, playtime tracking, and a modern customizable UI._
 
-  [Download](#-download) • [What's New in v1.4](#-whats-new-in-v14) • [Features](#-features) • [Supported Sources](#-supported-emulators--sources) • [Setup](#-setup) • [Contributing](#-contributing)
+  [Download](#-download) • [What's New in v1.5](#-whats-new-in-v15) • [Features](#-features) • [Supported Sources](#-supported-emulators--sources) • [Setup](#-setup) • [Contributing](#-contributing)
 
 </div>
 
@@ -28,7 +28,27 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 
 ---
 
-## 🚀 What's New in v1.4
+## 🚀 What's New in v1.5
+
+### 🏆 Platinum Hunter Tools
+- 📝 **Personal Achievement Notes** — Add personal notes to any achievement, visible on the game page and directly inside the in-game HUD tracker.
+- 🏷️ **Hunting Markers & Filters** — Tag achievements (`Missable`, `Multi`, `NG+`, `Buggy`) with remaining-missable counters and dedicated tag filters.
+- ⏳ **Estimated Time Left to 100%** — Cross-references HowLongToBeat (Completionist) durations with your playtime in both the Library (with dedicated sorting) and Objectives page.
+
+### 🔔 In-Game Experience & Notifications
+- 🎨 **5 Customizable Notification Skins** — Choose between **Accolade**, **PS5**, **Xbox 360**, **Steam Deck**, and **Retro 8-bit** overlay styles with an interactive live preview in Settings.
+- 🔊 **Milestone & Platinum Alerts** — Dedicated notifications and configurable sounds for **25% / 50% / 75%** progress milestones and **100% Platinum** completion.
+
+### 📊 Showcase, Journal & Social
+- 🖼️ **Profile Showcase (Trophy Cabinet)** — Pin up to 3 favorite 100% games and 3 rarest achievements on the Stats page, and export a profile showcase card as PNG.
+- 📅 **Automatic Play Session Log** — Automatically logs gameplay sessions in the Journal alongside a 7-day weekly playtime chart.
+- 🎲 **Backlog Roulette ("What to hunt tonight?")** — Spin the roulette on the Objectives page to pick a started game or a near-unlock achievement.
+- 🤝 **Direct Steam Profile Comparison** — Compare libraries directly via SteamID64, Steam profile URL, or vanity ID (with recent friends history), alongside offline `.json` import.
+
+<details>
+<summary>Previous release highlights (v1.4, v1.3 & v1.2)</summary>
+
+### v1.4
 
 - 🧩 **Steam Achievement Sets (Base Game & DLC Separation)** — Native support for Steam achievement groups (`IPlayerService/GetGameAchievements/v1` & binary `UserGameStatsSchema_*.bin` parsing), automatically separating **Base Game** achievements from **DLC / Expansion** sets.
 - 🏆 **Dual Completion Gauges (% Platinum vs. % Total with DLC)** — Independent **Platinum Progress (Base Game)** and **Total Progress (with DLC)** bars across game pages, library cards, objectives, stats, and completion filters, so DLCs never revoke an earned Base Game Platinum.
@@ -36,9 +56,6 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 - 🏛️ **Archived & Developer-Only Achievement Handling** — Automatically filters out private/developer-only groups and handles **archived** achievements accurately (excluded from required totals when locked, counted with an `Archived` badge when unlocked).
 - 🖼️ **Library Hover Clipping Fixes** — Added grid padding and adjusted `content-visibility` containment on library game cards so hover elevation and glow effects render cleanly without clipping.
 - ⚡ **Dependency Pruning & Faster Compile Times** — Removed unused Rust and frontend dependencies (`scraper`, `quick-xml`, `screenshots` replaced by native Win32 GDI fallback, unused Tailwind/SvelteKit plugins) and trimmed crate feature flags, streamlining the dependency tree for faster builds and a leaner binary.
-
-<details>
-<summary>Previous release highlights (v1.3 & v1.2)</summary>
 
 ### v1.3
 
@@ -72,22 +89,23 @@ Head to the [**Releases**](https://github.com/NotSerigne/Accolade/releases/lates
 
 ### 🔔 In-Game Overlay & HUD
 - **Real-time unlock notifications** — Instant overlay popup the moment an achievement unlocks or crosses a progress milestone (**25% / 50% / 75%**), no Alt-Tab needed.
-- **5 Visual Skins** — **Accolade** (Gold), **Steam**, **PlayStation 5**, **Xbox**, and **Minimal**, with configurable screen position, display duration, and scale (`75%` to `135%`).
-- **Custom Audio** — Built-in sound presets (*Default*, *PlayStation*, *Xbox*, *Steam*, *Retro*) plus custom `.mp3` / `.wav` / `.ogg` / `.m4a` import for both standard and rare/platinum unlocks.
-- **In-Game Achievement Tracker HUD (`Alt+O`)** — Toggle an on-screen transparent tracker at the top-left of your screen showing your pinned achievements for the running game.
+- **5 Visual Skins** — **Accolade**, **PS5**, **Xbox 360**, **Steam Deck**, and **Retro 8-bit**, with configurable screen position and live Settings preview.
+- **Custom Audio** — Built-in sound presets (*PS4*, *PS5*, *PS5 Platinum*, *Steam*, *Steam Deck*, *Windows 8/10/11*, *Xbox*, *Xbox Rare*) plus custom `.mp3` / `.wav` / `.ogg` / `.m4a` import, with separate slots for normal unlocks, milestones, and **100% Platinum**.
+- **In-Game Achievement Tracker HUD (`Alt+A`)** — Toggle an on-screen transparent tracker showing your pinned achievements, personal notes, and progress for the running game.
 
 ### 📊 Library, Stats & Progression
 - **Rich Steam & SteamGridDB Metadata** — Pulls localized achievement names, descriptions, icons, global completion percentages, genres, and high-res icons from Steam and SteamGridDB (with automatic fallback if Steam rate-limits requests).
 - **Steam Achievement Sets & Dual Completion** — Separates **Base Game** and **DLC** achievement groups with per-set filter tabs and mini progress bars, handles **archived** achievements, and tracks **Platinum %** (Base Game) independently from **Total %** (with DLC).
-- **Playtime & HowLongToBeat** — Automatic background session timer, manual playtime override, and HLTB completion bars (**Main Story**, **Main + Extra**, **100% Completionist**).
-- **Gamerscore & Analytics** — XP & Level system in the sidebar, 52-week activity heatmap, rarity breakdown (*Mythic*, *Legendary*, *Epic*, *Very Rare*, *Rare*, *Uncommon*, *Common*), and Top 5 rarest unlocked achievements.
-- **Journal & Pinned Goals** — Chronological timeline of unlocked achievements, personal objectives, and a dedicated **Pinned Achievements** section with one-click unpinning.
+- **Platinum Hunter Tools** — Per-achievement personal notes, hunting markers (`Missable`, `Multi`, `NG+`, `Buggy`), Backlog Roulette, and estimated time left to 100% from playtime + HowLongToBeat.
+- **Playtime & Session Journal** — Automatic background session timer, manual playtime override, 7-day session chart in the Journal, and HLTB completion bars (**Main Story**, **Main + Extra**, **100% Completionist**).
+- **Profile Showcase & Analytics** — XP & Level system in the sidebar, 52-week activity heatmap, rarity breakdown (*Mythic*, *Legendary*, *Epic*, *Very Rare*, *Rare*, *Uncommon*, *Common*), Top 5 rarest achievements, and a customizable Trophy Cabinet exportable as PNG.
+- **Journal & Pinned Goals** — Chronological timeline of unlocked achievements and play sessions, personal objectives, and a dedicated **Pinned Achievements** section with one-click unpinning.
 - **Manual Achievement Manager** — Toggle any achievement's unlocked state and edit its exact unlock timestamp directly from the game page.
 
 ### 📸 Media & Sharing
-- **Auto Screenshots & `Alt+F9` Hotkey** — Automatically captures the screen on unlock (or manually via `Alt+F9`) and links each screenshot to its game and achievement in a full-screen lightbox gallery.
-- **Instant Replay GIF (`Alt+F10`)** — Captures the last seconds of gameplay as an animated `.gif` when an achievement pops or on demand.
-- **Friend Comparison (Drag & Drop)** — Export your profile to `.json` or `.pdf` and drag & drop a friend's `.json` profile onto the **Compare** page to inspect head-to-head stats and per-game completion.
+- **Auto Screenshots & `F12` Hotkey** — Automatically captures the screen on unlock (or manually via `F12`), links each screenshot to its game and achievement in a full-screen lightbox gallery, and exports share cards.
+- **Automatic Replay GIF** — Rolling 6-second background screen buffer that saves an animated `.gif` clip when an achievement pops (when enabled in Settings).
+- **Friend Comparison (Steam & Offline JSON)** — Compare directly via SteamID64, profile URL, or vanity ID (with recent friends history), or drag & drop a friend's exported `.json` profile onto the **Compare** page.
 - **Full `.zip` Backup & Restore** — Safeguard all your emulator save/achievement files and Accolade data in one click from Settings.
 
 ---
@@ -147,9 +165,10 @@ On first launch, a setup wizard will guide you through the configuration. You ca
 | **RetroAchievements API Key** | ⬜ | [retroachievements.org/settings](https://retroachievements.org/settings) — optional retro console sync |
 
 ### ⌨️ Default Global Shortcuts
-- **`Alt+O`** — Toggle the In-Game Achievement Tracker HUD
-- **`Alt+F9`** — Capture a manual screenshot
-- **`Alt+F10`** — Save an Instant Replay GIF clip (when Instant Replay is enabled in Settings)
+| Shortcut | Action |
+| :--- | :--- |
+| **`Alt + A`** | Show / Hide the In-Game Achievement Tracker HUD |
+| **`F12`** | Capture a manual screenshot of the running game |
 
 ---
 

@@ -3,7 +3,15 @@
 	import { get } from 'svelte/store';
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
-	import { settings, saveSettings, applyTheme, type AppSettings } from '$lib/stores/settings.js';
+	import {
+		settings,
+		saveSettings,
+		applyTheme,
+		type AppSettings,
+		type NotifAchievement,
+		type NotifStyle
+	} from '$lib/stores/settings.js';
+	import AchievementNotif from '$lib/AchievementNotif.svelte';
 	import { settingsOpen } from '$lib/stores/ui.js';
 	import { syncSteamMetadata, loadGames, games, totalCompletedGames } from '$lib/stores/Games.js';
 	import { refreshSteamUser, steamUser } from '$lib/stores/user.js';
@@ -27,12 +35,16 @@
 	let isSaving = $state(false);
 	let saveError = $state('');
 	type NoticeKind = 'success' | 'error' | 'info';
+	type SoundSettingKey = 'notificationSound' | 'progressSound' | 'platinumSound';
+	type PreviewKind = 'normal' | 'progress' | 'platinum';
 	let actionNotice = $state<{ text: string; kind: NoticeKind } | null>(null);
 	let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 	let apiKeyVisible = $state(false);
 	let sgdbKeyVisible = $state(false);
 	let previewAudio = $state<HTMLAudioElement | null>(null);
 	let previewingSound = $state('');
+	let previewingSlot = $state<string>('');
+	let previewKind = $state<PreviewKind>('normal');
 	let isRecordingShortcut = $state(false);
 	let isRecordingHudShortcut = $state(false);
 	let appVersion = $state('');
@@ -65,8 +77,18 @@
 	$effect(() => {
 		return () => {
 			if (noticeTimer) clearTimeout(noticeTimer);
+			stopPreviewAudio();
 		};
 	});
+
+	function stopPreviewAudio(): void {
+		if (previewAudio) {
+			previewAudio.pause();
+			previewAudio = null;
+		}
+		previewingSound = '';
+		previewingSlot = '';
+	}
 
 	async function refreshCustomSounds() {
 		try {
@@ -76,7 +98,7 @@
 		}
 	}
 
-	async function handleImportSound() {
+	async function handleImportSound(targetKey: SoundSettingKey) {
 		try {
 			const selected = await open({
 				multiple: false,
@@ -87,7 +109,7 @@
 					sourcePath: selected
 				});
 				await refreshCustomSounds();
-				draft.notificationSound = 'custom:' + imported.path;
+				draft[targetKey] = 'custom:' + imported.path;
 				showNotice(imported.filename, 'success');
 			}
 		} catch (e) {
@@ -122,7 +144,7 @@
 				const count = await invoke<number>('restore_backup_zip', { zipPath: src });
 				await refreshCustomSounds();
 				await loadGames();
-				showNotice('Restauration termin\u00e9e (' + count + ' fichiers)', 'success');
+				showNotice(get(i18n).t('settings.backupRestoreSuccess', { count }), 'success');
 			}
 		} catch (e) {
 			console.error('Restore failed:', e);
@@ -197,6 +219,57 @@
 		{ labelKey: 'settings.accent.orange', value: '#fb923c' }
 	] as const;
 
+	const notifStyleOptions: Array<{ value: NotifStyle; labelKey: TranslationKey }> = [
+		{ value: 'accolade', labelKey: 'settings.notifStyle.accolade' },
+		{ value: 'ps5', labelKey: 'settings.notifStyle.ps5' },
+		{ value: 'xbox360', labelKey: 'settings.notifStyle.xbox360' },
+		{ value: 'steamdeck', labelKey: 'settings.notifStyle.steamdeck' },
+		{ value: 'retro', labelKey: 'settings.notifStyle.retro' }
+	];
+
+	const soundSlots: Array<{ key: SoundSettingKey; labelKey: TranslationKey }> = [
+		{ key: 'notificationSound', labelKey: 'settings.normalSound' },
+		{ key: 'progressSound', labelKey: 'settings.progressSound' },
+		{ key: 'platinumSound', labelKey: 'settings.platinumSound' }
+	];
+
+	const previewAchievement = $derived.by<NotifAchievement>(() => {
+		if (previewKind === 'progress') {
+			return {
+				name: $i18n.t('settings.previewData.progressName'),
+				desc: $i18n.t('settings.previewData.progressDesc'),
+				is_progress: true,
+				progress_current: 50,
+				progress_max: 100,
+				progress_milestone: 50
+			};
+		}
+		if (previewKind === 'platinum') {
+			return {
+				name: $i18n.t('settings.previewData.platinumName'),
+				desc: $i18n.t('settings.previewData.platinumDesc'),
+				rarity: $i18n.t('notif.platinum'),
+				completionpercentage: 0.4,
+				unlocked: 50,
+				total: 50,
+				unlocked_time: 1714470000,
+				is_platinum: true,
+				is_progress: false
+			};
+		}
+		return {
+			name: $i18n.t('settings.previewData.normalName'),
+			desc: $i18n.t('settings.previewData.normalDesc'),
+			rarity: rarityLabelByIndex($i18n.language, 4),
+			completionpercentage: 2.5,
+			unlocked: 12,
+			total: 50,
+			unlocked_time: 1714470000,
+			is_platinum: false,
+			is_progress: false
+		};
+	});
+
 	const soundOptions: Array<{ value: string; label?: string; labelKey?: TranslationKey }> = [
 		{ value: 'none', labelKey: 'setup.sound.none' },
 		{ value: 'PS4.mp3', label: 'PS4' },
@@ -266,13 +339,10 @@
 		draft.windowPosition = value;
 	}
 
-	function previewSound(filename: string): void {
-		if (previewAudio) {
-			previewAudio.pause();
-			previewAudio = null;
-		}
-		if (!filename || filename === 'none' || previewingSound === filename) {
-			previewingSound = '';
+	function previewSound(filename: string, slotKey = ''): void {
+		const isSameSlot = previewingSlot === slotKey && previewingSound === filename;
+		stopPreviewAudio();
+		if (!filename || filename === 'none' || isSameSlot) {
 			return;
 		}
 		const src = filename.startsWith('custom:')
@@ -282,30 +352,47 @@
 		audio.volume = draft.notificationVolume;
 		previewAudio = audio;
 		previewingSound = filename;
+		previewingSlot = slotKey;
 		audio.play().catch(() => {});
 		audio.addEventListener('ended', () => {
 			previewingSound = '';
+			previewingSlot = '';
 			previewAudio = null;
 		});
 	}
 
-	async function testNotification(): Promise<void> {
-		try {
-			const { Store } = await import('@tauri-apps/plugin-store');
-			const store = await Store.load('settings.json');
-			await store.set('windowPosition', draft.windowPosition);
-			await store.set('notificationSound', draft.notificationSound);
-			await store.set('notificationVolume', draft.notificationVolume);
-			await store.save();
+	async function persistOverlayTestPreferences(): Promise<void> {
+		const { Store } = await import('@tauri-apps/plugin-store');
+		const store = await Store.load('settings.json');
+		await store.set('windowPosition', draft.windowPosition);
+		await store.set('notif_style', draft.notif_style);
+		await store.set('notificationSound', draft.notificationSound);
+		await store.set('progressSound', draft.progressSound);
+		await store.set('platinumSound', draft.platinumSound);
+		await store.set('notificationVolume', draft.notificationVolume);
+		await store.save();
+	}
 
-			const { invoke } = await import('@tauri-apps/api/core');
-			await invoke('test_achievement_notif');
+	async function invokeOverlayTest(
+		commandName: 'test_achievement_notif' | 'test_progress_notif'
+	): Promise<void> {
+		try {
+			await persistOverlayTestPreferences();
+			await invoke(commandName);
 		} catch (error) {
-			console.error('Test notification failed:', error);
+			console.error(`Test notification (${commandName}) failed:`, error);
 			saveError = get(i18n).t('setup.errorTest', {
 				details: error instanceof Error ? error.message : String(error)
 			});
 		}
+	}
+
+	function testNotification(): Promise<void> {
+		return invokeOverlayTest('test_achievement_notif');
+	}
+
+	function testProgressNotification(): Promise<void> {
+		return invokeOverlayTest('test_progress_notif');
 	}
 
 	async function handleExport() {
@@ -325,7 +412,7 @@
 
 			const title = `${get(i18n).t('settings.reportTitle')} ${user?.personaname || get(i18n).t('settings.unknownPlayer')}`;
 			let content = `${get(i18n).t('settings.reportDate')}: ${new Date().toLocaleDateString()}\n`;
-			content += `${get(i18n).t('settings.reportPlayer')}: ${user?.personaname || get(i18n).t('settings.unknownPlayer')} (SteamID: ${user?.steamid || 'N/A'})\n\n`;
+			content += `${get(i18n).t('settings.reportPlayer')}: ${user?.personaname || get(i18n).t('settings.unknownPlayer')} (SteamID: ${user?.steamid || get(i18n).t('compare.na')})\n\n`;
 
 			content += `${get(i18n).t('settings.reportGlobalStats')}\n`;
 			content += `${get(i18n).t('settings.reportTotalGames')}: ${gamesList.length}\n`;
@@ -334,9 +421,9 @@
 			content += `${get(i18n).t('settings.reportCompletedGames')}: ${get(totalCompletedGames)}\n\n`;
 
 			content += `${get(i18n).t('settings.reportRecords')}\n`;
-			content += `${get(i18n).t('settings.reportRarest')}: ${stats.rarestAchievement ? `${stats.rarestAchievement.name} (${stats.rarestAchievement.pct}%)` : 'N/A'}\n`;
-			content += `${get(i18n).t('settings.reportOneDay')}: ${stats.maxAchievementsInDay} succès\n`;
-			content += `${get(i18n).t('settings.reportOneWeek')}: ${stats.maxAchievementsInWeek} succès\n\n`;
+			content += `${get(i18n).t('settings.reportRarest')}: ${stats.rarestAchievement ? `${stats.rarestAchievement.name} (${stats.rarestAchievement.pct}%)` : get(i18n).t('compare.na')}\n`;
+			content += `${get(i18n).t('settings.reportOneDay')}: ${get(i18n).t('settings.reportAchievementsCount', { count: stats.maxAchievementsInDay })}\n`;
+			content += `${get(i18n).t('settings.reportOneWeek')}: ${get(i18n).t('settings.reportAchievementsCount', { count: stats.maxAchievementsInWeek })}\n\n`;
 
 			content += `${get(i18n).t('settings.reportGameDetails')}\n`;
 			content += `------------------\n`;
@@ -373,7 +460,10 @@
 				language: draft.language,
 				setupCompleted: draft.setupCompleted,
 				windowPosition: draft.windowPosition,
+				notif_style: draft.notif_style,
 				notificationSound: draft.notificationSound,
+				progressSound: draft.progressSound,
+				platinumSound: draft.platinumSound,
 				notificationVolume: draft.notificationVolume,
 				theme: draft.theme,
 				accentColor: draft.accentColor,
@@ -433,6 +523,7 @@
 	}
 
 	function close(): void {
+		stopPreviewAudio();
 		applyTheme({ ...get(settings) });
 		settingsOpen.set(false);
 	}
@@ -775,54 +866,54 @@
 				</div>
 
 				<div class="position-side">
-					<p class="position-side-label">{$i18n.t('settings.sound')}</p>
-					<div class="sound-row">
-						<select class="sound-select" bind:value={draft.notificationSound}>
-							{#each soundOptions as opt (opt.value)}
-								<option value={opt.value}>{opt.labelKey ? $i18n.t(opt.labelKey) : opt.label}</option
-								>
-							{/each}
-							{#each customSounds as cs (cs.path)}
-								<option value={"custom:" + cs.path}>{cs.filename}</option>
-							{/each}
-						</select>
-						<button
-							type="button"
-							class="sound-preview-btn"
-							onclick={handleImportSound}
-							title={$i18n.t('settings.importSound')}
-						>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-								<line x1="12" y1="5" x2="12" y2="19" />
-								<line x1="5" y1="12" x2="19" y2="12" />
-							</svg>
-						</button>
-						<button
-							type="button"
-							class="sound-preview-btn"
-							class:playing={previewingSound === draft.notificationSound &&
-								draft.notificationSound !== 'none'}
-							onclick={() => previewSound(draft.notificationSound)}
-							title={previewingSound === draft.notificationSound
-								? $i18n.t('settings.soundStop')
-								: $i18n.t('settings.soundPlay')}
-							disabled={draft.notificationSound === 'none'}
-						>
-							{#if previewingSound === draft.notificationSound && draft.notificationSound !== 'none'}
-								<!-- Stop icon -->
-								<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-									<rect x="4" y="4" width="16" height="16" rx="2" />
+					{#each soundSlots as slot (slot.key)}
+						<p class="position-side-label">{$i18n.t(slot.labelKey)}</p>
+						<div class="sound-row">
+							<select class="sound-select" bind:value={draft[slot.key]}>
+								{#each soundOptions as opt (opt.value)}
+									<option value={opt.value}>{opt.labelKey ? $i18n.t(opt.labelKey) : opt.label}</option>
+								{/each}
+								{#each customSounds as cs (cs.path)}
+									<option value={'custom:' + cs.path}>{cs.filename}</option>
+								{/each}
+							</select>
+							<button
+								type="button"
+								class="sound-preview-btn"
+								onclick={() => handleImportSound(slot.key)}
+								title={$i18n.t('settings.importSound')}
+							>
+								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+									<line x1="12" y1="5" x2="12" y2="19" />
+									<line x1="5" y1="12" x2="19" y2="12" />
 								</svg>
-							{:else}
-								<!-- Play icon -->
-								<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-									<polygon points="5,3 19,12 5,21" />
-								</svg>
-							{/if}
-						</button>
-					</div>
+							</button>
+							<button
+								type="button"
+								class="sound-preview-btn"
+								class:playing={previewingSlot === slot.key &&
+									previewingSound === draft[slot.key] &&
+									draft[slot.key] !== 'none'}
+								onclick={() => previewSound(draft[slot.key], slot.key)}
+								title={previewingSlot === slot.key && previewingSound === draft[slot.key]
+									? $i18n.t('settings.soundStop')
+									: $i18n.t('settings.soundPlay')}
+								disabled={draft[slot.key] === 'none'}
+							>
+								{#if previewingSlot === slot.key && previewingSound === draft[slot.key] && draft[slot.key] !== 'none'}
+									<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+										<rect x="4" y="4" width="16" height="16" rx="2" />
+									</svg>
+								{:else}
+									<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+										<polygon points="5,3 19,12 5,21" />
+									</svg>
+								{/if}
+							</button>
+						</div>
+					{/each}
 
-					<p class="position-side-label" style="margin-top: 12px;">{$i18n.t('settings.volume')}</p>
+					<p class="position-side-label" style="margin-top: 8px;">{$i18n.t('settings.volume')}</p>
 					<div class="volume-row">
 						<svg
 							width="14"
@@ -847,22 +938,99 @@
 						<span class="volume-value">{Math.round(draft.notificationVolume * 100)}%</span>
 					</div>
 
-					<p class="position-side-label" style="margin-top: 12px;">{$i18n.t('settings.test')}</p>
-					<button type="button" class="test-btn" onclick={testNotification}>
-						<svg
-							width="13"
-							height="13"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
+					<p class="position-side-label" style="margin-top: 8px;">{$i18n.t('settings.test')}</p>
+					<div class="test-btn-row">
+						<button type="button" class="test-btn" onclick={testNotification}>
+							<svg
+								width="13"
+								height="13"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path
+									d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+								/>
+							</svg>
+							{$i18n.t('settings.testNotif')}
+						</button>
+						<button type="button" class="test-btn test-btn-progress" onclick={testProgressNotification}>
+							<svg
+								width="13"
+								height="13"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+							</svg>
+							{$i18n.t('settings.testProgressNotif')}
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div class="notif-style-block">
+				<div class="notif-style-header">
+					<div>
+						<div class="notif-style-title">{$i18n.t('settings.notifStyle')}</div>
+						<div class="notif-style-desc">{$i18n.t('settings.notifStyleDesc')}</div>
+					</div>
+				</div>
+
+				<div class="notif-style-pills">
+					{#each notifStyleOptions as opt (opt.value)}
+						<button
+							type="button"
+							class="notif-style-pill"
+							class:active={draft.notif_style === opt.value}
+							onclick={() => (draft.notif_style = opt.value)}
 						>
-							<path
-								d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
-							/>
-						</svg>
-						{$i18n.t('settings.testNotif')}
-					</button>
+							{$i18n.t(opt.labelKey)}
+						</button>
+					{/each}
+				</div>
+
+				<div class="notif-preview-box">
+					<div class="notif-preview-toolbar">
+						<span class="position-side-label">{$i18n.t('settings.notifPreview')}</span>
+						<div class="preview-kind-tabs">
+							<button
+								type="button"
+								class="preview-kind-btn"
+								class:active={previewKind === 'normal'}
+								onclick={() => (previewKind = 'normal')}
+							>
+								{$i18n.t('settings.previewNormal')}
+							</button>
+							<button
+								type="button"
+								class="preview-kind-btn"
+								class:active={previewKind === 'progress'}
+								onclick={() => (previewKind = 'progress')}
+							>
+								{$i18n.t('settings.previewProgress')}
+							</button>
+							<button
+								type="button"
+								class="preview-kind-btn"
+								class:active={previewKind === 'platinum'}
+								onclick={() => (previewKind = 'platinum')}
+							>
+								{$i18n.t('settings.previewPlatinum')}
+							</button>
+						</div>
+					</div>
+					<div class="notif-preview-stage">
+						<AchievementNotif
+							achievement={previewAchievement}
+							visible={true}
+							notifStyle={draft.notif_style}
+							preview={true}
+						/>
+					</div>
 				</div>
 			</div>
 		</section>
@@ -1952,16 +2120,22 @@
 		flex-shrink: 0;
 	}
 
+	.test-btn-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
 	.test-btn {
 		height: 36px;
-		padding: 0 16px;
+		padding: 0 14px;
 		border-radius: 8px;
 		background: color-mix(in srgb, #4ac8ff 12%, transparent);
 		border: 1px solid #4ac8ff;
 		color: #4ac8ff;
 		font-size: 13px;
 		cursor: pointer;
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		gap: 7px;
 		font-family: inherit;
@@ -1972,13 +2146,141 @@
 			border-color 0.12s;
 	}
 
+	.test-btn-progress {
+		background: color-mix(in srgb, var(--accent, #c8a96e) 12%, transparent);
+		border-color: var(--accent, #c8a96e);
+		color: var(--accent, #c8a96e);
+	}
+
 	.test-btn:hover {
 		background: color-mix(in srgb, #4ac8ff 18%, transparent);
 		border-color: #4ac8ff;
 	}
 
+	.test-btn-progress:hover {
+		background: color-mix(in srgb, var(--accent, #c8a96e) 20%, transparent);
+		border-color: var(--accent, #c8a96e);
+	}
+
 	.test-btn:active {
 		transform: scale(0.98);
+	}
+
+	.notif-style-block {
+		margin-top: 20px;
+		padding-top: 18px;
+		border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.notif-style-header {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.notif-style-title {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.notif-style-desc {
+		font-size: 12px;
+		color: var(--text-muted);
+		margin-top: 2px;
+	}
+
+	.notif-style-pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.notif-style-pill {
+		padding: 7px 14px;
+		border-radius: 8px;
+		border: 1px solid var(--border-soft);
+		background: var(--surface-2);
+		color: var(--text-secondary, var(--text-primary));
+		font-size: 12.5px;
+		font-weight: 500;
+		font-family: inherit;
+		cursor: pointer;
+		transition:
+			background 0.12s,
+			border-color 0.12s,
+			color 0.12s;
+	}
+
+	.notif-style-pill:hover {
+		background: var(--surface-hover);
+	}
+
+	.notif-style-pill.active {
+		background: color-mix(in srgb, var(--accent, #c8a96e) 16%, transparent);
+		border-color: var(--accent, #c8a96e);
+		color: var(--accent, #c8a96e);
+		font-weight: 600;
+	}
+
+	.notif-preview-box {
+		border-radius: 12px;
+		border: 1px solid var(--border-soft);
+		background: color-mix(in srgb, var(--surface-2) 70%, #090b10);
+		padding: 12px 14px 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		overflow: hidden;
+	}
+
+	.notif-preview-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.preview-kind-tabs {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+
+	.preview-kind-btn {
+		padding: 4px 10px;
+		border-radius: 6px;
+		border: 1px solid var(--border-soft);
+		background: transparent;
+		color: var(--text-muted);
+		font-size: 11.5px;
+		font-weight: 500;
+		font-family: inherit;
+		cursor: pointer;
+		transition:
+			background 0.12s,
+			color 0.12s,
+			border-color 0.12s;
+	}
+
+	.preview-kind-btn.active {
+		background: var(--surface-hover);
+		border-color: var(--accent, #c8a96e);
+		color: var(--text-primary);
+	}
+
+	.notif-preview-stage {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		min-height: 112px;
+		width: 100%;
+		overflow: hidden;
 	}
 
 	.position-test-row {
@@ -1991,8 +2293,10 @@
 	.position-side {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 8px;
 		padding-top: 4px;
+		flex: 1;
+		min-width: 240px;
 	}
 
 	.position-side-label {

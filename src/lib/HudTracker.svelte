@@ -1,7 +1,22 @@
 <script lang="ts">
 	// src/lib/HudTracker.svelte
 	import { i18n } from '$lib/stores/i18n.js';
-	import { getRarityPalette } from '$lib/stores/Games.js';
+	import {
+		getRarityPalette,
+		normalizeAchievementTags,
+		formatRemainingTimeHours,
+		type AchievementTagKey
+	} from '$lib/stores/Games.js';
+
+	const TAG_I18N_KEYS: Record<
+		AchievementTagKey,
+		'game.tag.missable' | 'game.tag.multi' | 'game.tag.ngplus' | 'game.tag.buggy'
+	> = {
+		missable: 'game.tag.missable',
+		multi: 'game.tag.multi',
+		ngplus: 'game.tag.ngplus',
+		buggy: 'game.tag.buggy'
+	};
 
 	interface HudAchievement {
 		key: string;
@@ -16,6 +31,8 @@
 		rarity?: number | string | null;
 		completionpercentage?: string | number | null;
 		pinned?: boolean;
+		note?: string | null;
+		tags?: string[];
 	}
 
 	let {
@@ -24,7 +41,8 @@
 		achievements = [],
 		totalCount = undefined,
 		unlockedCount = undefined,
-		pinnedKeys = []
+		pinnedKeys = [],
+		remainingHours = null
 	} = $props<{
 		visible: boolean;
 		gameName: string;
@@ -32,6 +50,7 @@
 		totalCount?: number;
 		unlockedCount?: number;
 		pinnedKeys?: string[];
+		remainingHours?: number | null;
 	}>();
 
 	let pinnedSet = $derived(new Set(pinnedKeys.map((k: string) => k.trim().toLowerCase())));
@@ -80,6 +99,31 @@
 			<span class="hud-progress-pct tabular-nums">{overallPct}%</span>
 		</div>
 
+		{#if remainingHours !== null && remainingHours !== undefined && overallPct < 100}
+			<div class="hud-remaining-time">
+				<svg
+					class="hud-time-icon"
+					width="11"
+					height="11"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="9" />
+					<polyline points="12 7 12 12 15 14" />
+				</svg>
+				<span class="tabular-nums">
+					{$i18n.t('objectives.remainingTimeBadge', {
+						time: formatRemainingTimeHours(remainingHours)
+					})}
+				</span>
+			</div>
+		{/if}
+
 		{#if achievements.length === 0}
 			<div class="hud-empty">{$i18n.t('hud.empty')}</div>
 		{:else}
@@ -89,11 +133,16 @@
 					{@const hasProg = Boolean(ach.max_progress && ach.max_progress > 0)}
 					{@const cur = ach.progress ?? 0}
 					{@const max = ach.max_progress ?? 0}
-					{@const pct = hasProg ? Math.min(Math.max((cur / max) * 100, 0), 100) : unlocked ? 100 : 0}
+					{@const pct = hasProg
+						? Math.min(Math.max((cur / max) * 100, 0), 100)
+						: unlocked
+							? 100
+							: 0}
 					{@const icon = !unlocked && ach.icon_gray ? ach.icon_gray : ach.icon}
 					{@const isPinned = Boolean(ach.pinned) || pinnedSet.has(ach.key.trim().toLowerCase())}
 					{@const rarityPct = getRarityPct(ach)}
 					{@const palette = rarityPct !== null ? getRarityPalette(rarityPct) : null}
+					{@const achTags = normalizeAchievementTags(ach.tags)}
 					<div class="ach-row" class:done={unlocked}>
 						{#if icon}
 							<img class="hud-icon" src={icon} alt="" loading="lazy" decoding="async" />
@@ -183,6 +232,36 @@
 							</div>
 							{#if ach.desc}
 								<div class="hud-desc">{ach.desc}</div>
+							{/if}
+							{#if achTags.length > 0}
+								<div class="hud-tags-row">
+									{#each achTags as tag (tag)}
+										<span class="hud-marker-badge" data-tag={tag}>
+											{$i18n.t(TAG_I18N_KEYS[tag])}
+										</span>
+									{/each}
+								</div>
+							{/if}
+							{#if ach.note?.trim()}
+								<div class="hud-note" title={ach.note.trim()}>
+									<svg
+										class="hud-note-icon"
+										viewBox="0 0 16 16"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.5"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M10.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V5.5Z"
+										/>
+										<path d="M10 2.5V6h3.5" />
+										<path d="M5.5 8.5h5M5.5 11h3.5" />
+									</svg>
+									<span class="hud-note-text">{ach.note.trim()}</span>
+								</div>
 							{/if}
 							{#if hasProg && !unlocked}
 								<div class="hud-bar">
@@ -350,6 +429,31 @@
 		text-align: right;
 	}
 
+	.hud-remaining-time {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		max-width: 100%;
+		margin: -4px 0 10px;
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-size: 10.5px;
+		font-weight: 700;
+		color: var(--accent, #c8a96e);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 14%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent, #c8a96e) 32%, transparent);
+		line-height: 1.35;
+	}
+
+	.hud-time-icon {
+		flex-shrink: 0;
+	}
+
+	:global([data-theme='light']) .hud-remaining-time {
+		color: color-mix(in srgb, var(--accent, #c8a96e) 78%, #0f172a);
+		background: color-mix(in srgb, var(--accent, #c8a96e) 16%, transparent);
+	}
+
 	.hud-empty {
 		font-size: 12px;
 		color: rgba(255, 255, 255, 0.6);
@@ -484,6 +588,92 @@
 
 	:global([data-theme='light']) .hud-desc {
 		color: #475569;
+	}
+
+	.hud-tags-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		margin-top: 1px;
+	}
+
+	.hud-marker-badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 1px 6px;
+		border-radius: 999px;
+		font-size: 9px;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		line-height: 1.35;
+		border: 1px solid transparent;
+	}
+
+	.hud-marker-badge[data-tag='missable'] {
+		background: rgba(245, 158, 11, 0.16);
+		border-color: rgba(245, 158, 11, 0.55);
+		color: #fbbf24;
+	}
+
+	.hud-marker-badge[data-tag='multi'] {
+		background: rgba(56, 189, 248, 0.15);
+		border-color: rgba(56, 189, 248, 0.52);
+		color: #38bdf8;
+	}
+
+	.hud-marker-badge[data-tag='ngplus'] {
+		background: rgba(192, 132, 252, 0.15);
+		border-color: rgba(192, 132, 252, 0.52);
+		color: #c084fc;
+	}
+
+	.hud-marker-badge[data-tag='buggy'] {
+		background: rgba(248, 113, 113, 0.15);
+		border-color: rgba(248, 113, 113, 0.52);
+		color: #f87171;
+	}
+
+	:global([data-theme='light']) .hud-marker-badge[data-tag='missable'] {
+		color: #b45309;
+	}
+
+	:global([data-theme='light']) .hud-marker-badge[data-tag='multi'] {
+		color: #0369a1;
+	}
+
+	:global([data-theme='light']) .hud-marker-badge[data-tag='ngplus'] {
+		color: #7e22ce;
+	}
+
+	:global([data-theme='light']) .hud-marker-badge[data-tag='buggy'] {
+		color: #b91c1c;
+	}
+
+	.hud-note {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 10.5px;
+		color: #fbbf24;
+		min-width: 0;
+	}
+
+	.hud-note-icon {
+		width: 11px;
+		height: 11px;
+		flex-shrink: 0;
+	}
+
+	.hud-note-text {
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	:global([data-theme='light']) .hud-note {
+		color: #b45309;
 	}
 
 	.hud-bar {

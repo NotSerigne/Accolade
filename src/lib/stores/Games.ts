@@ -4,6 +4,23 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { settings } from './settings';
 import { isSyncing } from './ui';
+import {
+	ACHIEVEMENT_TAG_KEYS,
+	normalizeAchievementTagKey,
+	normalizeAchievementTags,
+	computeRemainingCompletionistHours,
+	formatRemainingTimeHours,
+	type AchievementTagKey
+} from '../utils/achievementHelpers';
+
+export {
+	ACHIEVEMENT_TAG_KEYS,
+	normalizeAchievementTagKey,
+	normalizeAchievementTags,
+	computeRemainingCompletionistHours,
+	formatRemainingTimeHours,
+	type AchievementTagKey
+};
 
 export interface Achievement {
 	key: string;
@@ -22,6 +39,10 @@ export interface Achievement {
 	max_progress?: number | null;
 	groupid?: number;
 	archived?: boolean;
+	/** Optional user-written personal note displayed on the sheet and HUD. */
+	note?: string | null;
+	/** Canonical marker tags assigned by the user (`missable`, `multi`, `ngplus`, `buggy`). */
+	tags?: string[];
 }
 
 export interface AchievementGroup {
@@ -538,7 +559,9 @@ export function setupAchievementsRealtimeSync(): void {
 					return {
 						...incoming,
 						groupid: incoming.groupid ?? prev.groupid,
-						archived: incoming.archived ?? prev.archived
+						archived: incoming.archived ?? prev.archived,
+						note: incoming.note !== undefined ? incoming.note : prev.note,
+						tags: incoming.tags !== undefined ? incoming.tags : prev.tags
 					};
 				});
 				const total = payload.achievements_total ?? mergedAchievements.length;
@@ -555,9 +578,7 @@ export function setupAchievementsRealtimeSync(): void {
 		if (!payload || !payload.game_id) return;
 		games.update((currentGames) =>
 			currentGames.map((game) =>
-				game.id === payload.game_id
-					? { ...game, playtime_seconds: payload.playtime_seconds }
-					: game
+				game.id === payload.game_id ? { ...game, playtime_seconds: payload.playtime_seconds } : game
 			)
 		);
 	});

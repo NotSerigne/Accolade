@@ -38,27 +38,40 @@ pub struct AchievementNotifPayload {
     pub progress_current: Option<f64>,
     #[serde(default)]
     pub progress_max: Option<f64>,
+    #[serde(default)]
+    pub progress_milestone: Option<u32>,
 }
 
-/// Returns a milestone bucket (`1..=3` for 25%, 50%, 75%; or step index when `max <= 10`)
-/// so intermediate notifications only fire when a new threshold is crossed.
+/// Returns a milestone bucket (`25`, `50`, or `75`) once `current / max` crosses
+/// the corresponding percentage threshold, or `0` otherwise.
 fn progress_milestone_bucket(current: f64, max: f64) -> u32 {
-    if !(current.is_finite() && max.is_finite() && max > 0.0 && current > 0.0 && current < max) {
+    if !(current.is_finite() && max.is_finite() && max > 1.0 && current > 0.0 && current < max) {
         return 0;
-    }
-    if max <= 10.0 {
-        return current.floor() as u32;
     }
     let ratio = current / max;
     if ratio >= 0.75 {
-        3
+        75
     } else if ratio >= 0.50 {
-        2
+        50
     } else if ratio >= 0.25 {
-        1
+        25
     } else {
         0
     }
+}
+
+fn seed_progress_buckets(achievements: &[Achievement]) -> HashMap<String, u32> {
+    achievements
+        .iter()
+        .filter_map(|a| {
+            let cur = a.progress?;
+            let max = a.max_progress?;
+            Some((
+                a.key.trim().to_lowercase(),
+                progress_milestone_bucket(cur, max),
+            ))
+        })
+        .collect()
 }
 
 #[derive(Serialize, Clone)]
@@ -393,19 +406,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                         .collect();
                     unlocked_by_game.insert(game.id.clone(), unlocked);
                     live_keys_by_game.insert(game.id.clone(), live_keys(&game.achievements));
-                    let buckets: HashMap<String, u32> = game
-                        .achievements
-                        .iter()
-                        .filter_map(|a| {
-                            let cur = a.progress?;
-                            let max = a.max_progress?;
-                            Some((
-                                a.key.trim().to_lowercase(),
-                                progress_milestone_bucket(cur, max),
-                            ))
-                        })
-                        .collect();
-                    progress_bucket_by_game.insert(game.id.clone(), buckets);
+                    progress_bucket_by_game
+                        .insert(game.id.clone(), seed_progress_buckets(&game.achievements));
                 }
             }
         }
@@ -496,18 +498,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 live_keys_by_game.insert(game.id.clone(), live_keys(achs));
                             }
                             if !progress_bucket_by_game.contains_key(&game.id) {
-                                let buckets: HashMap<String, u32> = achs
-                                    .iter()
-                                    .filter_map(|a| {
-                                        let cur = a.progress?;
-                                        let max = a.max_progress?;
-                                        Some((
-                                            a.key.trim().to_lowercase(),
-                                            progress_milestone_bucket(cur, max),
-                                        ))
-                                    })
-                                    .collect();
-                                progress_bucket_by_game.insert(game.id.clone(), buckets);
+                                progress_bucket_by_game
+                                    .insert(game.id.clone(), seed_progress_buckets(achs));
                             }
                         }
                     }
@@ -591,6 +583,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                         }
                     }
 
+                    let user_data = crate::user_data::load_user_data(&app_handle);
                     let (ui_achievements, ui_total, ui_groups) = {
                         let state = app_handle.state::<AppState>();
                         state
@@ -599,11 +592,16 @@ pub fn start(app_handle: tauri::AppHandle) {
                             .ok()
                             .and_then(|mut gs| {
                                 gs.iter_mut().find(|g| g.id == game.id).map(|stored| {
-                                    let merged = merge_live_achievements(
+                                    let mut merged = merge_live_achievements(
                                         &stored.achievements,
                                         &achievements,
                                         &snapshot_previous_live_keys,
                                         &current_live_keys,
+                                    );
+                                    crate::commands::apply_manual_overrides_to_list(
+                                        &game.id,
+                                        &mut merged,
+                                        &user_data,
                                     );
                                     let total = merged.len() as u32;
                                     stored.achievements = merged.clone();
@@ -618,7 +616,12 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 })
                             })
                             .unwrap_or_else(|| {
-                                let fallback = achievements.clone();
+                                let mut fallback = achievements.clone();
+                                crate::commands::apply_manual_overrides_to_list(
+                                    &game.id,
+                                    &mut fallback,
+                                    &user_data,
+                                );
                                 let total = fallback.len() as u32;
                                 (fallback, total, game.achievement_groups.clone())
                             })
@@ -775,6 +778,7 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 is_progress: false,
                                 progress_current: None,
                                 progress_max: None,
+                                progress_milestone: None,
                             };
 
                             crate::overlay::raise(&app_handle);
@@ -819,8 +823,8 @@ pub fn start(app_handle: tauri::AppHandle) {
                         };
                         let new_bucket = progress_milestone_bucket(cur, max);
                         let prev_bucket = game_progress_buckets.get(&key).copied().unwrap_or(0);
-                        game_progress_buckets.insert(key.clone(), new_bucket);
                         if new_bucket > prev_bucket {
+                            game_progress_buckets.insert(key.clone(), new_bucket);
                             let completion_pct: Option<f32> = ach
                                 .completionpercentage
                                 .parse::<f32>()
@@ -853,11 +857,12 @@ pub fn start(app_handle: tauri::AppHandle) {
                                 is_progress: true,
                                 progress_current: Some(cur),
                                 progress_max: Some(max),
+                                progress_milestone: Some(new_bucket),
                             };
                             crate::overlay::raise(&app_handle);
                             let _ = app_handle.emit_to(
                                 crate::overlay::OVERLAY_LABEL,
-                                "achievement-notif",
+                                "achievement-progress-notif",
                                 &payload,
                             );
                         }
@@ -879,15 +884,17 @@ pub fn start(app_handle: tauri::AppHandle) {
     });
 }
 
+fn current_language(app_handle: &tauri::AppHandle) -> String {
+    let state = app_handle.state::<AppState>();
+    state
+        .language
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_else(|_| "fr".to_string())
+}
+
 pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
-    let language = {
-        let state = app_handle.state::<AppState>();
-        state
-            .language
-            .lock()
-            .map(|l| l.clone())
-            .unwrap_or_else(|_| "fr".to_string())
-    };
+    let language = current_language(app_handle);
 
     let payload = AchievementNotifPayload {
         name: "Test Achievement".to_string(),
@@ -905,8 +912,94 @@ pub fn emit_test_notification(app_handle: &tauri::AppHandle) {
         is_progress: false,
         progress_current: None,
         progress_max: None,
+        progress_milestone: None,
     };
 
     crate::overlay::raise(app_handle);
     let _ = app_handle.emit_to(crate::overlay::OVERLAY_LABEL, "achievement-notif", &payload);
+}
+
+pub fn emit_test_progress_notification(app_handle: &tauri::AppHandle) {
+    let language = current_language(app_handle);
+    let (name, desc) = match language.as_str() {
+        "en" => ("Test Progress (50%)", "50% progress milestone reached"),
+        "es" => ("Progreso de prueba (50%)", "Hito de progreso del 50 % alcanzado"),
+        "de" => ("Test-Fortschritt (50%)", "50-%-Fortschrittsmeilenstein erreicht"),
+        "it" => ("Progresso test (50%)", "Traguardo di progresso 50% raggiunto"),
+        _ => ("Test Progression (50%)", "Palier de progression 50 % atteint"),
+    };
+
+    let payload = AchievementNotifPayload {
+        name: name.to_string(),
+        desc: desc.to_string(),
+        icon: None,
+        rarity: rarity_label(None, &language),
+        completionpercentage: None,
+        unlocked: 5,
+        total: 50,
+        test: true,
+        is_platinum: false,
+        unlocked_time: None,
+        game_id: None,
+        ach_key: None,
+        is_progress: true,
+        progress_current: Some(50.0),
+        progress_max: Some(100.0),
+        progress_milestone: Some(50),
+    };
+
+    crate::overlay::raise(app_handle);
+    let _ = app_handle.emit_to(
+        crate::overlay::OVERLAY_LABEL,
+        "achievement-progress-notif",
+        &payload,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::progress_milestone_bucket;
+
+    #[test]
+    fn returns_zero_when_max_is_one_or_less() {
+        assert_eq!(progress_milestone_bucket(0.5, 1.0), 0);
+        assert_eq!(progress_milestone_bucket(1.0, 1.0), 0);
+        assert_eq!(progress_milestone_bucket(0.5, 0.5), 0);
+        assert_eq!(progress_milestone_bucket(0.0, 0.0), 0);
+        assert_eq!(progress_milestone_bucket(5.0, -10.0), 0);
+    }
+
+    #[test]
+    fn returns_zero_below_twenty_five_percent_and_non_positive() {
+        assert_eq!(progress_milestone_bucket(0.0, 100.0), 0);
+        assert_eq!(progress_milestone_bucket(-5.0, 100.0), 0);
+        assert_eq!(progress_milestone_bucket(1.0, 5.0), 0);
+        assert_eq!(progress_milestone_bucket(24.99, 100.0), 0);
+    }
+
+    #[test]
+    fn maps_progress_ratios_to_expected_milestone_buckets() {
+        assert_eq!(progress_milestone_bucket(25.0, 100.0), 25);
+        assert_eq!(progress_milestone_bucket(1.0, 4.0), 25);
+        assert_eq!(progress_milestone_bucket(49.99, 100.0), 25);
+
+        assert_eq!(progress_milestone_bucket(50.0, 100.0), 50);
+        assert_eq!(progress_milestone_bucket(2.0, 4.0), 50);
+        assert_eq!(progress_milestone_bucket(74.99, 100.0), 50);
+
+        assert_eq!(progress_milestone_bucket(75.0, 100.0), 75);
+        assert_eq!(progress_milestone_bucket(3.0, 4.0), 75);
+        assert_eq!(progress_milestone_bucket(99.99, 100.0), 75);
+    }
+
+    #[test]
+    fn returns_zero_when_complete_or_non_finite() {
+        assert_eq!(progress_milestone_bucket(100.0, 100.0), 0);
+        assert_eq!(progress_milestone_bucket(120.0, 100.0), 0);
+        assert_eq!(progress_milestone_bucket(f64::NAN, 100.0), 0);
+        assert_eq!(progress_milestone_bucket(50.0, f64::NAN), 0);
+        assert_eq!(progress_milestone_bucket(f64::INFINITY, 100.0), 0);
+        assert_eq!(progress_milestone_bucket(50.0, f64::INFINITY), 0);
+        assert_eq!(progress_milestone_bucket(f64::NEG_INFINITY, 100.0), 0);
+    }
 }

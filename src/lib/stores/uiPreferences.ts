@@ -4,7 +4,7 @@ export interface GameFilters {
 	status: 'all' | 'todo' | 'in-progress' | 'completed';
 	favorite: 'all' | 'yes' | 'no';
 	collection: string; // 'all' or tag name
-	sortBy: 'name' | 'date' | 'completion' | 'exe_name';
+	sortBy: 'name' | 'date' | 'completion' | 'exe_name' | 'remaining_time';
 	sortOrder: 'asc' | 'desc';
 	searchQuery: string;
 	displayMode: 'grid' | 'list' | 'timeline';

@@ -1,6 +1,40 @@
 // src/lib/stores/settings.ts
+import { emit } from '@tauri-apps/api/event';
 import { Store } from '@tauri-apps/plugin-store';
 import { writable } from 'svelte/store';
+
+export type NotifStyle = 'accolade' | 'ps5' | 'xbox360' | 'steamdeck' | 'retro';
+
+export interface NotifAchievement {
+	name?: string;
+	desc?: string;
+	icon?: string;
+	rarity?: string;
+	is_platinum?: boolean;
+	completionpercentage?: number;
+	unlocked?: number;
+	total?: number;
+	unlocked_time?: number;
+	is_progress?: boolean;
+	progress_current?: number;
+	progress_max?: number;
+	progress_milestone?: number;
+}
+
+export const NOTIF_STYLES: readonly NotifStyle[] = [
+	'accolade',
+	'ps5',
+	'xbox360',
+	'steamdeck',
+	'retro'
+];
+
+export function normalizeNotifStyle(value: unknown): NotifStyle {
+	if (typeof value === 'string' && (NOTIF_STYLES as readonly string[]).includes(value)) {
+		return value as NotifStyle;
+	}
+	return 'accolade';
+}
 
 export interface AppSettings {
 	steamId: string;
@@ -18,7 +52,10 @@ export interface AppSettings {
 		| 'bottom-left'
 		| 'bottom-center'
 		| 'bottom-right';
+	notif_style: NotifStyle;
 	notificationSound: string;
+	progressSound: string;
+	platinumSound: string;
 	notificationVolume: number;
 	theme: 'dark' | 'light' | 'system';
 	accentColor: string;
@@ -32,7 +69,7 @@ export interface AppSettings {
 	replayBuffer: boolean;
 }
 
-const DEFAULTS: AppSettings = {
+export const DEFAULTS: AppSettings = {
 	steamId: '',
 	steamApiKey: '',
 	raUsername: '',
@@ -42,7 +79,10 @@ const DEFAULTS: AppSettings = {
 	language: 'fr',
 	setupCompleted: false,
 	windowPosition: 'bottom-right',
+	notif_style: 'accolade',
 	notificationSound: 'Steam.mp3',
+	progressSound: 'Steamdeck.mp3',
+	platinumSound: 'PS5 Platinum.mp3',
 	notificationVolume: 0.7,
 	theme: 'system',
 	accentColor: '#c8a96e',
@@ -108,6 +148,10 @@ async function getStore(): Promise<Store> {
 	return store;
 }
 
+function normalizeSound(value: unknown, fallback: string): string {
+	return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
 export async function loadSettings(): Promise<void> {
 	const cached = readThemeCache();
 	if (cached) {
@@ -132,19 +176,40 @@ export async function loadSettings(): Promise<void> {
 		}
 	}
 
-	const merged = { ...DEFAULTS, ...saved };
+	const merged: AppSettings = {
+		...DEFAULTS,
+		...saved,
+		notif_style: normalizeNotifStyle(saved.notif_style),
+		notificationSound: normalizeSound(saved.notificationSound, DEFAULTS.notificationSound),
+		progressSound: normalizeSound(saved.progressSound, DEFAULTS.progressSound),
+		platinumSound: normalizeSound(saved.platinumSound, DEFAULTS.platinumSound)
+	};
 	settings.set(merged);
 	applyTheme(merged);
 	writeThemeCache(merged);
 }
 
 export async function saveSettings(next: AppSettings): Promise<void> {
+	const normalized: AppSettings = {
+		...next,
+		notif_style: normalizeNotifStyle(next.notif_style),
+		notificationSound: normalizeSound(next.notificationSound, DEFAULTS.notificationSound),
+		progressSound: normalizeSound(next.progressSound, DEFAULTS.progressSound),
+		platinumSound: normalizeSound(next.platinumSound, DEFAULTS.platinumSound)
+	};
 	const s = await getStore();
-	await Promise.all(Object.entries(next).map(([key, val]) => s.set(key, val)));
+	await Promise.all(Object.entries(normalized).map(([key, val]) => s.set(key, val)));
 	await s.save();
-	settings.set(next);
-	applyTheme(next);
-	writeThemeCache(next);
+	settings.set(normalized);
+	applyTheme(normalized);
+	writeThemeCache(normalized);
+	if (typeof window !== 'undefined') {
+		try {
+			await emit('settings-updated');
+		} catch {
+			// Ignore when running outside Tauri webview context
+		}
+	}
 }
 
 export function applyTheme(s: AppSettings): void {

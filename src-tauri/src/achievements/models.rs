@@ -105,6 +105,12 @@ pub struct Achievement {
     /// True when this achievement or its group is marked archived by the developer.
     #[serde(default)]
     pub archived: bool,
+    /// Personal user note/memo for this achievement, surfaced in game view and HUD.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Manual marker tags assigned by the user (e.g. "missable", "multi", "ngplus", "buggy").
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]

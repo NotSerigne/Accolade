@@ -1,12 +1,17 @@
 // src-tauri/src/commands/mod.rs
 use crate::achievements::models::{Achievement, Emulator, Game};
 use crate::achievements::steam::{
-    fetch_owned_games, fetch_recently_played_games, fetch_steam_user, get_local_steam_appids,
-    is_valid_game_name, OwnedGame, SteamUser,
+    fetch_owned_games, fetch_player_achievements, fetch_recently_played_games, fetch_steam_user,
+    get_local_steam_appids, is_valid_game_name, parse_steam_identifier, resolve_vanity_url,
+    OwnedGame, PlayerAchievementInfo, SteamIdentifier, SteamUser,
 };
-use crate::user_data::{load_user_data, save_user_data, ManualAchievementOverride, UserData};
+use crate::user_data::{
+    load_user_data, sanitize_profile_showcase, save_user_data, ManualAchievementOverride,
+    PlaySession, ProfileShowcase, UserData,
+};
 use crate::{apply_steamgriddb_icons, enrich_games_with_steam, AppState};
-use std::collections::HashSet;
+use futures::stream::{self, StreamExt};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 
@@ -22,19 +27,28 @@ pub fn test_achievement_notif(app_handle: tauri::AppHandle) {
     crate::watcher::emit_test_notification(&app_handle);
 }
 
-fn apply_manual_overrides_to_list(
+#[tauri::command]
+pub fn test_progress_notif(app_handle: tauri::AppHandle) {
+    crate::watcher::emit_test_progress_notification(&app_handle);
+}
+
+pub(crate) fn apply_manual_overrides_to_list(
     game_id: &str,
     achievements: &mut [Achievement],
     user_data: &UserData,
 ) {
-    if let Some(overrides) = user_data.manual_achievements.get(game_id) {
-        for ach in achievements.iter_mut() {
-            let key_lower = ach.key.trim().to_lowercase();
-            if let Some(ov) = overrides.get(&key_lower) {
-                ach.unlocked = ov.unlocked;
-                ach.unlocked_time = if ov.unlocked { ov.unlocked_time } else { None };
-            }
+    let overrides = user_data.manual_achievements.get(game_id);
+    let metas = user_data.achievement_meta.get(game_id);
+
+    for ach in achievements.iter_mut() {
+        let key_lower = ach.key.trim().to_lowercase();
+        if let Some(ov) = overrides.and_then(|map| map.get(&key_lower)) {
+            ach.unlocked = ov.unlocked;
+            ach.unlocked_time = if ov.unlocked { ov.unlocked_time } else { None };
         }
+        let meta = metas.and_then(|map| map.get(&key_lower));
+        ach.note = meta.and_then(|m| m.note.clone());
+        ach.tags = meta.map(|m| m.tags.clone()).unwrap_or_default();
     }
 }
 
@@ -231,6 +245,213 @@ pub async fn get_steam_owned_games(
     fetch_owned_games(&api_key, &steam_id, &language)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct FriendSteamProfile {
+    pub user: SteamUser,
+    pub games: Vec<Game>,
+}
+
+fn build_friend_game(
+    mut friend_game: Game,
+    playtime_seconds: u64,
+    pa_map: &HashMap<String, PlayerAchievementInfo>,
+) -> Game {
+    friend_game.is_favorite = false;
+    friend_game.tags = Vec::new();
+    friend_game.path_buf = None;
+    friend_game.playtime_seconds = playtime_seconds;
+
+    let lower_map: HashMap<String, &PlayerAchievementInfo> = pa_map
+        .iter()
+        .map(|(k, v)| (k.trim().to_lowercase(), v))
+        .collect();
+
+    for ach in &mut friend_game.achievements {
+        ach.unlocked = false;
+        ach.unlocked_time = None;
+        ach.progress = None;
+        ach.max_progress = None;
+        ach.note = None;
+        ach.tags.clear();
+
+        let key_lower = ach.key.trim().to_lowercase();
+        if let Some(info) = lower_map.get(&key_lower) {
+            if info.unlocked {
+                ach.unlocked = true;
+                ach.unlocked_time = if info.unlock_time > 0 {
+                    Some(info.unlock_time)
+                } else {
+                    None
+                };
+            }
+        }
+    }
+
+    friend_game.achievements_total = friend_game.achievements.len() as u32;
+    friend_game
+}
+
+#[tauri::command]
+pub async fn fetch_friend_steam_profile(
+    identifier: String,
+    api_key: Option<String>,
+    language: Option<String>,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<FriendSteamProfile, String> {
+    let mut effective_api_key = api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            state
+                .steam_api_key
+                .lock()
+                .map(|k| k.trim().to_string())
+                .unwrap_or_default()
+        });
+    if effective_api_key.is_empty() {
+        dotenv::dotenv().ok();
+        effective_api_key = std::env::var("STEAM_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+    }
+    if effective_api_key.is_empty() {
+        return Err("MISSING_API_KEY".to_string());
+    }
+
+    let effective_language = language
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            state
+                .language
+                .lock()
+                .map(|l| {
+                    let trimmed = l.trim();
+                    if trimmed.is_empty() {
+                        "fr".to_string()
+                    } else {
+                        trimmed.to_string()
+                    }
+                })
+                .unwrap_or_else(|_| "fr".to_string())
+        });
+
+    let friend_steam_id = match parse_steam_identifier(&identifier)? {
+        SteamIdentifier::SteamId64(id) => id,
+        SteamIdentifier::Vanity(vanity) => {
+            resolve_vanity_url(&effective_api_key, &vanity).await?
+        }
+    };
+
+    let user = fetch_steam_user(&effective_api_key, &friend_steam_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "PROFILE_NOT_FOUND".to_string())?;
+
+    if user.communityvisibilitystate != Some(3) {
+        return Err("PROFILE_PRIVATE".to_string());
+    }
+
+    let local_steam_games: Vec<Game> = get_all_games(state, app_handle)
+        .into_iter()
+        .filter(|g| g.steam_id.is_some_and(|sid| sid > 0))
+        .collect();
+
+    if local_steam_games.is_empty() {
+        return Ok(FriendSteamProfile {
+            user,
+            games: Vec::new(),
+        });
+    }
+
+    let (owned_res, recent_res) = futures::join!(
+        fetch_owned_games(&effective_api_key, &friend_steam_id, &effective_language),
+        fetch_recently_played_games(&effective_api_key, &friend_steam_id)
+    );
+
+    let mut friend_owned_playtime: HashMap<u32, u64> = HashMap::new();
+    if let Ok(owned) = owned_res {
+        for og in owned {
+            let secs = og.playtime_forever.unwrap_or(0).saturating_mul(60);
+            friend_owned_playtime
+                .entry(og.appid)
+                .and_modify(|cur| *cur = (*cur).max(secs))
+                .or_insert(secs);
+        }
+    }
+    if let Ok(recent) = recent_res {
+        for rg in recent {
+            let secs = rg.playtime_forever.unwrap_or(0).saturating_mul(60);
+            friend_owned_playtime
+                .entry(rg.appid)
+                .and_modify(|cur| *cur = (*cur).max(secs))
+                .or_insert(secs);
+        }
+    }
+
+    let candidates: Vec<Game> = if !friend_owned_playtime.is_empty() {
+        local_steam_games
+            .into_iter()
+            .filter(|g| {
+                g.steam_id
+                    .is_some_and(|sid| friend_owned_playtime.contains_key(&sid))
+            })
+            .collect()
+    } else {
+        local_steam_games
+    };
+
+    let fetched = stream::iter(candidates.into_iter().filter_map(|local_game| {
+        let appid = local_game.steam_id?;
+        let api_key = effective_api_key.clone();
+        let steam_id = friend_steam_id.clone();
+        let lang = effective_language.clone();
+        Some(async move {
+            let res = fetch_player_achievements(&api_key, &steam_id, appid, &lang).await;
+            (local_game, appid, res)
+        })
+    }))
+    .buffer_unordered(8)
+    .collect::<Vec<_>>()
+    .await;
+
+    let mut saw_private_error = false;
+    let mut success_count: usize = 0;
+    let mut friend_games: Vec<Game> = Vec::new();
+
+    for (local_game, appid, res) in fetched {
+        match res {
+            Ok(pa_map) => {
+                success_count += 1;
+                let playtime = friend_owned_playtime.get(&appid).copied().unwrap_or(0);
+                friend_games.push(build_friend_game(local_game, playtime, &pa_map));
+            }
+            Err(err) => {
+                if err.to_lowercase().contains("profile is not public") {
+                    saw_private_error = true;
+                }
+            }
+        }
+    }
+
+    if success_count == 0 && saw_private_error {
+        return Err("PROFILE_PRIVATE".to_string());
+    }
+
+    friend_games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    Ok(FriendSteamProfile {
+        user,
+        games: friend_games,
+    })
 }
 
 #[tauri::command]
@@ -956,6 +1177,7 @@ pub struct HudData {
     pub game_name: String,
     pub achievements: Vec<Achievement>,
     pub pinned_keys: Vec<String>,
+    pub remaining_hours: Option<f32>,
 }
 
 #[tauri::command]
@@ -996,6 +1218,19 @@ pub fn get_hud_data(
         .cloned()
         .unwrap_or_default();
 
+    let mut achievements = target.achievements.clone();
+    apply_manual_overrides_to_list(&target.id, &mut achievements, &user_data);
+
+    let playtime_seconds = user_data
+        .playtime_seconds
+        .get(&target.id)
+        .copied()
+        .unwrap_or(target.playtime_seconds);
+    let hltb_cache = crate::hltb::get_cached_hltb_data(app_handle.clone());
+    let remaining_hours = hltb_cache.get(&target.id).and_then(|h| {
+        crate::hltb::compute_remaining_completionist_hours(h.completionist_hours, playtime_seconds)
+    });
+
     Some(HudData {
         game_id: target.id.clone(),
         game_name: if target.name.is_empty() {
@@ -1003,8 +1238,9 @@ pub fn get_hud_data(
         } else {
             target.name.clone()
         },
-        achievements: target.achievements.clone(),
+        achievements,
         pinned_keys,
+        remaining_hours,
     })
 }
 
@@ -1542,4 +1778,231 @@ pub fn set_achievement_state(
 
     let _ = tauri::Emitter::emit(&app_handle, "achievements-updated", ());
     Ok(updated_achievements)
+}
+
+fn update_achievement_meta_and_emit<T>(
+    app_handle: &tauri::AppHandle,
+    state: &tauri::State<'_, AppState>,
+    game_id: &str,
+    ach_key: &str,
+    mutate: impl FnOnce(&mut UserData) -> T,
+) -> Result<T, String> {
+    if game_id.trim().is_empty() || ach_key.trim().is_empty() {
+        return Err("game_id and ach_key must not be empty".to_string());
+    }
+
+    let (result, updated_achievements) = {
+        let mut games = state
+            .games
+            .lock()
+            .map_err(|_| "Impossible de verrouiller les jeux".to_string())?;
+        let mut user_data = load_user_data(app_handle);
+        let result = mutate(&mut user_data);
+        save_user_data(app_handle, &user_data)?;
+
+        let updated = games.iter_mut().find(|g| g.id == game_id).map(|game| {
+            apply_manual_overrides_to_list(&game.id, &mut game.achievements, &user_data);
+            game.achievements.clone()
+        });
+
+        (result, updated)
+    };
+
+    if let Some(achievements) = updated_achievements {
+        let _ = tauri::Emitter::emit(
+            app_handle,
+            "achievements-updated",
+            serde_json::json!({
+                "game_id": game_id,
+                "achievements": achievements,
+            }),
+        );
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn set_achievement_note(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+    ach_key: String,
+    note: Option<String>,
+) -> Result<Option<String>, String> {
+    update_achievement_meta_and_emit(&app_handle, &state, &game_id, &ach_key, |user_data| {
+        user_data.set_achievement_note(&game_id, &ach_key, note.as_deref())
+    })
+}
+
+#[tauri::command]
+pub fn set_achievement_tags(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+    ach_key: String,
+    tags: Vec<String>,
+) -> Result<Vec<String>, String> {
+    update_achievement_meta_and_emit(&app_handle, &state, &game_id, &ach_key, |user_data| {
+        user_data.set_achievement_tags(&game_id, &ach_key, &tags)
+    })
+}
+
+#[tauri::command]
+pub fn get_profile_showcase(app_handle: tauri::AppHandle) -> ProfileShowcase {
+    sanitize_profile_showcase(load_user_data(&app_handle).profile_showcase)
+}
+
+#[tauri::command]
+pub fn set_profile_showcase(
+    app_handle: tauri::AppHandle,
+    showcase: ProfileShowcase,
+) -> Result<ProfileShowcase, String> {
+    let sanitized = sanitize_profile_showcase(showcase);
+    crate::user_data::update(&app_handle, |user_data| {
+        user_data.profile_showcase = sanitized.clone();
+        Ok(())
+    })?;
+    Ok(sanitized)
+}
+
+#[tauri::command]
+pub fn get_play_sessions(app_handle: tauri::AppHandle) -> Vec<PlaySession> {
+    let mut sessions = load_user_data(&app_handle).play_sessions;
+    sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    sessions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ach(key: &str) -> Achievement {
+        Achievement {
+            key: key.to_string(),
+            name: key.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn apply_manual_overrides_populates_and_clears_notes_tags_and_unlocks() {
+        let mut user_data = UserData::default();
+        user_data
+            .manual_achievements
+            .entry("steam_10".to_string())
+            .or_default()
+            .insert(
+                "ach_hero".to_string(),
+                ManualAchievementOverride {
+                    unlocked: true,
+                    unlocked_time: Some(1_700_000_000),
+                },
+            );
+        user_data.set_achievement_note("steam_10", "ACH_HERO", Some("Check shrine before boss"));
+        user_data.set_achievement_tags(
+            "steam_10",
+            "ach_hero",
+            &["Manquable".to_string(), "NG+".to_string()],
+        );
+
+        let mut list = vec![make_ach("  ACH_Hero "), make_ach("ACH_OTHER")];
+        list[1].note = Some("stale note".to_string());
+        list[1].tags = vec!["buggy".to_string()];
+
+        apply_manual_overrides_to_list("steam_10", &mut list, &user_data);
+
+        assert!(list[0].unlocked);
+        assert_eq!(list[0].unlocked_time, Some(1_700_000_000));
+        assert_eq!(list[0].note.as_deref(), Some("Check shrine before boss"));
+        assert_eq!(list[0].tags, vec!["missable", "ngplus"]);
+
+        assert!(!list[1].unlocked);
+        assert_eq!(list[1].note, None);
+        assert!(list[1].tags.is_empty());
+
+        // Clearing note & tags clears cached Achievement fields while preserving unlock override.
+        user_data.set_achievement_note("steam_10", "ach_hero", None);
+        user_data.set_achievement_tags("steam_10", "ach_hero", &[]);
+        apply_manual_overrides_to_list("steam_10", &mut list, &user_data);
+
+        assert!(list[0].unlocked);
+        assert_eq!(list[0].unlocked_time, Some(1_700_000_000));
+        assert_eq!(list[0].note, None);
+        assert!(list[0].tags.is_empty());
+    }
+
+    #[test]
+    fn build_friend_game_resets_user_fields_and_maps_friend_achievements() {
+        let mut ach1 = make_ach("ACH_ONE");
+        ach1.unlocked = true;
+        ach1.unlocked_time = Some(1_600_000_000);
+        ach1.progress = Some(5.0);
+        ach1.max_progress = Some(10.0);
+        ach1.note = Some("my secret note".to_string());
+        ach1.tags = vec!["missable".to_string()];
+
+        let mut ach2 = make_ach("ACH_TWO");
+        ach2.unlocked = true;
+        ach2.unlocked_time = Some(1_600_000_500);
+
+        let local_game = Game {
+            name: "Test Game".to_string(),
+            id: "steam_420".to_string(),
+            steam_id: Some(420),
+            game_icon: "icon.png".to_string(),
+            steamgrid_icon_url: String::new(),
+            header_image_url: String::new(),
+            background_image_url: String::new(),
+            achievements_total: 2,
+            achievements: vec![ach1, ach2],
+            path_buf: Some("C:\\local\\path".to_string()),
+            source: crate::achievements::models::SourceType::Emulator(Emulator::Steam),
+            genres: vec!["Action".to_string()],
+            is_favorite: true,
+            tags: vec!["RPG".to_string()],
+            playtime_seconds: 9999,
+            achievement_groups: Vec::new(),
+        };
+
+        let mut pa_map = HashMap::new();
+        pa_map.insert(
+            "ach_two".to_string(),
+            PlayerAchievementInfo {
+                unlocked: true,
+                unlock_time: 1_710_000_000,
+                name: String::new(),
+                description: String::new(),
+            },
+        );
+        pa_map.insert(
+            "ACH_ONE".to_string(),
+            PlayerAchievementInfo {
+                unlocked: false,
+                unlock_time: 0,
+                name: String::new(),
+                description: String::new(),
+            },
+        );
+
+        let friend_game = build_friend_game(local_game, 3600, &pa_map);
+        assert!(!friend_game.is_favorite);
+        assert!(friend_game.tags.is_empty());
+        assert_eq!(friend_game.path_buf, None);
+        assert_eq!(friend_game.playtime_seconds, 3600);
+        assert_eq!(friend_game.achievements_total, 2);
+
+        assert!(!friend_game.achievements[0].unlocked);
+        assert_eq!(friend_game.achievements[0].unlocked_time, None);
+        assert_eq!(friend_game.achievements[0].progress, None);
+        assert_eq!(friend_game.achievements[0].max_progress, None);
+        assert_eq!(friend_game.achievements[0].note, None);
+        assert!(friend_game.achievements[0].tags.is_empty());
+
+        assert!(friend_game.achievements[1].unlocked);
+        assert_eq!(
+            friend_game.achievements[1].unlocked_time,
+            Some(1_710_000_000)
+        );
+    }
 }
