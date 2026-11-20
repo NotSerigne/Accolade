@@ -1,5 +1,4 @@
 /* src/routes/(app)/layout.css */
-@import 'tailwindcss';
 
 * {
 	margin: 0;
@@ -35,7 +34,17 @@
 	--completed-text: #111111;
 	--text-primary: #f5f5f7;
 	--text-secondary: #b4bccf;
-	--text-muted: #7b8294;
+	--text-muted: #8e96a8;
+	--ok: #3fd18a;
+	--warn: #eab308;
+	--err: #f87171;
+	--rarity-mythic: #ff6b81;
+	--rarity-legendary: #f5c451;
+	--rarity-epic: #c084fc;
+	--rarity-very-rare: #f4a261;
+	--rarity-rare: #5cc8ff;
+	--rarity-uncommon: #4ade80;
+	--rarity-common: #8e96a8;
 	--bg-app: #0d0d0f;
 	--bg-sidebar: rgba(16, 17, 21, 0.78);
 	--bg-panel: rgba(22, 23, 28, 0.8);
@@ -54,12 +63,24 @@
 }
 
 :root[data-theme='light'] {
-	--accent-default: #8f6a25;
+	--accent-default: #785612;
 	--accent: var(--accent-default);
 	--accent-text: #ffffff;
+	--completed: #785612;
+	--completed-text: #ffffff;
 	--text-primary: #101828;
 	--text-secondary: #334155;
-	--text-muted: #64748b;
+	--text-muted: #4f5d73;
+	--ok: #126e40;
+	--warn: #8a5600;
+	--err: #b91c1c;
+	--rarity-mythic: #a60f34;
+	--rarity-legendary: #734800;
+	--rarity-epic: #6b1bb8;
+	--rarity-very-rare: #8f3c04;
+	--rarity-rare: #02598a;
+	--rarity-uncommon: #115e39;
+	--rarity-common: #4f5d73;
 	--bg-app: #edf1f6;
 	--bg-sidebar: rgba(226, 232, 240, 0.78);
 	--bg-panel: rgba(248, 250, 252, 0.84);

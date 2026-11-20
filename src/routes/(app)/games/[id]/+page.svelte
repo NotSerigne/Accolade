@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	// src/routes/(app)/games/[id]/+page.svelte
 	import GamePage from '$lib/GamePage.svelte';
 	import { page } from '$app/state';
@@ -14,10 +14,13 @@
 <style>
 	.game-main {
 		background: var(--bg-panel);
-		border-radius: 12px;
+		border: 1px solid var(--border-soft);
+		border-radius: 14px;
+		box-shadow: var(--shadow-card);
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		min-width: 0;
 	}
 </style>

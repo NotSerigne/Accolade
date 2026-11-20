@@ -2,26 +2,36 @@
 	// src/lib/MainContent.svelte
 	import {
 		games,
+		computeGameProgress,
+		formatPlaytime,
 		getGameCompletionPct,
 		getGameHeaderUrl,
-		getRarityPalette,
-		type Game,
-		type Achievement
+		getGameIconUrl,
+		getRarityCssVar,
+		getRarityTier7,
+		getRarityTierIndex,
+		profileRank,
+		totalCompletedGames,
+		totalUnlockedAchievements,
+		type Achievement,
+		type Game
 	} from '$lib/stores/Games.js';
+	import { steamUser } from '$lib/stores/user.js';
+	import { achievementJumpIntent } from '$lib/stores/ui.js';
+	import { selectedGameId } from '$lib/stores/selectedGame.js';
+	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
+	import { SvelteSet } from 'svelte/reactivity';
 
-	function rarityLabel(pct: string): string {
-		const n = parseFloat(pct);
-		if (isNaN(n)) return rarityLabelByIndex($i18n.language, 6);
-		if (n <= 0.1) return rarityLabelByIndex($i18n.language, 0);
-		if (n <= 1) return rarityLabelByIndex($i18n.language, 1);
-		if (n <= 3) return rarityLabelByIndex($i18n.language, 2);
-		if (n <= 7) return rarityLabelByIndex($i18n.language, 3);
-		if (n <= 15) return rarityLabelByIndex($i18n.language, 4);
-		if (n <= 35) return rarityLabelByIndex($i18n.language, 5);
-		return rarityLabelByIndex($i18n.language, 6);
+	let failedImageUrls = new SvelteSet<string>();
+
+	function pickImageUrl(...candidates: Array<string | null | undefined>): string | null {
+		for (const candidate of candidates) {
+			const url = candidate?.trim();
+			if (url && !failedImageUrls.has(url)) return url;
+		}
+		return null;
 	}
 
 	function formatDateTime(ts: number | null | undefined): string {
@@ -36,11 +46,63 @@
 		});
 	}
 
+	function formatRarityPct(raw?: string | null): string {
+		const val = parseFloat((raw ?? '').replace(',', '.'));
+		if (!Number.isFinite(val)) return '—';
+		return `${val.toFixed(1)}%`;
+	}
+
+	function formatCompletionPct(unlocked: number, total: number, rawPct: number): number {
+		if (total <= 0) return 0;
+		if (unlocked === total) return 100;
+		return Math.min(99, Math.max(0, Math.round(rawPct)));
+	}
+
+	function getSourceLabel(game: Game): string {
+		if (typeof game.source === 'object' && game.source?.type === 'Emulator') {
+			return game.source.value || game.source.type;
+		}
+		return game.source?.type ?? '';
+	}
+
+	function openGame(gameId: string): void {
+		selectedGameId.set(gameId);
+		void goto(resolve('/(app)/games/[id]', { id: gameId }));
+	}
+
+	function openAchievement(item: RecentAchievement): void {
+		achievementJumpIntent.set({
+			gameId: item.gameId,
+			achievementKey: item.key,
+			token: Date.now()
+		});
+		selectedGameId.set(item.gameId);
+		void goto(resolve('/(app)/games/[id]', { id: item.gameId }));
+	}
+
 	type RecentAchievement = Achievement & {
 		gameName: string;
 		gameId: string;
 		gameHeaderImage: string;
 	};
+
+	let totalAllAchievements = $derived.by(() => {
+		let total = 0;
+		for (const game of $games) {
+			if (game.achievements?.length) {
+				total += computeGameProgress(game.achievements, game.achievement_groups).totalAll;
+			} else {
+				total += game.achievements_total || 0;
+			}
+		}
+		return total;
+	});
+
+	let avgProgression = $derived.by(() => {
+		if ($games.length === 0) return 0;
+		const sum = $games.reduce((acc, g) => acc + getGameCompletionPct(g), 0);
+		return Math.round(sum / $games.length);
+	});
 
 	let recentActivity = $derived.by((): RecentAchievement[] => {
 		return $games
@@ -71,106 +133,114 @@
 	});
 </script>
 
-<main class="main-content">
-	<section class="activity-section">
-		<h2 class="section-title">{$i18n.t('main.recentActivity')}</h2>
-		<div class="activity-grid">
-			{#each recentActivity as item (item.gameId + ':' + item.key)}
-				{@const palette = getRarityPalette(item.completionpercentage)}
-				<button
-					type="button"
-					class="activity-card"
-					onclick={() => void goto(resolve('/(app)/games/[id]', { id: item.gameId }))}
-				>
-					<div class="activity-icon-wrap">
-						{#if item.icon}
-							<img
-								src={item.icon}
-								alt={item.name}
-								class="activity-icon"
-								onerror={(e) => {
-									const t = e.target as HTMLImageElement;
-									if (item.gameHeaderImage && t.src !== item.gameHeaderImage) {
-										t.src = item.gameHeaderImage;
-									} else {
-										t.style.display = 'none';
-										t.parentElement?.classList.add('icon-error');
-									}
-								}}
-							/>
-							<span class="activity-icon-fallback">
-								<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-									<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-									<path d="M4 22h16" />
-									<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-									<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-									<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-								</svg>
-							</span>
-						{:else if item.gameHeaderImage}
-							<img
-								src={item.gameHeaderImage}
-								alt={item.name}
-								class="activity-icon"
-								onerror={(e) => {
-									const t = e.target as HTMLImageElement;
-									t.style.display = 'none';
-									t.parentElement?.classList.add('icon-error');
-								}}
-							/>
-							<span class="activity-icon-fallback">
-								<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-									<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-									<path d="M4 22h16" />
-									<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-									<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-									<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-								</svg>
-							</span>
-						{:else}
-							<span class="activity-icon activity-icon-fallback always-visible">
-								<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-									<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-									<path d="M4 22h16" />
-									<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-									<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-									<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-								</svg>
-							</span>
-						{/if}
-					</div>
-					<div class="activity-info">
-						<div class="activity-header">
-							<span class="activity-name">{item.name}</span>
-						</div>
-						<div class="activity-game">{item.gameName}</div>
-						<div class="activity-footer">
-							<span
-								class="activity-rarity-badge tabular-nums"
-								style:color={palette.color}
-								style:background={palette.bg}
-								style:border-color={palette.border}
-							>
-								{rarityLabel(item.completionpercentage)} · {parseFloat(
-									item.completionpercentage
-								).toFixed(1)}%
-							</span>
-							<span class="activity-time tabular-nums">{formatDateTime(item.unlocked_time)}</span>
-						</div>
-					</div>
-				</button>
-			{/each}
+{#snippet trophySvg(size: number)}
+	<svg
+		width={size}
+		height={size}
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.8"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+	>
+		<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+		<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+		<path d="M4 22h16" />
+		<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+		<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+		<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+	</svg>
+{/snippet}
+
+<div class="main-content">
+	<header class="home-header">
+		<h1 class="home-title">{$i18n.t('sidebar.home')}</h1>
+		{#if $steamUser || $games.length > 0}
+			<div class="home-profile">
+				{#if $steamUser?.personaname}
+					<span class="profile-name">{$steamUser.personaname}</span>
+					<span class="profile-sep" aria-hidden="true">·</span>
+				{/if}
+				<span class="profile-level">{$i18n.t('main.level', { level: $profileRank.level })}</span>
+				<span class="profile-sep" aria-hidden="true">·</span>
+				<span class="profile-xp tabular-nums">
+					{$profileRank.currentLevelXp} / {$profileRank.nextLevelXp} XP
+				</span>
+			</div>
+		{/if}
+	</header>
+
+	<section class="kpi-strip" aria-label={$i18n.t('statsPanel.stats')}>
+		<div class="kpi-cell">
+			<span class="kpi-label">{$i18n.t('statsPanel.unlocked')}</span>
+			<span class="kpi-value tabular-nums">
+				{$totalUnlockedAchievements}<span class="kpi-sub"> / {totalAllAchievements}</span>
+			</span>
+		</div>
+		<div class="kpi-cell">
+			<span class="kpi-label">{$i18n.t('main.platinums')}</span>
+			<span class="kpi-value is-completed tabular-nums">{$totalCompletedGames}</span>
+		</div>
+		<div class="kpi-cell">
+			<span class="kpi-label">{$i18n.t('statsPanel.avgProgress')}</span>
+			<span class="kpi-value tabular-nums">{avgProgression}%</span>
+		</div>
+		<div class="kpi-cell">
+			<span class="kpi-label">{$i18n.t('main.gamerscore')}</span>
+			<span class="kpi-value tabular-nums">{$profileRank.score} G</span>
+		</div>
+	</section>
+
+	<section class="home-section">
+		<div class="section-header">
+			<h2 class="section-title">{$i18n.t('main.recentActivity')}</h2>
 		</div>
 
-		{#if recentActivity.length === 0}
+		{#if recentActivity.length > 0}
+			<ul class="activity-list">
+				{#each recentActivity as item (item.gameId + ':' + item.key)}
+					{@const tier = getRarityTier7(item.completionpercentage)}
+					{@const rarityLabel = rarityLabelByIndex($i18n.language, getRarityTierIndex(tier))}
+					{@const iconUrl = pickImageUrl(item.icon, item.gameHeaderImage)}
+					<li class="activity-item">
+						<button type="button" class="activity-row" onclick={() => openAchievement(item)}>
+							<div class="activity-icon-wrap">
+								{#if iconUrl}
+									<img
+										src={iconUrl}
+										alt={item.name}
+										class="activity-icon"
+										onerror={() => failedImageUrls.add(iconUrl)}
+									/>
+								{:else}
+									{@render trophySvg(18)}
+								{/if}
+							</div>
+							<div class="activity-info">
+								<span class="activity-name">{item.name}</span>
+								<span class="activity-meta tabular-nums">
+									{item.unlocked_time
+										? `${item.gameName} · ${formatDateTime(item.unlocked_time)}`
+										: item.gameName}
+								</span>
+							</div>
+							<span class="activity-rarity tabular-nums" title={rarityLabel}>
+								<span class="rarity-dot" style:background={getRarityCssVar(tier)} aria-hidden="true"
+								></span>
+								<span>{formatRarityPct(item.completionpercentage)}</span>
+							</span>
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{:else}
 			<div class="empty-hint">{$i18n.t('main.noRecentActivity')}</div>
 		{/if}
 	</section>
 
-	<section class="activity-section library-section">
+	<section class="home-section library-section">
 		<div class="section-header">
 			<h2 class="section-title">{$i18n.t('main.recentLibrary')}</h2>
 			<button
@@ -178,82 +248,235 @@
 				class="library-link-btn"
 				onclick={() => void goto(resolve('/(app)/games'))}
 			>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<svg
+					width="14"
+					height="14"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
 					<rect x="3" y="3" width="7" height="7" rx="1.5" />
 					<rect x="14" y="3" width="7" height="7" rx="1.5" />
 					<rect x="3" y="14" width="7" height="7" rx="1.5" />
 					<rect x="14" y="14" width="7" height="7" rx="1.5" />
 				</svg>
 				<span>{$i18n.t('topbar.library')}</span>
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<svg
+					width="13"
+					height="13"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2.2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
 					<path d="M9 18l6-6-6-6" />
 				</svg>
 			</button>
 		</div>
+
 		<div class="game-grid">
 			{#each recentGames as game (game.id)}
-				{@const headerUrl = getGameHeaderUrl(game)}
-				{@const pct = getGameCompletionPct(game)}
-				<button
-					type="button"
-					class="game-card"
-					onclick={() => void goto(resolve('/(app)/games/[id]', { id: game.id }))}
-				>
-					<div class="game-card-bg">
-						{#if headerUrl}
-							<img src={headerUrl} alt={game.name} />
+				{@const iconUrl = pickImageUrl(getGameIconUrl(game), getGameHeaderUrl(game))}
+				{@const progress = computeGameProgress(
+					game.achievements ?? [],
+					game.achievement_groups,
+					$i18n.t('game.baseGame')
+				)}
+				{@const basePct = formatCompletionPct(
+					progress.unlockedBase,
+					progress.totalBase,
+					progress.platinumPct
+				)}
+				{@const totalPct = formatCompletionPct(
+					progress.unlockedAll,
+					progress.totalAll,
+					progress.globalPct
+				)}
+				{@const sourceLabel = getSourceLabel(game)}
+				<button type="button" class="game-card" onclick={() => openGame(game.id)}>
+					<div class="game-card-top">
+						<div class="game-card-thumb">
+							{#if iconUrl}
+								<img
+									src={iconUrl}
+									alt={game.name || game.id}
+									class="game-card-img"
+									onerror={() => failedImageUrls.add(iconUrl)}
+								/>
+							{:else}
+								{@render trophySvg(20)}
+							{/if}
+						</div>
+						<div class="game-card-head">
+							<div class="game-card-title-row">
+								<span class="game-card-title">{game.name || game.id}</span>
+								{#if progress.isPlatinum}
+									<span
+										class="game-platinum-icon"
+										title={$i18n.t('game.completedLabel')}
+										aria-label={$i18n.t('game.completedLabel')}
+									>
+										{@render trophySvg(13)}
+									</span>
+								{/if}
+							</div>
+							<span class="game-card-sub tabular-nums">
+								{#if sourceLabel}{sourceLabel} ·
+								{/if}{progress.unlockedAll}/{progress.totalAll}
+							</span>
+						</div>
+					</div>
+
+					<div class="game-card-gauges">
+						{#if progress.hasDlc}
+							<div class="gauge-row">
+								<span class="gauge-label">{$i18n.t('main.platinumShort')}</span>
+								<div class="gauge-track" aria-hidden="true">
+									<div class="gauge-fill is-completed" style:width="{progress.platinumPct}%"></div>
+								</div>
+								<span class="gauge-pct tabular-nums">{basePct}%</span>
+							</div>
+							<div class="gauge-row">
+								<span class="gauge-label">{$i18n.t('main.totalShort')}</span>
+								<div class="gauge-track" aria-hidden="true">
+									<div class="gauge-fill is-accent" style:width="{progress.globalPct}%"></div>
+								</div>
+								<span class="gauge-pct tabular-nums">{totalPct}%</span>
+							</div>
 						{:else}
-							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="game-card-fallback-icon" aria-hidden="true">
-								<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-								<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-								<path d="M4 22h16" />
-								<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-								<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-								<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-							</svg>
+							<div class="gauge-row">
+								<div class="gauge-track" aria-hidden="true">
+									<div
+										class="gauge-fill"
+										class:is-completed={progress.isPlatinum}
+										class:is-accent={!progress.isPlatinum}
+										style:width="{progress.platinumPct}%"
+									></div>
+								</div>
+								<span class="gauge-pct tabular-nums" class:is-completed={progress.isPlatinum}>
+									{basePct}%
+								</span>
+							</div>
 						{/if}
 					</div>
-					<div class="game-card-overlay"></div>
-					<div class="game-card-info">
-						<div class="game-card-title">{game.name || game.id}</div>
-						<div class="game-card-bar">
-							<div
-								class="game-card-bar-fill"
-								style="width: {pct}%; background: {pct === 100
-									? 'var(--completed)'
-									: 'var(--accent)'}"
-							></div>
-						</div>
-						<div
-							class="game-card-pct tabular-nums"
-							class:complete={pct === 100}
-						>
-							{pct}%
-						</div>
+
+					<div class="game-card-footer tabular-nums">
+						{game.playtime_seconds && game.playtime_seconds > 0
+							? formatPlaytime(game.playtime_seconds)
+							: $i18n.t('games.neverPlayed')}
 					</div>
 				</button>
 			{/each}
 		</div>
 	</section>
-</main>
+</div>
 
 <style>
 	.main-content {
-		background: var(--bg-panel);
-		padding: 28px 32px;
+		padding: 24px 28px;
 		overflow-y: auto;
-		height: 100%;
+		flex: 1;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
+		gap: 24px;
 	}
 
-	.activity-section {
+	.home-header {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+
+	.home-title {
+		font-size: 22px;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		line-height: 1.2;
+		color: var(--text-primary);
+	}
+
+	.home-profile {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		flex-wrap: wrap;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.profile-name {
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.profile-sep,
+	.profile-xp {
+		color: var(--text-muted);
+	}
+
+	.kpi-strip {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		background: var(--surface-1);
+		border: 1px solid var(--border-soft);
+		border-radius: 10px;
+	}
+
+	.kpi-cell {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding: 13px 16px;
+		min-width: 0;
+	}
+
+	.kpi-cell + .kpi-cell {
+		border-left: 1px solid var(--border-soft);
+	}
+
+	.kpi-label {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.kpi-value {
+		font-size: 20px;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		line-height: 1.15;
+		color: var(--text-primary);
+	}
+
+	.kpi-value.is-completed {
+		color: var(--completed);
+	}
+
+	.kpi-sub {
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--text-muted);
+	}
+
+	.home-section {
 		display: flex;
 		flex-direction: column;
 	}
 
 	.library-section {
-		margin-top: 32px;
 		flex: 1;
 	}
 
@@ -262,26 +485,22 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		margin-bottom: 18px;
-	}
-
-	.section-header .section-title {
-		margin-bottom: 0;
+		margin-bottom: 10px;
 	}
 
 	.section-title {
-		font-size: 20px;
-		font-weight: 800;
-		margin-bottom: 18px;
-		letter-spacing: -0.5px;
-		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-muted);
 	}
 
 	.library-link-btn {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 6px 12px;
+		padding: 5px 11px;
 		border-radius: 999px;
 		background: var(--surface-1);
 		border: 1px solid var(--border-soft);
@@ -290,99 +509,76 @@
 		font-weight: 600;
 		font-family: inherit;
 		cursor: pointer;
-		box-shadow: var(--shadow-card);
 		transition:
-			transform 0.2s var(--spring-out),
-			background 0.18s ease,
-			border-color 0.18s ease,
-			color 0.18s ease;
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease;
 	}
 
 	.library-link-btn:hover {
 		background: var(--surface-hover);
 		border-color: var(--border-specular);
 		color: var(--text-primary);
-		transform: translateY(-1px);
 	}
 
-	.library-link-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
+	.activity-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
 	}
 
-	.activity-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-		gap: 12px;
+	.activity-item {
+		border-bottom: 1px solid var(--border-soft);
 	}
 
-	.activity-card {
+	.activity-item:last-child {
+		border-bottom: none;
+	}
+
+	.activity-row {
 		display: flex;
 		align-items: center;
-		gap: 14px;
-		padding: 12px;
-		background: var(--surface-1);
-		border: 1px solid var(--border-soft);
-		border-radius: 12px;
-		cursor: pointer;
-		box-shadow: var(--shadow-card);
-		transition:
-			transform 0.22s var(--spring-out),
-			background 0.18s ease,
-			border-color 0.18s ease,
-			box-shadow 0.22s ease;
-		text-align: left;
+		gap: 12px;
 		width: 100%;
+		padding: 9px 8px;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		text-align: left;
 		font-family: inherit;
+		cursor: pointer;
+		transition: background 0.15s ease;
 	}
 
-	.activity-card:hover {
+	.activity-row:hover {
 		background: var(--surface-hover);
-		border-color: var(--border-specular);
-		box-shadow: var(--shadow-elevated);
-		transform: translateY(-2px);
 	}
 
-	.activity-card:focus-visible {
+	.activity-row:focus-visible {
 		outline: 2px solid var(--accent);
-		outline-offset: 2px;
+		outline-offset: -2px;
 	}
 
 	.activity-icon-wrap {
 		flex-shrink: 0;
+		width: 36px;
+		height: 36px;
+		border-radius: 7px;
+		overflow: hidden;
+		background: var(--surface-2);
+		color: var(--text-muted);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 56px;
-		height: 56px;
-		position: relative;
 	}
 
 	.activity-icon {
-		width: 56px;
-		height: 56px;
-		border-radius: 8px;
+		width: 100%;
+		height: 100%;
 		object-fit: cover;
-		background: var(--surface-3);
-	}
-
-	.activity-icon-fallback {
-		display: none;
-		align-items: center;
-		justify-content: center;
-		width: 56px;
-		height: 56px;
-		border-radius: 8px;
-		background: var(--surface-3);
-		color: var(--text-muted);
-	}
-
-	:global(.activity-icon-wrap.icon-error .activity-icon-fallback) {
-		display: flex;
-	}
-
-	.activity-icon-fallback.always-visible {
-		display: flex;
+		display: block;
 	}
 
 	.activity-info {
@@ -390,183 +586,218 @@
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
-		justify-content: space-between;
-	}
-
-	.activity-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		margin-bottom: 2px;
+		gap: 2px;
 	}
 
 	.activity-name {
-		font-size: 14px;
-		font-weight: 700;
+		font-size: 13px;
+		font-weight: 600;
 		color: var(--text-primary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
-	.activity-game {
+	.activity-meta {
 		font-size: 12px;
-		font-weight: 500;
 		color: var(--text-secondary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		margin-bottom: 6px;
 	}
 
-	.activity-footer {
-		display: flex;
-		justify-content: space-between;
+	.activity-rarity {
+		display: inline-flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
+		flex-shrink: 0;
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-secondary);
 	}
 
-	.activity-rarity-badge {
-		font-size: 10px;
-		font-weight: 800;
-		padding: 2px 8px;
-		border-radius: 5px;
-		border: 1px solid transparent;
-		text-transform: uppercase;
-		letter-spacing: 0.4px;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.activity-time {
-		font-size: 10px;
-		font-weight: 600;
-		color: var(--text-muted);
-		font-variant-numeric: tabular-nums;
+	.rarity-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		flex-shrink: 0;
 	}
 
 	.empty-hint {
 		font-size: 13px;
 		color: var(--text-muted);
-		padding: 16px 0;
+		padding: 12px 0;
 	}
 
 	.game-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-		gap: 12px;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 10px;
 	}
 
 	.game-card {
-		position: relative;
-		height: 120px;
-		border-radius: 12px;
-		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 12px;
+		border-radius: 10px;
+		background: var(--surface-1);
 		border: 1px solid var(--border-soft);
-		cursor: pointer;
-		background: var(--surface-3);
-		padding: 0;
-		box-shadow: var(--shadow-card);
-		transition:
-			transform 0.22s var(--spring-out),
-			border-color 0.18s ease,
-			box-shadow 0.22s ease;
 		text-align: left;
+		font-family: inherit;
+		cursor: pointer;
+		min-width: 0;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease;
 	}
 
 	.game-card:hover {
-		border-color: var(--accent, #c8a96e);
-		box-shadow: var(--shadow-elevated);
-		transform: translateY(-2px);
+		background: var(--surface-hover);
+		border-color: var(--border-specular);
 	}
 
-	.game-card:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
+	.game-card-top {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
 	}
 
-	.game-card-bg {
-		position: absolute;
-		inset: 0;
+	.game-card-thumb {
+		width: 44px;
+		height: 44px;
+		border-radius: 8px;
+		overflow: hidden;
+		background: var(--surface-2);
+		color: var(--text-muted);
+		flex-shrink: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: var(--surface-2);
 	}
-	.game-card-bg img {
+
+	.game-card-img {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
-	}
-	.game-card-fallback-icon {
-		color: var(--text-muted);
-		opacity: 0.55;
+		display: block;
 	}
 
-	.game-card-overlay {
-		position: absolute;
-		inset: 0;
-		background: linear-gradient(
-			to top,
-			rgba(10, 12, 18, 0.92) 0%,
-			rgba(10, 12, 18, 0.45) 58%,
-			rgba(10, 12, 18, 0.08) 100%
-		);
+	.game-card-head {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
 	}
 
-	.game-card-info {
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		padding: 10px 12px;
+	.game-card-title-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
 	}
 
 	.game-card-title {
-		font-size: 12px;
-		font-weight: 700;
-		color: #ffffff;
-		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+		flex: 1;
+		min-width: 0;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		margin-bottom: 6px;
 	}
 
-	.game-card-bar {
-		height: 3px;
-		background: rgba(255, 255, 255, 0.22);
-		border-radius: 2px;
+	.game-platinum-icon {
+		color: var(--completed);
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+	}
+
+	.game-card-sub {
+		font-size: 11px;
+		color: var(--text-muted);
+		white-space: nowrap;
 		overflow: hidden;
-		margin-bottom: 4px;
+		text-overflow: ellipsis;
 	}
 
-	.game-card-bar-fill {
+	.game-card-gauges {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+	}
+
+	.gauge-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.gauge-label {
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--text-muted);
+		min-width: 34px;
+		flex-shrink: 0;
+	}
+
+	.gauge-track {
+		flex: 1;
+		height: 3px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		overflow: hidden;
+	}
+
+	.gauge-fill {
 		height: 100%;
-		background: var(--accent, #c8a96e);
-		border-radius: 2px;
+		border-radius: 999px;
 	}
 
-	.game-card-pct {
-		font-size: 10px;
-		font-weight: 800;
-		color: rgba(255, 255, 255, 0.8);
-		font-variant-numeric: tabular-nums;
-	}
-	.game-card-pct.complete {
-		color: var(--completed, #e4b441);
+	.gauge-fill.is-completed {
+		background: var(--completed);
 	}
 
-	::-webkit-scrollbar {
-		width: 4px;
+	.gauge-fill.is-accent {
+		background: var(--accent);
 	}
-	::-webkit-scrollbar-track {
-		background: transparent;
+
+	.gauge-pct {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--text-secondary);
+		flex-shrink: 0;
 	}
-	::-webkit-scrollbar-thumb {
-		background: var(--border-soft);
-		border-radius: 2px;
+
+	.gauge-pct.is-completed {
+		color: var(--completed);
 	}
-	::-webkit-scrollbar-thumb:hover {
-		background: var(--text-muted);
+
+	.game-card-footer {
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+
+	@media (max-width: 720px) {
+		.main-content {
+			padding: 18px 16px;
+			gap: 20px;
+		}
+
+		.kpi-strip {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.kpi-cell:nth-child(3) {
+			border-left: none;
+		}
+
+		.kpi-cell:nth-child(n + 3) {
+			border-top: 1px solid var(--border-soft);
+		}
 	}
 </style>

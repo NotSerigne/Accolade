@@ -16,7 +16,8 @@
 					const parsed = JSON.parse(raw);
 					const theme = parsed?.theme;
 					const accent = typeof parsed?.accentColor === 'string' ? parsed.accentColor : null;
-					if (!theme || !accent) return;
+					if (theme !== 'dark' && theme !== 'light' && theme !== 'system') return;
+					if (!accent) return;
 					const root = document.documentElement;
 
 					const resolvedTheme =
@@ -27,7 +28,15 @@
 							: theme;
 
 					root.setAttribute('data-theme', resolvedTheme);
-					root.style.setProperty('--accent', accent);
+					const calibrated =
+						accent.trim().toLowerCase() !== '#c8a96e' ? parsed?.calibrated?.[resolvedTheme] : null;
+					if (calibrated && typeof calibrated.accent === 'string' && calibrated.accent) {
+						root.style.setProperty('--accent-default', calibrated.accent);
+						root.style.setProperty('--accent', calibrated.accent);
+						if (typeof calibrated.text === 'string' && calibrated.text) {
+							root.style.setProperty('--accent-text', calibrated.text);
+						}
+					}
 					root.style.colorScheme = resolvedTheme;
 				} catch {}
 			})();

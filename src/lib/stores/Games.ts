@@ -10,7 +10,12 @@ import {
 	normalizeAchievementTags,
 	computeRemainingCompletionistHours,
 	formatRemainingTimeHours,
-	type AchievementTagKey
+	RARITY_TIERS_7,
+	getRarityTier7,
+	getRarityTierIndex,
+	getRarityCssVar,
+	type AchievementTagKey,
+	type RarityTier7
 } from '../utils/achievementHelpers';
 
 export {
@@ -19,7 +24,12 @@ export {
 	normalizeAchievementTags,
 	computeRemainingCompletionistHours,
 	formatRemainingTimeHours,
-	type AchievementTagKey
+	RARITY_TIERS_7,
+	getRarityTier7,
+	getRarityTierIndex,
+	getRarityCssVar,
+	type AchievementTagKey,
+	type RarityTier7
 };
 
 export interface Achievement {

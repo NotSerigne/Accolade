@@ -2,6 +2,7 @@
 import { emit } from '@tauri-apps/api/event';
 import { Store } from '@tauri-apps/plugin-store';
 import { writable } from 'svelte/store';
+import { calibrateAccentForTheme } from '../utils/achievementHelpers';
 
 export type NotifStyle = 'accolade' | 'ps5' | 'xbox360' | 'steamdeck' | 'retro';
 
@@ -98,7 +99,21 @@ export const DEFAULTS: AppSettings = {
 
 const THEME_CACHE_KEY = 'accolade:theme:v1';
 
-type ThemeCache = Pick<AppSettings, 'theme' | 'accentColor'>;
+interface CalibratedThemeAccent {
+	accent: string;
+	text: string;
+}
+
+type ThemeCache = Pick<AppSettings, 'theme' | 'accentColor'> & {
+	calibrated?: {
+		dark: CalibratedThemeAccent;
+		light: CalibratedThemeAccent;
+	};
+};
+
+function isCustomAccent(accentColor: string): boolean {
+	return accentColor.trim().toLowerCase() !== DEFAULTS.accentColor.toLowerCase();
+}
 
 function readThemeCache(): ThemeCache | null {
 	if (typeof localStorage === 'undefined') return null;
@@ -125,10 +140,17 @@ function writeThemeCache(s: AppSettings): void {
 	if (typeof localStorage === 'undefined') return;
 
 	try {
-		localStorage.setItem(
-			THEME_CACHE_KEY,
-			JSON.stringify({ theme: s.theme, accentColor: s.accentColor })
-		);
+		const cache: ThemeCache = {
+			theme: s.theme,
+			accentColor: s.accentColor
+		};
+		if (isCustomAccent(s.accentColor)) {
+			cache.calibrated = {
+				dark: calibrateAccentForTheme(s.accentColor, 'dark'),
+				light: calibrateAccentForTheme(s.accentColor, 'light')
+			};
+		}
+		localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(cache));
 	} catch {
 		// empty
 	}
@@ -212,6 +234,23 @@ export async function saveSettings(next: AppSettings): Promise<void> {
 	}
 }
 
+function syncAccentVariables(
+	root: HTMLElement,
+	accentColor: string,
+	resolvedTheme: 'dark' | 'light'
+): void {
+	if (!isCustomAccent(accentColor)) {
+		root.style.removeProperty('--accent-default');
+		root.style.removeProperty('--accent');
+		root.style.removeProperty('--accent-text');
+		return;
+	}
+	const { accent, text } = calibrateAccentForTheme(accentColor, resolvedTheme);
+	root.style.setProperty('--accent-default', accent);
+	root.style.setProperty('--accent', accent);
+	root.style.setProperty('--accent-text', text);
+}
+
 export function applyTheme(s: AppSettings): void {
 	if (typeof document === 'undefined') return;
 
@@ -219,12 +258,13 @@ export function applyTheme(s: AppSettings): void {
 	const mediaQuery =
 		typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 	const prefersDark = mediaQuery ? mediaQuery.matches : true;
-	const resolvedTheme = s.theme === 'system' ? (prefersDark ? 'dark' : 'light') : s.theme;
+	const resolvedTheme: 'dark' | 'light' =
+		s.theme === 'system' ? (prefersDark ? 'dark' : 'light') : s.theme;
 
+	root.lang = s.language || 'fr';
 	root.setAttribute('data-theme', resolvedTheme);
-	root.style.setProperty('--accent-default', s.accentColor);
-	root.style.setProperty('--accent', s.accentColor);
 	root.style.colorScheme = resolvedTheme;
+	syncAccentVariables(root, s.accentColor, resolvedTheme);
 
 	if (removeSystemThemeListener) {
 		removeSystemThemeListener();
@@ -234,10 +274,10 @@ export function applyTheme(s: AppSettings): void {
 	if (!mediaQuery || s.theme !== 'system') return;
 
 	const onChange = () => {
-		const nextTheme = mediaQuery.matches ? 'dark' : 'light';
+		const nextTheme: 'dark' | 'light' = mediaQuery.matches ? 'dark' : 'light';
 		root.setAttribute('data-theme', nextTheme);
 		root.style.colorScheme = nextTheme;
-		root.style.setProperty('--accent', s.accentColor);
+		syncAccentVariables(root, s.accentColor, nextTheme);
 	};
 	mediaQuery.addEventListener('change', onChange);
 	removeSystemThemeListener = () => mediaQuery.removeEventListener('change', onChange);

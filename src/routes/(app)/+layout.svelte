@@ -25,54 +25,38 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { checkForUpdates } from '$lib/stores/update.js';
 	import UpdateNotice from '$lib/UpdateNotice.svelte';
+	import { calibrateAccentForTheme } from '$lib/utils/achievementHelpers.js';
 
 	let { children } = $props();
 	let isSetupRoute = $derived(page.url.pathname.startsWith('/setup'));
 	let activeThemeColor = $state<string | null>(null);
 	let activeThemeContrast = $state<string>('#111111');
+	let osDark = $state<boolean>(
+		typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)').matches : true
+	);
+	let resolvedTheme = $derived<'dark' | 'light'>(
+		$settings.theme === 'system' ? (osDark ? 'dark' : 'light') : $settings.theme
+	);
 	let selectedBannerUrl = $derived(
 		$selectedGame
 			? $selectedGame.header_image_url ||
-				($selectedGame.steam_id
-					? getGameHeaderUrl($selectedGame)
-					: $selectedGame.background_image_url ||
-						$selectedGame.steamgrid_icon_url ||
-						getGameHeaderUrl($selectedGame))
+					($selectedGame.steam_id
+						? getGameHeaderUrl($selectedGame)
+						: $selectedGame.background_image_url ||
+							$selectedGame.steamgrid_icon_url ||
+							getGameHeaderUrl($selectedGame))
 			: ''
 	);
-
-	function parseColorRgb(color: string): [number, number, number] | null {
-		const hexMatch = color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-		if (hexMatch) {
-			const hex = hexMatch[1];
-			if (hex.length === 3) {
-				return [
-					parseInt(hex[0] + hex[0], 16),
-					parseInt(hex[1] + hex[1], 16),
-					parseInt(hex[2] + hex[2], 16)
-				];
-			}
-			return [
-				parseInt(hex.slice(0, 2), 16),
-				parseInt(hex.slice(2, 4), 16),
-				parseInt(hex.slice(4, 6), 16)
-			];
-		}
-		const rgb = color.match(/\d+/g);
-		if (rgb && rgb.length >= 3) {
-			return [Number(rgb[0]), Number(rgb[1]), Number(rgb[2])];
-		}
-		return null;
-	}
 
 	$effect(() => {
 		let cancelled = false;
 		const game = $selectedGame;
 		const s = $settings;
+		const themeMode = resolvedTheme;
 
 		if (!s.dynamicTheme || !game) {
 			activeThemeColor = null;
-			activeThemeContrast = '#111111';
+			activeThemeContrast = themeMode === 'dark' ? '#111111' : '#ffffff';
 			return;
 		}
 
@@ -84,19 +68,18 @@
 		if (imageUrl) {
 			extractGameThemeColor(imageUrl).then((color) => {
 				if (cancelled) return;
-				activeThemeColor = color;
 				if (color) {
-					const parsed = parseColorRgb(color);
-					if (parsed) {
-						const [r, g, b] = parsed;
-						const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-						activeThemeContrast = luminance > 0.6 ? '#111111' : '#ffffff';
-					}
+					const calibrated = calibrateAccentForTheme(color, themeMode);
+					activeThemeColor = calibrated.accent;
+					activeThemeContrast = calibrated.text;
+				} else {
+					activeThemeColor = null;
+					activeThemeContrast = themeMode === 'dark' ? '#111111' : '#ffffff';
 				}
 			});
 		} else {
 			activeThemeColor = null;
-			activeThemeContrast = '#111111';
+			activeThemeContrast = themeMode === 'dark' ? '#111111' : '#ffffff';
 		}
 
 		return () => {
@@ -112,10 +95,18 @@
 	onMount(() => {
 		setupAchievementsRealtimeSync();
 
+		const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+		osDark = mediaQuery.matches;
+		const onThemeMediaChange = (event: MediaQueryListEvent) => {
+			osDark = event.matches;
+		};
+		mediaQuery.addEventListener('change', onThemeMediaChange);
+
 		const unlisten = listen<boolean>('watcher-status', (event) => {
 			watcherActive.set(event.payload);
 		});
 
+		let destroyed = false;
 		let unlistenClose: (() => void) | undefined;
 
 		const appWindow = getCurrentWindow();
@@ -129,8 +120,12 @@
 					await invoke('exit_app');
 				}
 			})
-			.then((unlisten) => {
-				unlistenClose = unlisten;
+			.then((unlistenCloseFn) => {
+				if (destroyed) {
+					unlistenCloseFn();
+					return;
+				}
+				unlistenClose = unlistenCloseFn;
 			});
 
 		void (async () => {
@@ -185,8 +180,10 @@
 		})();
 
 		return () => {
+			destroyed = true;
+			mediaQuery.removeEventListener('change', onThemeMediaChange);
 			unlisten.then((u) => u());
-			if (unlistenClose) unlistenClose();
+			unlistenClose?.();
 		};
 	});
 
@@ -236,11 +233,11 @@
 		></button>
 		<div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
 			<Settings />
-			</div>
 		</div>
-	{/if}
+	</div>
+{/if}
 
-	<UpdateNotice />
+<UpdateNotice />
 
 <style>
 	.app-container {

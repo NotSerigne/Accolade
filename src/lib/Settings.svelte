@@ -476,6 +476,7 @@
 				discordRpc: draft.discordRpc,
 				replayBuffer: draft.replayBuffer
 			};
+			const prev = get(settings);
 			await saveSettings(next);
 
 			try {
@@ -510,8 +511,25 @@
 				console.warn('Failed to configure autostart:', e);
 			}
 
-			await refreshSteamUser();
-			await syncSteamMetadata(next.steamApiKey, next.steamGridDbApiKey);
+			const userCredentialsChanged =
+				prev.steamId !== next.steamId || prev.steamApiKey !== next.steamApiKey;
+			const searchPathsChanged =
+				prev.searchPaths.length !== next.searchPaths.length ||
+				prev.searchPaths.some((p, i) => p !== next.searchPaths[i]);
+			const metadataConfigChanged =
+				userCredentialsChanged ||
+				prev.raUsername !== next.raUsername ||
+				prev.raApiKey !== next.raApiKey ||
+				prev.steamGridDbApiKey !== next.steamGridDbApiKey ||
+				prev.language !== next.language ||
+				searchPathsChanged;
+
+			if (userCredentialsChanged) {
+				void refreshSteamUser();
+			}
+			if (metadataConfigChanged) {
+				void syncSteamMetadata(next.steamApiKey, next.steamGridDbApiKey);
+			}
 			settingsOpen.set(false);
 		} catch (error) {
 			const details = error instanceof Error ? error.message : String(error);

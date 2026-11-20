@@ -3,26 +3,33 @@
 	import {
 		games,
 		computeGameProgress,
-		getGameCompletionPct,
+		formatPlaytime,
 		getGameHeaderUrl,
 		getGameIconUrl,
-		totalUnlockedAchievements
+		getRarityCssVar,
+		getRarityTier7,
+		RARITY_TIERS_7,
+		totalUnlockedAchievements,
+		type RarityTier7
 	} from '$lib/stores/Games.js';
+	import { selectedGameId } from '$lib/stores/selectedGame.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { i18n, rarityLabelByIndex } from '$lib/stores/i18n.js';
+	import { SvelteSet } from 'svelte/reactivity';
 
-	type RarityBreakdown = {
-		mythic: number;
-		legendary: number;
-		epic: number;
-		veryRare: number;
-		rare: number;
-		uncommon: number;
-		common: number;
-	};
+	let failedImageUrls = new SvelteSet<string>();
 
-	function openGame(id: string) {
+	function pickImageUrl(...candidates: Array<string | null | undefined>): string | null {
+		for (const candidate of candidates) {
+			const url = candidate?.trim();
+			if (url && !failedImageUrls.has(url)) return url;
+		}
+		return null;
+	}
+
+	function openGame(id: string): void {
+		selectedGameId.set(id);
 		void goto(resolve('/(app)/games/[id]', { id }));
 	}
 
@@ -33,65 +40,34 @@
 		}))
 	);
 
-	let totalAchievements = $derived(
-		gameProgressList.reduce(
-			(acc, { game, progress }) =>
-				acc + (game.achievements?.length ? progress.totalAll : game.achievements_total || 0),
-			0
-		)
-	);
-
-	let avgProgression = $derived.by(() => {
-		if ($games.length === 0) return 0;
-		const sum = $games.reduce((acc, g) => acc + getGameCompletionPct(g), 0);
-		return Math.round(sum / $games.length);
-	});
-
-	let rarityBreakdown = $derived.by(() => {
-		const all = gameProgressList
-			.flatMap(({ progress }) => progress.sections.flatMap((s) => s.achievements))
-			.filter((a) => a.unlocked);
-		const breakdown: RarityBreakdown = {
+	let rarityCounts = $derived.by(() => {
+		const counts: Record<RarityTier7, number> = {
 			mythic: 0,
 			legendary: 0,
 			epic: 0,
-			veryRare: 0,
+			'very-rare': 0,
 			rare: 0,
 			uncommon: 0,
 			common: 0
 		};
 
-		for (const a of all) {
-			const n = parseFloat(a.completionpercentage);
-			if (isNaN(n)) {
-				breakdown.common += 1;
-			} else if (n <= 0.1) {
-				breakdown.mythic += 1;
-			} else if (n <= 1) {
-				breakdown.legendary += 1;
-			} else if (n <= 3) {
-				breakdown.epic += 1;
-			} else if (n <= 7) {
-				breakdown.veryRare += 1;
-			} else if (n <= 15) {
-				breakdown.rare += 1;
-			} else if (n <= 35) {
-				breakdown.uncommon += 1;
-			} else {
-				breakdown.common += 1;
+		for (const { progress } of gameProgressList) {
+			for (const section of progress.sections) {
+				for (const ach of section.achievements) {
+					if (ach.unlocked) {
+						counts[getRarityTier7(ach.completionpercentage)] += 1;
+					}
+				}
 			}
 		}
 
-		return breakdown;
+		return counts;
 	});
 
 	let highRarityPct = $derived.by(() => {
 		if ($totalUnlockedAchievements === 0) return 0;
 		const highRarity =
-			rarityBreakdown.mythic +
-			rarityBreakdown.legendary +
-			rarityBreakdown.epic +
-			rarityBreakdown.veryRare;
+			rarityCounts.mythic + rarityCounts.legendary + rarityCounts.epic + rarityCounts['very-rare'];
 		return Math.round((highRarity / $totalUnlockedAchievements) * 100);
 	});
 
@@ -115,140 +91,148 @@
 			})
 			.slice(0, 3);
 	});
-
-	let rarityRows = $derived.by(() => [
-		{
-			label: rarityLabelByIndex($i18n.language, 0),
-			count: rarityBreakdown.mythic,
-			className: 'mythic'
-		},
-		{
-			label: rarityLabelByIndex($i18n.language, 1),
-			count: rarityBreakdown.legendary,
-			className: 'legendary'
-		},
-		{
-			label: rarityLabelByIndex($i18n.language, 2),
-			count: rarityBreakdown.epic,
-			className: 'epic'
-		},
-		{
-			label: rarityLabelByIndex($i18n.language, 3),
-			count: rarityBreakdown.veryRare,
-			className: 'very-rare'
-		},
-		{
-			label: rarityLabelByIndex($i18n.language, 4),
-			count: rarityBreakdown.rare,
-			className: 'rare'
-		},
-		{
-			label: rarityLabelByIndex($i18n.language, 5),
-			count: rarityBreakdown.uncommon,
-			className: 'uncommon'
-		},
-		{
-			label: rarityLabelByIndex($i18n.language, 6),
-			count: rarityBreakdown.common,
-			className: 'common'
-		}
-	]);
 </script>
 
-<div class="stats-panel">
-	<h2 class="section-title">{$i18n.t('statsPanel.stats')}</h2>
+<aside class="stats-panel" aria-label={$i18n.t('statsPanel.stats')}>
+	<section class="panel-section">
+		<div class="rarity-header">
+			<h2 class="section-title">{$i18n.t('statsPanel.rarityBreakdown')}</h2>
+			<span class="rarity-share tabular-nums">
+				<span class="rarity-share-pct">{highRarityPct}%</span>
+				<span class="rarity-share-label">{$i18n.t('statsPanel.rareShare')}</span>
+			</span>
+		</div>
 
-	<div class="stat-card">
-		<span class="stat-label">{$i18n.t('statsPanel.unlocked')}</span>
-		<span class="stat-value tabular-nums">{$totalUnlockedAchievements}</span>
-		<span class="stat-sub tabular-nums">{$i18n.t('statsPanel.outOf', { total: totalAchievements })}</span>
-	</div>
-
-	<div class="stat-card">
-		<span class="stat-label">{$i18n.t('statsPanel.avgProgress')}</span>
-		<span class="stat-value tabular-nums">{avgProgression}%</span>
-	</div>
-
-	<div class="stat-card">
-		<span class="stat-label">{$i18n.t('statsPanel.avgRarity')}</span>
-		<span class="stat-value tabular-nums">{highRarityPct}%</span>
-	</div>
-
-	<h2 class="section-title">{$i18n.t('statsPanel.rarityBreakdown')}</h2>
-
-	<ul class="rarity-list">
-		{#each rarityRows as row (row.className)}
-			{@const sharePct =
-				$totalUnlockedAchievements > 0 ? (row.count / $totalUnlockedAchievements) * 100 : 0}
-			<li class="rarity-row">
-				<div class="rarity-row-top">
-					<span class={'dot ' + row.className}></span>
-					<span class="rarity-label">{row.label}</span>
-					<span class="rarity-count tabular-nums">{row.count}</span>
-				</div>
-				<div class="rarity-bar-track" aria-hidden="true">
-					<div class={'rarity-bar-fill ' + row.className} style:width="{sharePct}%"></div>
-				</div>
-			</li>
-		{/each}
-	</ul>
-
-	<h2 class="section-title">{$i18n.t('statsPanel.recentCompleted')}</h2>
-
-	<ul class="completed-list">
-		{#each recentlyCompleted as { game, progress } (game.id)}
-			<li class="completed-item">
-				<button type="button" class="completed-btn" onclick={() => openGame(game.id)}>
-					<img
-						src={getGameIconUrl(game)}
-						alt={game.name}
-						class="game-icon"
-						onerror={(e) => {
-							const t = e.target as HTMLImageElement;
-							const headerUrl = getGameHeaderUrl(game);
-							if (headerUrl && t.src !== headerUrl) {
-								t.src = headerUrl;
-							}
-						}}
-					/>
-					<div class="completed-info">
-						<span class="completed-name">{game.name}</span>
-						<span class="completed-sub tabular-nums">
-							100% · {progress.unlockedBase}/{progress.totalBase}
-						</span>
+		<ul class="rarity-list">
+			{#each RARITY_TIERS_7 as tier, idx (tier)}
+				{@const count = rarityCounts[tier]}
+				{@const sharePct =
+					$totalUnlockedAchievements > 0 ? (count / $totalUnlockedAchievements) * 100 : 0}
+				{@const colorVar = getRarityCssVar(tier)}
+				<li class="rarity-row">
+					<div class="rarity-row-top">
+						<span class="rarity-dot" style:background={colorVar} aria-hidden="true"></span>
+						<span class="rarity-label">{rarityLabelByIndex($i18n.language, idx)}</span>
+						<span class="rarity-count tabular-nums">{count}</span>
 					</div>
-					<svg
-						class="completed-chevron"
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path d="M9 18l6-6-6-6" />
-					</svg>
-				</button>
-			</li>
-		{/each}
-	</ul>
-</div>
+					<div class="rarity-bar-track" aria-hidden="true">
+						<div
+							class="rarity-bar-fill"
+							style:width="{sharePct}%"
+							style:background={colorVar}
+						></div>
+					</div>
+				</li>
+			{/each}
+		</ul>
+
+		<div class="rarity-summary">
+			<span class="rarity-summary-label">{$i18n.t('statsPanel.cumulativeTotal')}</span>
+			<span class="rarity-summary-value tabular-nums">
+				{$i18n.t('statsPanel.achievementsCount', { count: $totalUnlockedAchievements })}
+			</span>
+		</div>
+	</section>
+
+	{#if recentlyCompleted.length > 0}
+		<section class="panel-section">
+			<h2 class="section-title">{$i18n.t('statsPanel.recentCompleted')}</h2>
+
+			<ul class="completed-list">
+				{#each recentlyCompleted as { game, progress } (game.id)}
+					{@const iconUrl = pickImageUrl(getGameIconUrl(game), getGameHeaderUrl(game))}
+					<li class="completed-item">
+						<button type="button" class="completed-btn" onclick={() => openGame(game.id)}>
+							<div class="game-icon-wrap">
+								{#if iconUrl}
+									<img
+										src={iconUrl}
+										alt={game.name || game.id}
+										class="game-icon"
+										onerror={() => failedImageUrls.add(iconUrl)}
+									/>
+								{:else}
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.8"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+										<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+										<path d="M4 22h16" />
+										<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+										<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+										<path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+									</svg>
+								{/if}
+							</div>
+							<div class="completed-info">
+								<span class="completed-name">{game.name || game.id}</span>
+								<span class="completed-sub tabular-nums">
+									<span class="completed-pct"
+										>100% · {progress.unlockedBase}/{progress.totalBase}</span
+									>
+									{#if game.playtime_seconds && game.playtime_seconds > 0}
+										<span class="completed-playtime">· {formatPlaytime(game.playtime_seconds)}</span
+										>
+									{/if}
+								</span>
+							</div>
+							<svg
+								class="completed-chevron"
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M9 18l6-6-6-6" />
+							</svg>
+						</button>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+</aside>
 
 <style>
 	.stats-panel {
 		background: var(--bg-panel);
 		border: 1px solid var(--border-soft);
 		border-radius: 14px;
-		padding: 24px;
+		box-shadow: var(--shadow-card);
+		padding: 20px;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: 20px;
 		height: 100%;
-		box-shadow: var(--shadow-card);
+		min-height: 0;
+	}
+
+	.panel-section {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.rarity-header {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 
 	.section-title {
@@ -257,46 +241,22 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: var(--text-muted);
-		margin-top: 16px;
-		margin-bottom: 4px;
 	}
 
-	.section-title:first-child {
-		margin-top: 0;
-	}
-
-	.stat-card {
-		background: var(--surface-1);
-		border-radius: 10px;
-		border: 1px solid var(--border-soft);
-		padding: 14px 16px;
-		display: flex;
-		flex-direction: column;
+	.rarity-share {
+		display: inline-flex;
+		align-items: baseline;
 		gap: 4px;
-		box-shadow: var(--shadow-card);
-	}
-
-	.stat-label {
 		font-size: 11px;
-		font-weight: 600;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--text-muted);
 	}
 
-	.stat-value {
-		font-size: 30px;
+	.rarity-share-pct {
 		font-weight: 700;
-		color: var(--accent, #c8a96e);
-		line-height: 1.05;
-		font-variant-numeric: tabular-nums;
+		color: var(--text-primary);
 	}
 
-	.stat-sub {
-		font-size: 12px;
+	.rarity-share-label {
 		color: var(--text-muted);
-		margin-top: 2px;
-		font-variant-numeric: tabular-nums;
 	}
 
 	.rarity-list {
@@ -305,70 +265,45 @@
 		margin: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 9px;
 	}
 
 	.rarity-row {
 		display: flex;
 		flex-direction: column;
-		gap: 5px;
+		gap: 4px;
 	}
 
 	.rarity-row-top {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		font-size: 13px;
+		gap: 8px;
+		font-size: 12px;
 	}
 
-	.dot {
-		width: 8px;
-		height: 8px;
+	.rarity-dot {
+		width: 6px;
+		height: 6px;
 		border-radius: 50%;
 		flex-shrink: 0;
-	}
-
-	.dot.mythic,
-	.rarity-bar-fill.mythic {
-		background: #ff3b5c;
-	}
-	.dot.legendary,
-	.rarity-bar-fill.legendary {
-		background: #ffd85a;
-	}
-	.dot.epic,
-	.rarity-bar-fill.epic {
-		background: #a855f7;
-	}
-	.dot.very-rare,
-	.rarity-bar-fill.very-rare {
-		background: #f4b860;
-	}
-	.dot.rare,
-	.rarity-bar-fill.rare {
-		background: #4ac8ff;
-	}
-	.dot.uncommon,
-	.rarity-bar-fill.uncommon {
-		background: #3ddc84;
-	}
-	.dot.common,
-	.rarity-bar-fill.common {
-		background: var(--text-muted);
 	}
 
 	.rarity-label {
 		flex: 1;
 		color: var(--text-secondary);
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
+
 	.rarity-count {
 		color: var(--text-primary);
 		font-weight: 600;
-		font-variant-numeric: tabular-nums;
 	}
 
 	.rarity-bar-track {
-		height: 4px;
+		height: 3px;
 		border-radius: 999px;
 		background: var(--surface-2);
 		overflow: hidden;
@@ -380,13 +315,31 @@
 		transition: width 0.35s var(--spring-out);
 	}
 
+	.rarity-summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		padding-top: 10px;
+		border-top: 1px solid var(--border-soft);
+		font-size: 12px;
+	}
+
+	.rarity-summary-label {
+		color: var(--text-muted);
+	}
+
+	.rarity-summary-value {
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
 	.completed-list {
 		list-style: none;
 		padding: 0;
 		margin: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
 	}
 
 	.completed-item {
@@ -400,7 +353,7 @@
 	.completed-btn {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 10px;
 		width: 100%;
 		padding: 8px 6px;
 		border-radius: 8px;
@@ -409,9 +362,7 @@
 		text-align: left;
 		font-family: inherit;
 		cursor: pointer;
-		transition:
-			background 0.18s ease,
-			transform 0.2s var(--spring-out);
+		transition: background 0.16s ease;
 	}
 
 	.completed-btn:hover {
@@ -425,16 +376,27 @@
 
 	.completed-btn:focus-visible {
 		outline: 2px solid var(--accent);
-		outline-offset: 1px;
+		outline-offset: -2px;
+	}
+
+	.game-icon-wrap {
+		width: 32px;
+		height: 32px;
+		border-radius: 6px;
+		overflow: hidden;
+		background: var(--surface-2);
+		color: var(--text-muted);
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.game-icon {
-		width: 36px;
-		height: 36px;
-		border-radius: 6px;
+		width: 100%;
+		height: 100%;
 		object-fit: cover;
-		background: var(--surface-2);
-		flex-shrink: 0;
+		display: block;
 	}
 
 	.completed-info {
@@ -443,7 +405,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
-		overflow: hidden;
 	}
 
 	.completed-name {
@@ -456,31 +417,29 @@
 	}
 
 	.completed-sub {
+		display: flex;
+		align-items: center;
+		gap: 4px;
 		font-size: 11px;
-		color: var(--completed, #4caf6e);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.completed-pct {
+		color: var(--completed);
 		font-weight: 600;
-		font-variant-numeric: tabular-nums;
+	}
+
+	.completed-playtime {
+		color: var(--text-muted);
 	}
 
 	.completed-chevron {
 		color: var(--text-muted);
 		flex-shrink: 0;
 		transition:
-			color 0.18s ease,
+			color 0.16s ease,
 			transform 0.2s var(--spring-out);
-	}
-
-	::-webkit-scrollbar {
-		width: 4px;
-	}
-	::-webkit-scrollbar-track {
-		background: transparent;
-	}
-	::-webkit-scrollbar-thumb {
-		background: var(--border-soft);
-		border-radius: 2px;
-	}
-	::-webkit-scrollbar-thumb:hover {
-		background: var(--text-muted);
 	}
 </style>
